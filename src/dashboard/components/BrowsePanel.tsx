@@ -177,7 +177,7 @@ export default function BrowsePanel({
       )}
 
       {/* Slot — native webview sits over this */}
-      <div ref={slotRef} style={{ flex: 1, minHeight: 0, minWidth: 0, background: "#111" }} />
+      <div ref={slotRef} style={{ flex: 1, minHeight: 0, minWidth: 0, background: "#111", pointerEvents: "none" }} />
       <style>{`@keyframes bpSlide{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}`}</style>
     </div>
   );
@@ -200,3 +200,4 @@ function Btn({ children, title, onClick, style }: {
       }}>{children}</button>
   );
 }
+

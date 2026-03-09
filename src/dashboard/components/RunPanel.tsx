@@ -38,11 +38,13 @@ const CSS = `
     display: flex; flex-direction: column;
     overflow: hidden; position: relative;
   }
-  .sbx-term {
-    flex: 1; min-height: 0; min-width: 0;
-    overflow: hidden; cursor: text;
-    padding: 4px 0 4px 4px; box-sizing: border-box;
-  }
+  .sbx-wrap {
+    width: 100%; height: 100%;
+    background: #0d0d0d;
+    display: flex; flex-direction: column;
+    overflow: hidden; position: relative;
+    transition: opacity .2s;
+  } 
   .sbx-term .xterm,
   .sbx-term .xterm-viewport,
   .sbx-term .xterm-screen { background: transparent !important; }
@@ -222,6 +224,7 @@ export default function RunPanel({
       className="sbx-wrap"
       onMouseDown={handleMouseDown}
       onPaste={handlePaste}
+      style={{ opacity: isActive ? 1 : 0.4 }}
     >
       {/* No banner — silent startup, no "connecting to server" message */}
       <div className="sbx-term" ref={termElRef} />

@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import RunPanel    from "./RunPanel";
 import BrowserPane from "./BrowsePanel";
+import MemoryPanel from "./MemoryPanel";
 
 interface Runbox {
   id: string; name: string; cwd: string;
@@ -13,7 +14,7 @@ const C = {
   bg3: "#222222", bg4: "#2a2a2a",
   border: "rgba(255,255,255,.07)", borderHi: "rgba(255,255,255,.14)",
   text0: "#f0f0f0", text1: "#b0b0b0", text2: "#555555", text3: "#333333",
-  green: "#3fb950", red: "#e05252", blue: "#79b8ff",
+  green: "#3fb950", red: "#e05252", blue: "#79b8ff", purple: "#c084fc",
 };
 
 const tbtn: React.CSSProperties = {
@@ -42,6 +43,13 @@ const IconGlobe = ({ active }: { active: boolean }) => (
     <circle cx="12" cy="12" r="10"/>
     <line x1="2" y1="12" x2="22" y2="12"/>
     <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+  </svg>
+);
+const IconBrain = ({ active }: { active: boolean }) => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+    stroke={active ? C.purple : "#555"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/>
+    <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/>
   </svg>
 );
 
@@ -243,7 +251,7 @@ function Sidebar({ runboxes, activeId, activeTab, cwdMap, onSelect, onCreate, on
   );
 }
 
-// ── PaneLeaf — pure measurement slot ──────────────────────────────────────────
+// ── PaneLeaf ──────────────────────────────────────────────────────────────────
 function PaneLeaf({ node, activePane, onActivate, onClose, onSplitH, onSplitV, onSlotMount, onSlotUnmount }: {
   node: TermNode; activePane: string;
   onActivate: (id: string) => void; onClose: (id: string) => void;
@@ -273,7 +281,7 @@ function PaneLeaf({ node, activePane, onActivate, onClose, onSplitH, onSplitV, o
         </button>
         <button title="Close" onClick={e => { e.stopPropagation(); onClose(node.id); }} style={{ ...tbtn, color: C.red }}>×</button>
       </div>
-      <div ref={slotRef} style={{ flex: 1, minHeight: 0, minWidth: 0 }} />
+      <div ref={slotRef} style={{ flex: 1, minHeight: 0, minWidth: 0, opacity: isActive ? 1 : 0.3, transition: "opacity .2s" }} />
     </div>
   );
 }
@@ -460,13 +468,9 @@ function BrowserPanel({ open, width, onWidthChange, onClosePanel }: {
 }) {
   const [tabs,       setTabs]       = useState<BrowserTab[]>(() => [mkBrowserTab()]);
   const [activeTab,  setActiveTab]  = useState<string>(() => tabs[0].id);
-  // ── KEY FIX: lazy mount — only render BrowserPane once its tab has been activated.
-  // This prevents all N tabs from calling browser_create simultaneously on open.
   const [mountedIds, setMountedIds] = useState<Set<string>>(() => new Set([tabs[0].id]));
-
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
 
-  // When active tab changes, mark it as mounted (lazy mount)
   useEffect(() => {
     setMountedIds(prev => {
       if (prev.has(activeTab)) return prev;
@@ -479,23 +483,16 @@ function BrowserPanel({ open, width, onWidthChange, onClosePanel }: {
   const addTab = () => {
     const t = mkBrowserTab();
     setTabs(prev => [...prev, t]);
-    setActiveTab(t.id); // switching to it will trigger lazy mount
+    setActiveTab(t.id);
   };
 
   const closeTab = (id: string) => {
     setTabs(prev => {
-      if (prev.length === 1) {
-        // Last tab — close the whole panel instead
-        onClosePanel();
-        return prev;
-      }
+      if (prev.length === 1) { onClosePanel(); return prev; }
       const idx  = prev.findIndex(t => t.id === id);
       const next = prev.filter(t => t.id !== id);
-      // Switch to neighbour before unmounting
       setActiveTab(a => a === id ? (next[Math.max(0, idx - 1)]?.id ?? next[0].id) : a);
-      // Clean up lazy-mount set
       setMountedIds(m => { const n = new Set(m); n.delete(id); return n; });
-      // Destroy native webview
       invoke("browser_destroy", { id }).catch(() => {});
       return next;
     });
@@ -507,7 +504,7 @@ function BrowserPanel({ open, width, onWidthChange, onClosePanel }: {
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return;
       const delta = dragRef.current.startX - ev.clientX;
-      onWidthChange(Math.max(280, Math.min(900, dragRef.current.startW + delta)));
+      onWidthChange(Math.max(200, Math.min(window.innerWidth - 300, dragRef.current.startW + delta)));
     };
     const onUp = () => {
       dragRef.current = null;
@@ -521,53 +518,26 @@ function BrowserPanel({ open, width, onWidthChange, onClosePanel }: {
   if (!open) return null;
 
   return (
-    <div style={{
-      width, flexShrink: 0, display: "flex", flexDirection: "column",
-      background: C.bg1, borderLeft: `1px solid ${C.border}`,
-      position: "relative",
-      // No CSS transition — panel snaps open so slot has real dims immediately
-    }}>
-      {/* Drag handle */}
-      <div
-        onMouseDown={onDragStart}
-        style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 30 }}
+    <div style={{ width, flexShrink: 0, display: "flex", flexDirection: "column", background: C.bg1, borderLeft: `1px solid ${C.border}`, position: "relative" }}>
+      <div onMouseDown={onDragStart} style={{ position: "absolute", left: -3, top: 0, bottom: 0, width: 10, cursor: "col-resize", zIndex: 9999 }}
         onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "rgba(121,184,255,.2)"}
-        onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}
-      />
+        onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"} />
 
-      {/* Tab bar */}
-      <div style={{
-        display: "flex", alignItems: "stretch", height: 34, flexShrink: 0,
-        background: C.bg1, borderBottom: `1px solid ${C.border}`,
-        overflowX: "auto", overflowY: "hidden", paddingLeft: 5,
-      }}>
+      <div style={{ display: "flex", alignItems: "stretch", height: 34, flexShrink: 0, background: C.bg1, borderBottom: `1px solid ${C.border}`, overflowX: "auto", overflowY: "hidden", paddingLeft: 5 }}>
         {tabs.map(tab => {
           const isActive = tab.id === activeTab;
           const domain = (() => { try { return new URL(tab.url).hostname.replace("www.", ""); } catch { return "new tab"; } })();
           return (
-            <div
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                display: "flex", alignItems: "center", gap: 5,
-                padding: "0 6px 0 10px", minWidth: 80, maxWidth: 140,
-                cursor: "pointer", flexShrink: 0,
-                background: isActive ? C.bg0 : C.bg1,
-                borderRight: `1px solid ${C.border}`,
-                borderBottom: isActive ? `2px solid ${C.blue}` : "2px solid transparent",
-              }}
+            <div key={tab.id} onClick={() => setActiveTab(tab.id)}
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 6px 0 10px", minWidth: 80, maxWidth: 140, cursor: "pointer", flexShrink: 0, background: isActive ? C.bg0 : C.bg1, borderRight: `1px solid ${C.border}`, borderBottom: isActive ? `2px solid ${C.blue}` : "2px solid transparent" }}
               onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = C.bg2; }}
-              onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = C.bg1; }}
-            >
+              onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = C.bg1; }}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={isActive ? C.blue : C.text2} strokeWidth="1.8" style={{ flexShrink: 0 }}>
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="2" y1="12" x2="22" y2="12"/>
+                <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
                 <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
               </svg>
               <span style={{ fontSize: 11, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: isActive ? C.text0 : C.text2, fontFamily: "-apple-system,system-ui,sans-serif" }}>{domain}</span>
-              {/* Close tab button — always works, last tab closes panel */}
-              <button
-                onClick={e => { e.stopPropagation(); closeTab(tab.id); }}
+              <button onClick={e => { e.stopPropagation(); closeTab(tab.id); }}
                 style={{ ...tbtn, fontSize: 13, opacity: isActive ? 0.5 : 0, padding: "0 2px", flexShrink: 0 }}
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = "1"; (e.currentTarget as HTMLElement).style.color = C.red; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = isActive ? "0.5" : "0"; (e.currentTarget as HTMLElement).style.color = C.text2; }}>×</button>
@@ -581,28 +551,14 @@ function BrowserPanel({ open, width, onWidthChange, onClosePanel }: {
         <div style={{ flex: 1 }} />
       </div>
 
-      {/* Browser pane stack — LAZY MOUNTED, only active visible */}
       <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
         {tabs.map(tab => {
-          // ── Lazy mount: don't render until tab has been activated at least once.
-          // This ensures only ONE browser_create fires at a time, never in parallel.
           if (!mountedIds.has(tab.id)) return null;
-
           return (
-            <div
-              key={tab.id}
-              style={{
-                position: "absolute", inset: 0,
-                // visibility hidden keeps webview alive but off-screen
-                visibility: tab.id === activeTab ? "visible" : "hidden",
-                pointerEvents: tab.id === activeTab ? "auto" : "none",
-              }}
-            >
+            <div key={tab.id} style={{ position: "absolute", inset: 0, visibility: tab.id === activeTab ? "visible" : "hidden", pointerEvents: tab.id === activeTab ? "auto" : "none" }}>
               <BrowserPane
-                paneId={tab.id}
-                isActive={tab.id === activeTab}
-                onActivate={() => setActiveTab(tab.id)}
-                onClose={closeTab}
+                paneId={tab.id} isActive={tab.id === activeTab}
+                onActivate={() => setActiveTab(tab.id)} onClose={closeTab}
                 onUrlChange={url => setTabs(prev => prev.map(t => t.id === tab.id ? { ...t, url } : t))}
               />
             </div>
@@ -631,6 +587,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
+
 // ── Storage ────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "stackbox-runboxes";
 function loadRunboxes(): Runbox[] { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]"); } catch { return []; } }
@@ -645,6 +602,8 @@ export default function RunboxManager() {
   const [cwdMap,       setCwdMap]       = useState<Record<string, string>>({});
   const [browserOpen,  setBrowserOpen]  = useState(false);
   const [browserWidth, setBrowserWidth] = useState(480);
+  const [memoryOpen,   setMemoryOpen]   = useState(false);
+  const [memoryWidth,  setMemoryWidth]  = useState(320);
 
   useEffect(() => { saveRunboxes(runboxes); }, [runboxes]);
 
@@ -678,7 +637,9 @@ export default function RunboxManager() {
       setActiveId(aid => aid === id ? (next[0]?.id ?? null) : aid);
       return next;
     });
-  }, [runboxes]);
+    // Close memory panel if we deleted the active runbox
+    if (id === activeId) setMemoryOpen(false);
+  }, [runboxes, activeId]);
 
   const safeId = runboxes.find(r => r.id === activeId)?.id ?? runboxes[0]?.id ?? null;
 
@@ -686,13 +647,15 @@ export default function RunboxManager() {
     <div style={{ display: "flex", height: "100%", width: "100%", background: C.bg0, overflow: "hidden" }}>
 
       <Sidebar runboxes={runboxes} activeId={safeId} activeTab={activeTab} cwdMap={cwdMap}
-        onSelect={setActiveId} onCreate={onCreate} onRename={onRename}
+        onSelect={id => { setActiveId(id); }}
+        onCreate={onCreate} onRename={onRename}
         onDelete={onDelete} onTabChange={setActiveTab} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative" }}>
-        {/* Globe toggle */}
+
+        {/* ── Globe (browser) toggle ── */}
         <button
-          onClick={() => setBrowserOpen(o => !o)}
+          onClick={() => { setBrowserOpen(o => !o); setMemoryOpen(false); }}
           title={browserOpen ? "Close browser" : "Open browser"}
           style={{
             position: "absolute", top: 3, right: 8, zIndex: 100,
@@ -700,11 +663,30 @@ export default function RunboxManager() {
             background: browserOpen ? C.bg3 : "none",
             border: `1px solid ${browserOpen ? C.borderHi : "transparent"}`,
             borderRadius: 6, cursor: "pointer",
+            
           }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.bg3; (e.currentTarget as HTMLElement).style.borderColor = C.borderHi; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = browserOpen ? C.bg3 : "none"; (e.currentTarget as HTMLElement).style.borderColor = browserOpen ? C.borderHi : "transparent"; }}
         >
           <IconGlobe active={browserOpen} />
+        </button>
+
+        {/* ── Brain (memory) toggle ── */}
+        <button
+          onClick={() => { setMemoryOpen(o => !o); setBrowserOpen(false); }}
+          title={memoryOpen ? "Close memory" : "Open memory"}
+          style={{
+            position: "absolute", top: 3, right: 42, zIndex: 100,
+            width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center",
+            background: memoryOpen ? C.bg3 : "none",
+            border: `1px solid ${memoryOpen ? C.borderHi : "transparent"}`,
+            borderRadius: 6, cursor: "pointer",
+      
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.bg3; (e.currentTarget as HTMLElement).style.borderColor = C.borderHi; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = memoryOpen ? C.bg3 : "none"; (e.currentTarget as HTMLElement).style.borderColor = memoryOpen ? C.borderHi : "transparent"; }}
+        >
+          <IconBrain active={memoryOpen} />
         </button>
 
         {runboxes.map(rb => (
@@ -716,11 +698,48 @@ export default function RunboxManager() {
         {showModal && <NewRunboxModal onSubmit={(n, c, a, b) => { onCreate(n, c, a, b); setShowModal(false); }} onClose={() => setShowModal(false)} />}
       </div>
 
+      {/* ── Browser panel ── */}
       <BrowserPanel
         open={browserOpen} width={browserWidth}
         onWidthChange={setBrowserWidth}
         onClosePanel={() => setBrowserOpen(false)}
       />
+
+      {/* ── Memory panel ── */}
+      {memoryOpen && safeId && (() => {
+        const rb = runboxes.find(r => r.id === safeId);
+        if (!rb) return null;
+        return (
+          <div style={{
+            width: memoryWidth, flexShrink: 0, display: "flex", flexDirection: "column",
+            background: C.bg1, borderLeft: `1px solid ${C.border}`, position: "relative",
+          }}>
+            {/* Drag handle */}
+            <div
+              onMouseDown={(e: React.MouseEvent) => {
+                e.preventDefault();
+                const startX = e.clientX, startW = memoryWidth;
+                const onMove = (ev: MouseEvent) =>
+                  setMemoryWidth(Math.max(260, Math.min(700, startW + (startX - ev.clientX))));
+                const onUp = () => {
+                  window.removeEventListener("mousemove", onMove);
+                  window.removeEventListener("mouseup", onUp);
+                };
+                window.addEventListener("mousemove", onMove);
+                window.addEventListener("mouseup", onUp);
+              }}
+              style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 5, cursor: "col-resize", zIndex: 30 }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "rgba(192,132,252,.2)"}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}
+            />
+            <MemoryPanel
+              runboxId={rb.id}
+              runboxName={rb.name}
+              onClose={() => setMemoryOpen(false)}
+            />
+          </div>
+        );
+      })()}
 
       <style>{`
         @keyframes modalIn { from{opacity:0;transform:scale(.96) translateY(8px)} to{opacity:1;transform:scale(1) translateY(0)} }

@@ -1,4 +1,7 @@
 mod browser;
+mod db;
+mod memory;
+
 use browser::{
     browser_create, browser_destroy, browser_navigate, browser_set_bounds,
     browser_go_back, browser_go_forward, browser_reload, browser_show, browser_hide,
@@ -18,10 +21,9 @@ use tauri::http::{Request, Response};
 fn expand_cwd(raw: &str) -> String {
     let s = raw.trim();
 
-    // Replace ~ or ~/ prefix with the real home dir
     let expanded = if s == "~" || s.starts_with("~/") || s.starts_with("~\\") {
         if let Some(home) = dirs::home_dir() {
-            let rest = &s[1..]; // everything after ~
+            let rest = &s[1..];
             let rest = rest.trim_start_matches('/').trim_start_matches('\\');
             if rest.is_empty() {
                 home.to_string_lossy().to_string()
@@ -35,7 +37,6 @@ fn expand_cwd(raw: &str) -> String {
         s.to_string()
     };
 
-    // On Windows also expand %USERPROFILE% and %HOMEDRIVE%%HOMEPATH%
     #[cfg(windows)]
     {
         if expanded.contains('%') {
@@ -52,16 +53,19 @@ fn expand_cwd(raw: &str) -> String {
 const PROXY_BASE: &str = "proxy://localhost/fetch?url=";
 
 struct PtySession {
-    writer: Box<dyn Write + Send>,
+    writer:  Box<dyn Write + Send>,
     _master: Box<dyn portable_pty::MasterPty + Send>,
-    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    _child:  Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 type SessionMap = Arc<Mutex<HashMap<String, PtySession>>>;
 
 struct AppState {
     sessions: SessionMap,
+    db:       db::Db,
 }
+
+ 
 
 fn resolve_url(base: &str, href: &str) -> String {
     if href.starts_with("http://") || href.starts_with("https://") {
@@ -193,6 +197,8 @@ fn handle_proxy_request(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     })
 }
 
+// ── PTY commands ──────────────────────────────────────────────────────────────
+
 #[tauri::command]
 async fn pty_spawn(
     app: AppHandle,
@@ -207,6 +213,14 @@ async fn pty_spawn(
     let mut cmd = CommandBuilder::new(if cfg!(windows) { "powershell.exe" } else { "bash" });
     let resolved_cwd = expand_cwd(&cwd);
     cmd.cwd(&resolved_cwd);
+    if cfg!(windows) {
+        cmd.args(&[
+            "-NoLogo",
+            "-NoExit",
+            "-Command",
+            r#"function prompt { "~/" + (Get-Location | Split-Path -Leaf) + "> " }"#,
+        ]);
+    }
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -224,6 +238,7 @@ async fn pty_spawn(
                 String::from_utf8_lossy(&buf[..n]).to_string(),
             );
         }
+        let _ = app.emit(&format!("pty://ended/{}", sid), ());
     });
     Ok(())
 }
@@ -241,16 +256,150 @@ fn pty_write(
     Ok(())
 }
 
+#[tauri::command]
+fn pty_resize(
+    session_id: String,
+    cols: u16,
+    rows: u16,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    if let Some(s) = state.sessions.lock().unwrap().get(&session_id) {
+        s._master
+            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_kill(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.sessions.lock().unwrap().remove(&session_id);
+    Ok(())
+}
+
+// ── memory.rs commands ────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn memory_add(
+    runbox_id:  String,
+    session_id: String,
+    agent:      String,
+    content:    String,
+) -> Result<memory::Memory, String> {
+    memory::memory_add(&runbox_id, &session_id, &agent, &content).await
+}
+
+#[tauri::command]
+async fn memory_list(runbox_id: String) -> Result<Vec<memory::Memory>, String> {
+    memory::memories_for_runbox(&runbox_id).await
+}
+
+#[tauri::command]
+async fn memory_delete(id: String) -> Result<(), String> {
+    memory::memory_delete(&id).await
+}
+
+#[tauri::command]
+async fn memory_pin(id: String, pinned: bool) -> Result<(), String> {
+    memory::memory_pin(&id, pinned).await
+}
+
+// ── db.rs commands ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn db_sessions_for_runbox(
+    runbox_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<db::Session>, String> {
+    db::sessions_for_runbox(&state.db, &runbox_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn db_file_changes_for_runbox(
+    runbox_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<db::FileChange>, String> {
+    db::file_changes_for_runbox(&state.db, &runbox_id).map_err(|e| e.to_string())
+}
+
+// ── worktree commands (referenced by RunboxManager) ───────────────────────────
+
+#[tauri::command]
+async fn worktree_create(
+    repo_path:     String,
+    worktree_path: String,
+    branch:        String,
+) -> Result<String, String> {
+    let output = tokio::process::Command::new("git")
+        .args(["worktree", "add", "-b", &branch, &worktree_path])
+        .current_dir(&repo_path)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        Ok(worktree_path)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+#[tauri::command]
+async fn worktree_remove(
+    repo_path:     String,
+    worktree_path: String,
+) -> Result<(), String> {
+    let output = tokio::process::Command::new("git")
+        .args(["worktree", "remove", "--force", &worktree_path])
+        .current_dir(&repo_path)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            db:       db::open().expect("failed to open stackbox db"),
+        })
+        .setup(|_app| {
+            tauri::async_runtime::spawn(async {
+                memory::init().await.expect("memory init failed");
+            });
+            Ok(())
         })
         .register_uri_scheme_protocol("proxy", |_ctx, req| handle_proxy_request(req))
         .invoke_handler(tauri::generate_handler![
+            // pty
             pty_spawn,
             pty_write,
+            pty_resize,
+            pty_kill,
+            // memory
+            memory_add,
+            memory_list,
+            memory_delete,
+            memory_pin,
+            // db
+            db_sessions_for_runbox,
+            db_file_changes_for_runbox,
+            // worktree
+            worktree_create,
+            worktree_remove,
+            // browser
             browser_create,
             browser_destroy,
             browser_navigate,

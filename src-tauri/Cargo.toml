@@ -31,3 +31,8 @@ urlencoding         = "2"
 url                 = "2.5.8"
 axum                = "0.7"
 tower-http          = { version = "0.6", features = ["cors"] }
+lancedb             = "0.21.2"
+arrow-array         = "=55.2.0"
+arrow-schema        = "=55.2.0"
+futures             = "0.3"
+rusqlite            = { version = "0.38.0", features = ["bundled"] }
