@@ -1,5 +1,5 @@
 import { useState } from "react";
-import RunboxManager from "./components/RunboxManager";
+import RunboxManager from "../components/RunboxManager";
 import { useStackbox } from "./useStackbox";
 
 const globalStyles = `
