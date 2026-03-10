@@ -4,6 +4,19 @@ import RunPanel    from "./RunPanel";
 import BrowserPane from "./BrowsePanel";
 import MemoryPanel from "./MemoryPanel";
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tauri backend commands used in this file:
+//    open_in_editor(path: String, editor: String)
+//      → runs `code <path>` or `cursor <path>` via std::process::Command
+//    check_git_repo(path: String) → Result<(), String>
+//    open_directory_dialog() → Option<String>
+//    worktree_create(repo_path, worktree_path, branch) → Result<String, String>
+//    worktree_remove(repo_path, worktree_path) → Result<(), String>
+//    git_ignore_worktrees(repo_path) → Result<(), String>
+//    memory_delete_for_runbox(runbox_id) → Result<(), String>
+//    browser_destroy(id) → Result<(), String>
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface Runbox {
   id: string; name: string; cwd: string;
   worktreePath: string | null; branch: string | null;
@@ -94,6 +107,15 @@ const IcoBranch = ({ on }: { on?: boolean }) => (
     <line x1="6" y1="3" x2="6" y2="15"/>
     <circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
     <path d="M18 9a9 9 0 0 1-9 9"/>
+  </svg>
+);
+// Open-in-editor icon — box with arrow pointing out
+const IcoOpenEditor = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+    <polyline points="15 3 21 3 21 9"/>
+    <line x1="10" y1="14" x2="21" y2="3"/>
   </svg>
 );
 
@@ -301,6 +323,82 @@ function NewRunboxModal({ onSubmit, onClose }: {
 // ─────────────────────────────────────────────────────────────────────────────
 //  WorktreePanel — draggable width
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Small self-contained open-in-editor control used inside each worktree card
+function OpenInEditorBtn({ path }: { path: string }) {
+  const [opening,        setOpening]        = useState(false);
+  const [showMenu,       setShowMenu]        = useState(false);
+  const [openedEditor,   setOpenedEditor]    = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const h = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false);
+    };
+    window.addEventListener("mousedown", h);
+    return () => window.removeEventListener("mousedown", h);
+  }, [showMenu]);
+
+  const openIn = async (editor: "vscode" | "cursor") => {
+    setOpening(true);
+    setShowMenu(false);
+    setOpenedEditor(editor === "vscode" ? "VS Code" : "Cursor");
+    try { await invoke("open_in_editor", { path, editor }); } catch {}
+    setTimeout(() => { setOpening(false); setOpenedEditor(null); }, 1800);
+  };
+
+  return (
+    <div ref={menuRef} style={{ position: "relative" }}>
+      <button
+        onClick={e => { e.stopPropagation(); setShowMenu(v => !v); }}
+        title="Open in external editor"
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "4px 8px", background: C.bg3,
+          border: `1px solid ${C.border}`, borderRadius: 6,
+          cursor: "pointer", color: opening ? C.tealText : C.t1,
+          fontSize: 11, fontFamily: SANS, fontWeight: 500,
+          transition: "all .12s", whiteSpace: "nowrap",
+        }}
+        onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = C.borderMd; el.style.color = C.t0; el.style.background = C.bg4; }}
+        onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = C.border; el.style.color = opening ? C.tealText : C.t1; el.style.background = C.bg3; }}>
+        <IcoOpenEditor />
+        {opening ? `Opening in ${openedEditor}…` : "Open in Editor"}
+        <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+
+      {showMenu && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: C.bg2, border: `1px solid ${C.borderMd}`, borderRadius: 9, overflow: "hidden", boxShadow: "0 8px 28px rgba(0,0,0,.55)", minWidth: 170, zIndex: 300, animation: "sbFadeUp .12s cubic-bezier(.2,1,.4,1)" }}>
+          {/* Path */}
+          <div style={{ padding: "8px 12px 6px", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: C.t2, fontFamily: SANS, marginBottom: 3 }}>Folder</div>
+            <div style={{ fontSize: 10, color: C.t1, fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</div>
+          </div>
+          {([
+            { id: "vscode" as const, label: "VS Code", hint: "code" },
+            { id: "cursor" as const, label: "Cursor",  hint: "cursor" },
+          ]).map(opt => (
+            <button key={opt.id}
+              onClick={e => { e.stopPropagation(); openIn(opt.id); }}
+              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 12px", background: "none", border: "none", cursor: "pointer", color: C.t1, fontSize: 12, fontFamily: SANS, textAlign: "left", transition: "all .1s" }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.bg3; el.style.color = C.t0; }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "none"; el.style.color = C.t1; }}>
+              <span style={{ flex: 1 }}>{opt.label}</span>
+              <span style={{ fontSize: 10, color: C.t2, fontFamily: MONO }}>{opt.hint}</span>
+            </button>
+          ))}
+          <div style={{ padding: "5px 12px 7px", borderTop: `1px solid ${C.border}`, fontSize: 10, color: C.t2, fontFamily: SANS, lineHeight: 1.6 }}>
+            Opens full worktree — git diff vs main shown automatically.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WorktreePanel({ runboxes, activeId, onSelect, onClose }: {
   runboxes: Runbox[]; activeId: string | null;
   onSelect: (id: string) => void; onClose: () => void;
@@ -350,6 +448,7 @@ function WorktreePanel({ runboxes, activeId, onSelect, onClose }: {
               onMouseEnter={e => { if (!isActive) { (e.currentTarget as HTMLElement).style.background = C.bg3; (e.currentTarget as HTMLElement).style.borderColor = C.borderMd; } }}
               onMouseLeave={e => { if (!isActive) { (e.currentTarget as HTMLElement).style.background = C.bg2; (e.currentTarget as HTMLElement).style.borderColor = C.border; } }}>
 
+              {/* Branch + active badge */}
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
                   stroke={isActive ? C.tealText : C.t2} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -365,8 +464,19 @@ function WorktreePanel({ runboxes, activeId, onSelect, onClose }: {
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: 11, color: C.t1, fontFamily: SANS, marginBottom: 4 }}>{r.name}</div>
-              <div style={{ fontSize: 10, color: C.t2, fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.worktreePath}</div>
+
+              {/* Runbox name */}
+              <div style={{ fontSize: 11, color: C.t1, fontFamily: SANS, marginBottom: 5 }}>{r.name}</div>
+
+              {/* Worktree path */}
+              <div style={{ fontSize: 10, color: C.t2, fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 10 }}>
+                {r.worktreePath}
+              </div>
+
+              {/* Open in Editor — only shown, click doesn't bubble to card select */}
+              <div onClick={e => e.stopPropagation()}>
+                <OpenInEditorBtn path={r.worktreePath!} />
+              </div>
             </div>
           );
         })}
@@ -588,9 +698,10 @@ function PaneTree(props: PaneTreeProps) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  TermTabBar
 // ─────────────────────────────────────────────────────────────────────────────
-function TermTabBar({ leafIds, activePane, paneCwds, runboxCwd, onSelect, onNewTerm, onClose }: {
+function TermTabBar({ leafIds, activePane, paneCwds, runboxCwd, runboxBranch, openPath, onSelect, onNewTerm, onClose }: {
   leafIds: string[]; activePane: string; paneCwds: Record<string, string>;
-  runboxCwd: string; onSelect: (id: string) => void;
+  runboxCwd: string; runboxBranch: string | null; openPath: string;
+  onSelect: (id: string) => void;
   onNewTerm: () => void; onClose: (id: string) => void;
 }) {
   return (
@@ -619,11 +730,27 @@ function TermTabBar({ leafIds, activePane, paneCwds, runboxCwd, onSelect, onNewT
           </div>
         );
       })}
+
+      {/* New terminal + */}
       <button onClick={onNewTerm} title="New terminal"
         style={{ ...tbtn, padding: "0 12px", fontSize: 17, fontWeight: 300, borderRight: `1px solid ${C.border}`, borderRadius: 0, flexShrink: 0 }}
         onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = C.tealText}
         onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t2}>+</button>
+
       <div style={{ flex: 1 }} />
+
+      {/* Branch pill — read-only, shows current worktree branch */}
+      {runboxBranch && (
+        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "0 12px", borderLeft: `1px solid ${C.border}`, flexShrink: 0 }}>
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={C.t2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/>
+            <circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
+          </svg>
+          <span style={{ fontSize: 10, color: C.t2, fontFamily: MONO, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {runboxBranch}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -698,8 +825,8 @@ function RunboxView({ runbox, onCwdChange }: { runbox: Runbox; onCwdChange: (cwd
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <TermTabBar leafIds={leafIds} activePane={activePane} paneCwds={paneCwds}
-        runboxCwd={effectiveCwd} onSelect={setActivePane}
-        onNewTerm={() => doSplit(activePane, "h")} onClose={handleClose} />
+        runboxCwd={effectiveCwd} runboxBranch={runbox.branch} openPath={effectiveCwd}
+        onSelect={setActivePane} onNewTerm={() => doSplit(activePane, "h")} onClose={handleClose} />
       <div ref={wrapperRef} style={{ flex: 1, display: "flex", minHeight: 0, background: C.bg0, position: "relative" }}>
         <PaneTree node={paneRoot} activePane={activePane}
           onActivate={setActivePane} onClose={handleClose}

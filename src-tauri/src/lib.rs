@@ -482,6 +482,15 @@ async fn git_ignore_worktrees(repo_path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn open_in_editor(path: String, editor: String) {
+    let cmd = match editor.as_str() {
+        "cursor" => "cursor",
+        _        => "code",
+    };
+    std::process::Command::new(cmd).arg(&path).spawn().ok();
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -520,6 +529,7 @@ pub fn run() {
             check_git_repo,
             memory_delete_for_runbox,
             git_ignore_worktrees,
+            open_in_editor,
             // browser
             browser_create,
             browser_destroy,
