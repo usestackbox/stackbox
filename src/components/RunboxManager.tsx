@@ -4,31 +4,13 @@ import RunPanel    from "./RunPanel";
 import BrowserPane from "./BrowsePanel";
 import MemoryPanel from "./MemoryPanel";
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Tauri backend commands used in this file:
-//    open_in_editor(path: String, editor: String)
-//      → runs `code <path>` or `cursor <path>` via std::process::Command
-//    check_git_repo(path: String) → Result<(), String>
-//    open_directory_dialog() → Option<String>
-//    worktree_create(repo_path, worktree_path, branch) → Result<String, String>
-//    worktree_remove(repo_path, worktree_path) → Result<(), String>
-//    git_ignore_worktrees(repo_path) → Result<(), String>
-//    memory_delete_for_runbox(runbox_id) → Result<(), String>
-//    browser_destroy(id) → Result<(), String>
-// ─────────────────────────────────────────────────────────────────────────────
-
 interface Runbox {
   id: string; name: string; cwd: string;
   worktreePath: string | null; branch: string | null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Design tokens — GitHub Dark charcoal · sage-teal accent
-//  Reference: GitHub Dark, Linear, Vercel Dashboard, Warp terminal
-//  Principle: neutral backgrounds = invisible to eyes, content pops
-// ─────────────────────────────────────────────────────────────────────────────
 const C = {
-  // Neutral charcoal blacks — no blue/purple tint, pure charcoal
+
   bg0: "#0d1117",   // main canvas / terminal bg
   bg1: "#10161e",   // sidebar
   bg2: "#161b22",   // panel / card surface
@@ -107,6 +89,14 @@ const IcoBranch = ({ on }: { on?: boolean }) => (
     <line x1="6" y1="3" x2="6" y2="15"/>
     <circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
     <path d="M18 9a9 9 0 0 1-9 9"/>
+  </svg>
+);
+const IcoSidebar = ({ on }: { on?: boolean }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2"/>
+    <path d="M9 3v18"/>
+    <path d="M3 3h6v18H3z" fill={on ? "currentColor" : "none"} stroke="none"/>
   </svg>
 );
 // Open-in-editor icon — box with arrow pointing out
@@ -492,14 +482,15 @@ function WorktreePanel({ runboxes, activeId, onSelect, onClose }: {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Sidebar
 // ─────────────────────────────────────────────────────────────────────────────
-function Sidebar({ runboxes, activeId, activeTab, cwdMap, onSelect, onCreate, onRename, onDelete, onTabChange }: {
-  runboxes: Runbox[]; activeId: string | null; activeTab: "run" | "dashboard";
+function Sidebar({ runboxes, activeId, cwdMap, collapsed, onToggle, onSelect, onCreate, onRename, onDelete }: {
+  runboxes: Runbox[]; activeId: string | null;
   cwdMap: Record<string, string>;
+  collapsed: boolean;
+  onToggle: () => void;
   onSelect: (id: string) => void;
   onCreate: (name: string, cwd: string, branch: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
-  onTabChange: (t: "run" | "dashboard") => void;
 }) {
   const [showModal, setShowModal] = useState(false);
   const [renaming,  setRenaming]  = useState<string | null>(null);
@@ -516,110 +507,108 @@ function Sidebar({ runboxes, activeId, activeTab, cwdMap, onSelect, onCreate, on
           onClose={() => setShowModal(false)} />
       )}
 
-      <div style={{ width: 218, flexShrink: 0, background: C.bg1, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column" }}>
+      <div style={{ width: collapsed ? 48 : 218, flexShrink: 0, background: C.bg1, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", transition: "width .15s cubic-bezier(.4,0,.2,1)" }}>
 
         {/* Header */}
-        <div style={{ padding: "12px 12px 10px", borderBottom: `1px solid ${C.border}` }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 10 }}>
-            {/* Dot wordmark */}
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.teal, marginRight: 3, flexShrink: 0 }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: C.t1, fontFamily: SANS, flex: 1, letterSpacing: ".07em", textTransform: "uppercase" }}>
-              Stackbox
-            </span>
-            {/* Tab toggles */}
-            {(["run", "dashboard"] as const).map(t => (
-              <button key={t} onClick={() => onTabChange(t)}
-                style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", background: activeTab === t ? C.bg4 : "none", border: `1px solid ${activeTab === t ? C.borderMd : "transparent"}`, borderRadius: 7, cursor: "pointer", transition: "all .12s" }}
-                onMouseEnter={e => { if (activeTab !== t) (e.currentTarget as HTMLElement).style.background = C.bg3; }}
-                onMouseLeave={e => { if (activeTab !== t) (e.currentTarget as HTMLElement).style.background = "none"; }}>
-                {t === "run" ? <IcoTerminal on={activeTab === t} /> : <IcoGrid on={activeTab === t} />}
-              </button>
-            ))}
+        <div style={{ padding: collapsed ? "12px 0" : "12px 12px 10px", borderBottom: `1px solid ${C.border}`, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: collapsed ? 0 : 10, width: "100%", padding: collapsed ? "0" : "0 4px", justifyContent: collapsed ? "center" : "flex-start" }}>
+            {!collapsed && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: C.t1, fontFamily: SANS, flex: 1, letterSpacing: ".07em", textTransform: "uppercase", paddingLeft: 4 }}>
+                Stackbox
+              </span>
+            )}
+            <button onClick={onToggle} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              style={{ ...tbtn, color: collapsed ? C.t0 : C.t2, padding: 6 }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = C.t0}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = collapsed ? C.t0 : C.t2}>
+              <IcoSidebar on={!collapsed} />
+            </button>
           </div>
 
-          {/* New runbox */}
-          <button onClick={() => setShowModal(true)}
-            style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "7px 10px", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, color: C.t2, fontSize: 11, fontWeight: 500, fontFamily: SANS, cursor: "pointer", transition: "all .12s" }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.bg3; el.style.borderColor = C.borderMd; el.style.color = C.t1; }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.borderColor = C.border; el.style.color = C.t2; }}>
-            <span style={{ fontSize: 16, lineHeight: 1, fontWeight: 200 }}>+</span>
-            New runbox
-          </button>
-        </div>
-
-        {/* Section label */}
-        {runboxes.length > 0 && (
-          <div style={{ padding: "10px 14px 4px", fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: C.t2, fontFamily: SANS }}>
-            Runboxes
-          </div>
-        )}
-
-        {/* List */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "4px 8px 8px" }}>
-          {runboxes.length === 0 && (
-            <div style={{ padding: "20px 8px", fontSize: 11, color: C.t2, fontFamily: SANS, lineHeight: 1.7 }}>
-              No runboxes yet.
-            </div>
+          {!collapsed && (
+            <button onClick={() => setShowModal(true)}
+              style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "7px 10px", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, color: C.t2, fontSize: 11, fontWeight: 500, fontFamily: SANS, cursor: "pointer", transition: "all .12s" }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.bg3; el.style.borderColor = C.borderMd; el.style.color = C.t1; }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.borderColor = C.border; el.style.color = C.t2; }}>
+              <span style={{ fontSize: 16, lineHeight: 1, fontWeight: 200 }}>+</span>
+              New runbox
+            </button>
           )}
+        </div>
 
-          {runboxes.map(rb => {
-            const isOn    = activeId === rb.id;
-            const liveCwd = cwdMap[rb.id] || rb.worktreePath || rb.cwd;
-            return (
-              <div key={rb.id}
-                onClick={() => onSelect(rb.id)}
-                onDoubleClick={() => { setRenaming(rb.id); setRenameVal(rb.name); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  padding: "7px 9px", marginBottom: 2, cursor: "pointer",
-                  // Full-row rounded highlight when active
-                  background: isOn ? C.tealDim : "transparent",
-                  border: `1px solid ${isOn ? C.tealBorder : "transparent"}`,
-                  borderRadius: 9,
-                  transition: "all .12s",
-                }}
-                onMouseEnter={e => { if (!isOn) { (e.currentTarget as HTMLElement).style.background = C.bg3; (e.currentTarget as HTMLElement).style.borderColor = C.border; } }}
-                onMouseLeave={e => { if (!isOn) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; } }}>
-
-                {/* Status dot */}
-                <span style={{ display: "block", width: 5, height: 5, borderRadius: "50%", background: isOn ? C.teal : C.green, flexShrink: 0, transition: "background .15s" }} />
-
-                {/* Text */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {renaming === rb.id ? (
-                    <input ref={renameRef} value={renameVal}
-                      onChange={e => setRenameVal(e.target.value)}
-                      onBlur={() => submitRename(rb.id)}
-                      onKeyDown={e => { if (e.key === "Enter") submitRename(rb.id); if (e.key === "Escape") setRenaming(null); }}
-                      onClick={e => e.stopPropagation()}
-                      style={{ background: C.bg4, border: `1px solid ${C.borderHi}`, borderRadius: 5, color: C.t0, fontSize: 12, padding: "2px 6px", width: "100%", outline: "none", fontFamily: MONO }} />
-                  ) : (
-                    <>
-                      <div style={{ fontSize: 12, fontWeight: isOn ? 500 : 400, color: isOn ? C.tealText : C.t0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontFamily: SANS, marginBottom: 1 }}>
-                        {rb.name}
-                      </div>
-                      <div style={{ fontSize: 10, color: isOn ? "rgba(86,212,168,.4)" : C.t2, fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {rb.branch ? `⎇ ${rb.branch}` : liveCwd}
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Delete */}
-                {isOn && (
-                  <button onClick={e => { e.stopPropagation(); if (confirm(`Delete "${rb.name}"?`)) onDelete(rb.id); }}
-                    style={{ ...tbtn, fontSize: 14, flexShrink: 0 }}
-                    onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = C.red}
-                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t3}>×</button>
-                )}
+        {!collapsed && (
+          <>
+            {/* Section label */}
+            {runboxes.length > 0 && (
+              <div style={{ padding: "10px 14px 4px", fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: C.t2, fontFamily: SANS }}>
+                Runboxes
               </div>
-            );
-          })}
-        </div>
+            )}
 
-        <div style={{ padding: "8px 14px", borderTop: `1px solid ${C.border}`, fontSize: 10, color: C.t3, fontFamily: SANS }}>
-          Double-click to rename
-        </div>
+            {/* List */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "4px 8px 8px" }}>
+              {runboxes.length === 0 && (
+                <div style={{ padding: "20px 8px", fontSize: 11, color: C.t2, fontFamily: SANS, lineHeight: 1.7 }}>
+                  No runboxes yet.
+                </div>
+              )}
+
+              {runboxes.map(rb => {
+                const isOn    = activeId === rb.id;
+                const liveCwd = cwdMap[rb.id] || rb.worktreePath || rb.cwd;
+                return (
+                  <div key={rb.id}
+                    onClick={() => onSelect(rb.id)}
+                    onDoubleClick={() => { setRenaming(rb.id); setRenameVal(rb.name); }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "7px 9px", marginBottom: 2, cursor: "pointer",
+                      background: isOn ? C.tealDim : "transparent",
+                      border: `1px solid ${isOn ? C.tealBorder : "transparent"}`,
+                      borderRadius: 9,
+                      transition: "all .12s",
+                    }}
+                    onMouseEnter={e => { if (!isOn) { (e.currentTarget as HTMLElement).style.background = C.bg3; (e.currentTarget as HTMLElement).style.borderColor = C.border; } }}
+                    onMouseLeave={e => { if (!isOn) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; } }}>
+
+                    <span style={{ display: "block", width: 5, height: 5, borderRadius: "50%", background: isOn ? C.teal : C.green, flexShrink: 0, transition: "background .15s" }} />
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {renaming === rb.id ? (
+                        <input ref={renameRef} value={renameVal}
+                          onChange={e => setRenameVal(e.target.value)}
+                          onBlur={() => submitRename(rb.id)}
+                          onKeyDown={e => { if (e.key === "Enter") submitRename(rb.id); if (e.key === "Escape") setRenaming(null); }}
+                          onClick={e => e.stopPropagation()}
+                          style={{ background: C.bg4, border: `1px solid ${C.borderHi}`, borderRadius: 5, color: C.t0, fontSize: 12, padding: "2px 6px", width: "100%", outline: "none", fontFamily: MONO }} />
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 12, fontWeight: isOn ? 500 : 400, color: isOn ? C.tealText : C.t0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontFamily: SANS, marginBottom: 1 }}>
+                            {rb.name}
+                          </div>
+                          <div style={{ fontSize: 10, color: isOn ? "rgba(86,212,168,.4)" : C.t2, fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {rb.branch ? `⎇ ${rb.branch}` : liveCwd}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {isOn && (
+                      <button onClick={e => { e.stopPropagation(); if (confirm(`Delete "${rb.name}"?`)) onDelete(rb.id); }}
+                        style={{ ...tbtn, fontSize: 14, flexShrink: 0 }}
+                        onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = C.red}
+                        onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t3}>×</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ padding: "8px 14px", borderTop: `1px solid ${C.border}`, fontSize: 10, color: C.t3, fontFamily: SANS }}>
+              Double-click to rename
+            </div>
+          </>
+        )}
       </div>
     </>
   );
@@ -982,12 +971,12 @@ function saveRunboxes(rbs: Runbox[]) { try { localStorage.setItem(STORAGE_KEY, J
 export default function RunboxManager() {
   const [runboxes,     setRunboxes]     = useState<Runbox[]>(() => loadRunboxes());
   const [activeId,     setActiveId]     = useState<string | null>(() => loadRunboxes()[0]?.id ?? null);
-  const [activeTab,    setActiveTab]    = useState<"run" | "dashboard">("run");
   const [showModal,    setShowModal]    = useState(false);
   const [cwdMap,       setCwdMap]       = useState<Record<string, string>>({});
   const [browserOpen,  setBrowserOpen]  = useState(false);
   const [memoryOpen,   setMemoryOpen]   = useState(false);
   const [worktreeOpen, setWorktreeOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [memWidth,     setMemWidth]     = useState(320);
 
   useEffect(() => { saveRunboxes(runboxes); }, [runboxes]);
@@ -1010,7 +999,6 @@ export default function RunboxManager() {
     const rb: Runbox = { id, name, cwd, worktreePath, branch: branch.trim() || null };
     setRunboxes(p => [...p, rb]);
     setActiveId(id);
-    setActiveTab("run");
   }, []);
 
   const onRename = useCallback((id: string, name: string) =>
@@ -1054,9 +1042,9 @@ export default function RunboxManager() {
 
       {/* ── Sidebar */}
       <Sidebar
-        runboxes={runboxes} activeId={safeId} activeTab={activeTab} cwdMap={cwdMap}
+        runboxes={runboxes} activeId={safeId} cwdMap={cwdMap}
         onSelect={id => setActiveId(id)} onCreate={onCreate}
-        onRename={onRename} onDelete={onDelete} onTabChange={setActiveTab} />
+        onRename={onRename} onDelete={onDelete} />
 
       {/* ── Main */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative" }}>
@@ -1079,12 +1067,12 @@ export default function RunboxManager() {
 
         {/* Runboxes */}
         {runboxes.map(rb => (
-          <div key={rb.id} style={{ display: activeTab === "run" && safeId === rb.id ? "flex" : "none", flex: 1, flexDirection: "column", minHeight: 0 }}>
+          <div key={rb.id} style={{ display: safeId === rb.id ? "flex" : "none", flex: 1, flexDirection: "column", minHeight: 0 }}>
             <RunboxView runbox={rb} onCwdChange={cwd => setCwdMap(p => ({ ...p, [rb.id]: cwd }))} />
           </div>
         ))}
 
-        {activeTab === "run" && runboxes.length === 0 && (
+        {runboxes.length === 0 && (
           <EmptyState onCreate={() => setShowModal(true)} />
         )}
 
@@ -1100,7 +1088,7 @@ export default function RunboxManager() {
 
       {worktreeOpen && (
         <WorktreePanel runboxes={runboxes} activeId={safeId}
-          onSelect={id => { setActiveId(id); setActiveTab("run"); }}
+          onSelect={id => { setActiveId(id); }}
           onClose={() => setWorktreeOpen(false)} />
       )}
 
@@ -1117,7 +1105,6 @@ export default function RunboxManager() {
         </div>
       )}
 
-      {/* Global styles */}
       <style>{`
         @keyframes sbFadeUp {
           from { opacity: 0; transform: translateY(8px) scale(.98); }

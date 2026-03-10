@@ -9,6 +9,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
@@ -129,6 +130,16 @@ export default function RunPanel({
     term.loadAddon(fit);
     term.loadAddon(links);
     term.open(termElRef.current);
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        webgl.dispose();
+      });
+      term.loadAddon(webgl);
+    } catch {
+      // WebGL might fail to initialize — fallback to canvas}
+    }
+
     termRef.current = term;
     fitRef.current  = fit;
 
