@@ -111,14 +111,19 @@ fn has_git(cwd: &str, runbox_id: &str) -> bool {
     std::path::Path::new(&shadow).exists()
 }
 
-/// Run a git command in the given cwd, with optional --git-dir override.
+/// Run a git command.
+/// - git_dir=None  → run in cwd, let git discover the repo normally
+/// - git_dir=Some  → pass --git-dir + --work-tree, run in that git_dir
 fn git(args: &[&str], cwd: &str, git_dir: Option<&str>) -> Result<String, String> {
     let mut cmd = std::process::Command::new("git");
     if let Some(gd) = git_dir {
         cmd.arg("--git-dir").arg(gd);
         cmd.arg("--work-tree").arg(cwd);
+        cmd.current_dir(gd);
+    } else {
+        cmd.current_dir(cwd);
     }
-    cmd.args(args).current_dir(cwd);
+    cmd.args(args);
     let out = cmd.output().map_err(|e| format!("git exec: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
@@ -132,37 +137,45 @@ fn git(args: &[&str], cwd: &str, git_dir: Option<&str>) -> Result<String, String
 pub fn ensure_git_repo(cwd: &str, runbox_id: &str) -> Result<String, String> {
     let dot_git = std::path::Path::new(cwd).join(".git");
 
-    if dot_git.exists() {
-        // Real repo — use it directly (git_dir arg = None means git finds it automatically)
+    // Real .git directory → use as-is
+    if dot_git.is_dir() {
         return Ok(dot_git.to_string_lossy().to_string());
     }
 
-    // No .git — create a shadow repo so user's folder stays clean
-    let shadow = git_dir_for(cwd, runbox_id);
-    let shadow_path = std::path::Path::new(&shadow);
+    // Clean up any stray .git file left in cwd by old --separate-git-dir approach
+    if dot_git.is_file() { let _ = std::fs::remove_file(&dot_git); }
 
+    let shadow = git_dir_for(cwd, runbox_id);
+    let shadow_head = std::path::Path::new(&shadow).join("HEAD");
+
+    // Shadow repo already fully initialised (HEAD exists) → nothing to do
+    if shadow_head.exists() {
+        return Ok(shadow);
+    }
+
+    // Create dir only if it doesn't exist at all
+    let shadow_path = std::path::Path::new(&shadow);
     if !shadow_path.exists() {
         std::fs::create_dir_all(&shadow)
             .map_err(|e| format!("mkdir shadow git: {e}"))?;
-
-        // Init with separate-git-dir
-        git(
-            &["init", &format!("--separate-git-dir={shadow}"), "."],
-            cwd,
-            None,
-        ).map_err(|e| format!("git init: {e}"))?;
-
-        // Initial commit so diff has something to compare against
-        git(&["add", "-A"], cwd, Some(&shadow))?;
-        git(
-            &["commit", "--allow-empty", "-m", "stackbox: initial snapshot"],
-            cwd,
-            Some(&shadow),
-        ).ok(); // ok if nothing to commit
-
-        eprintln!("[git_memory] created shadow repo at {shadow} for {cwd}");
     }
 
+    // Re-init is safe on existing bare repos — it's idempotent
+    git(&["init", "--bare"], &shadow, None)
+        .map_err(|e| format!("git init --bare: {e}"))?;
+
+    git(&["config", "core.worktree", cwd], &shadow, None)
+        .map_err(|e| format!("git config worktree: {e}"))?;
+
+    // Stage + initial commit so HEAD exists and diffs work
+    git(&["--work-tree", cwd, "add", "-A"], &shadow, None).ok();
+    git(
+        &["--work-tree", cwd, "commit", "--allow-empty", "-m", "stackbox: initial snapshot"],
+        &shadow,
+        None,
+    ).ok();
+
+    eprintln!("[git_memory] created shadow repo at {shadow} for {cwd}");
     Ok(shadow)
 }
 

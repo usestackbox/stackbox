@@ -604,13 +604,23 @@ function SessionList({ runboxId }: { runboxId: string }) {
   const [sessions, setSessions] = useState<DbSession[]>([]);
   const [loading,  setLoading]  = useState(true);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
     invoke<DbSession[]>("db_sessions_for_runbox", { runboxId })
       .then(setSessions)
       .catch(e => console.error("[db] sessions:", e))
       .finally(() => setLoading(false));
   }, [runboxId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Re-fetch whenever a session ends (memory-added fires right after commit_and_capture)
+  useEffect(() => {
+    const unsub = listen<{ runbox_id: string }>("memory-added", ({ payload }) => {
+      if (payload.runbox_id === runboxId) load();
+    });
+    return () => { unsub.then(f => f()); };
+  }, [runboxId, load]);
 
   if (loading) return <Spinner />;
   if (!sessions.length) return <Empty text="No sessions recorded yet." />;
