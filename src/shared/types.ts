@@ -1,4 +1,5 @@
-﻿export interface Runbox {
+
+export interface Runbox {
   id:   string;
   name: string;
   cwd:  string;
@@ -17,7 +18,7 @@ export interface DiffTab {
   id:         string;
   path:       string;
   diff:       string;
-  changeType: string;  // "created" | "modified" | "deleted"
+  changeType: string;
   insertions: number;
   deletions:  number;
   openedAt:   number;

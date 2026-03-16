@@ -1,10 +1,3 @@
-/**
- * RunPanel.tsx
- * - No "connecting to server" / "spawning" banner — silent startup
- * - Terminal never remounts or loses data when panes split
- * - Restart only on explicit user request
- */
-
 import { useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -66,25 +59,41 @@ function parseOsc7(data: string): string | null {
   } catch { return null; }
 }
 
-export default function RunPanel({
-  runboxCwd = "~/",
-  runboxId  = "default",
+export default function RunPane({
+  runboxCwd       = "~/",
+  runboxId        = "default",
+  sessionId,
   onCwdChange,
+  onSessionChange,
   isActive,
   onActivate,
 }: {
-  runboxCwd?:   string;
-  runboxId?:    string;
-  onCwdChange?: (cwd: string) => void;
-  isActive?:    boolean;
-  onActivate?:  () => void;
+  runboxCwd?:       string;
+  runboxId?:        string;
+  /** Stable session ID supplied by the parent. When provided, this is used
+   *  instead of generating a random UUID so the parent always knows the ID
+   *  before spawn — required for SubAgentPanel correlation. */
+  sessionId?:       string;
+  onCwdChange?:     (cwd: string) => void;
+  /** Called once on mount with the resolved session ID. */
+  onSessionChange?: (sid: string) => void;
+  isActive?:        boolean;
+  onActivate?:      () => void;
 }) {
   const termElRef = useRef<HTMLDivElement>(null);
   const termRef   = useRef<Terminal | null>(null);
   const fitRef    = useRef<FitAddon | null>(null);
-  // Stable session ID — never changes for the lifetime of this component
-  const sidRef    = useRef<string>(`${runboxId}-${crypto.randomUUID()}`);
-  const gone      = useRef(false);
+  // Use stable session ID from parent if provided, otherwise generate one.
+  // The parent supplies it so it knows the ID before spawn (for SubAgentPanel).
+  const sidRef     = useRef<string>(sessionId ?? `${runboxId}-${crypto.randomUUID()}`);
+  const gone       = useRef(false);
+  const agentCmdRef = useRef<string | undefined>(undefined);
+
+  // Report resolved session ID to parent once on mount
+  useEffect(() => {
+    onSessionChange?.(sidRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Inject CSS once
   useEffect(() => {
@@ -190,14 +199,14 @@ export default function RunPanel({
           disposable.dispose();
           spawnedAt = Date.now();
           // pass runboxId on restart too
-          invoke("pty_spawn", { sessionId: sid, runboxId, cwd: runboxCwd }).catch(() => {});
+          invoke("pty_spawn", { sessionId: sid, runboxId, cwd: runboxCwd, agentCmd: agentCmdRef.current }).catch(() => {});
         });
       }),
     ]).then(([a, b]) => {
       unlistenOutput = a;
       unlistenEnded  = b;
       spawnedAt = Date.now();
-      return invoke("pty_spawn", { sessionId: sid, runboxId, cwd: runboxCwd });
+      return invoke("pty_spawn", { sessionId: sid, runboxId, cwd: runboxCwd, agentCmd: agentCmdRef.current });
     }).catch(err => {
       if (!gone.current) {
         term.write(`\r\n\x1b[31m[error: ${err}]\x1b[0m\r\n`);

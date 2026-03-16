@@ -33,7 +33,7 @@ function toUrl(raw: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(t)}`;
 }
 
-export default function BrowsePanel({
+export default function BrowsePane({
   paneId, isActive, onActivate, onClose,
   agentRef, onUrlChange,
   externalUrl, onExternalUrlConsumed,

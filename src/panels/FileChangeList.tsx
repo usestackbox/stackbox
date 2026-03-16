@@ -1,17 +1,3 @@
-/**
- * FileChangeList.tsx
- * Standalone diff viewer — split / unified toggle, stat squares, collapse.
- *
- * Changes from original:
- *  - Uses LiveDiffFile (git_diff_live) instead of db_file_changes_for_runbox
- *  - runboxCwd prop added — required for git_diff_live
- *  - StatSquares rounding fix (was producing negative empty squares)
- *  - Split diff panels now scroll in sync
- *  - "N/N viewed" counter now correctly tracks viewed files
- *  - Refresh button is wired to reload
- *  - memory-added event triggers reload
- */
-
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -97,6 +83,13 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
   }, [runboxId, runboxCwd]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Safety-net polling — catches cases where notify misses an event or
+  // the watcher wasn't mounted yet when a file changed.
+  useEffect(() => {
+    const id = setInterval(load, 3000);
+    return () => clearInterval(id);
+  }, [load]);
 
   useEffect(() => {
     const unsub = listen<{ runbox_id: string }>("memory-added", ({ payload }) => {
@@ -226,4 +219,3 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
 }
 
 export default FileChangeList;
-

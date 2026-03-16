@@ -17,8 +17,8 @@ import { listen } from "@tauri-apps/api/event";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const C = {
-  bg0: "#0d1117", bg1: "#10161e", bg2: "#161b22",
-  bg3: "#1c2230", bg4: "#21283a",
+  bg0: "#0d0d0d", bg1: "#141414", bg2: "#1a1a1a",
+  bg3: "#202020", bg4: "#282828",
   border:   "rgba(255,255,255,.07)",
   borderMd: "rgba(255,255,255,.11)",
   borderHi: "rgba(255,255,255,.17)",
@@ -382,17 +382,21 @@ function EventLog({ runboxId }: { runboxId: string }) {
   const [error,    setError]    = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const load = useCallback((q = query) => {
+  const queryRef = useRef(query);
+  useEffect(() => { queryRef.current = query; }, [query]);
+
+  const load = useCallback((q?: string) => {
+    const resolvedQ = q ?? queryRef.current;
     setLoading(true); setError(null);
     invoke<SessionEvent[]>("db_events_for_runbox", {
       runboxId,
-      query: q.trim() || null,
+      query: resolvedQ.trim() || null,
       limit: 50,
     })
       .then(setEvents)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [runboxId, query]);
+  }, [runboxId]); // query intentionally excluded — read via queryRef
 
   useEffect(() => { load(); }, [runboxId]);
 
@@ -401,11 +405,11 @@ function EventLog({ runboxId }: { runboxId: string }) {
       if (payload.runbox_id === runboxId) load();
     });
     return () => { unsub.then(f => f()); };
-  }, [runboxId, load]);
+  }, [runboxId, load]); // load is now stable — only changes when runboxId changes
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    load(query);
+    load(query); // explicit pass overrides queryRef
   };
 
   return (
