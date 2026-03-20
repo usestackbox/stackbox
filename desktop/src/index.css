@@ -1,0 +1,168 @@
+/* ── Reset ────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root {
+  height: 100%; overflow: hidden;
+  background: #0a0a0a; color: #e8e8e8;
+  font-family: 'DM Sans', 'Outfit', -apple-system, system-ui, sans-serif;
+  font-size: 13px; -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; cursor: pointer; }
+button:focus { outline: none; }
+input, textarea, select { font-family: inherit; background: transparent; color: #e8e8e8; }
+input:focus, textarea:focus { outline: none; }
+
+/* ── Scrollbars ───────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1e1e1e; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #2a2a2a; }
+
+/* ── Keyframes ────────────────────────────────────────────────── */
+@keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes fadeDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideIn  { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes pulse    { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* ── Design tokens ────────────────────────────────────────────── */
+:root {
+  --bg:         #0a0a0a;
+  --bg2:        #111111;
+  --bg3:        #181818;
+  --bg4:        #1f1f1f;
+  --bg5:        #272727;
+  --border:     rgba(255,255,255,.06);
+  --border2:    rgba(255,255,255,.10);
+  --border3:    rgba(255,255,255,.18);
+  --text:       #f2f2f2;
+  --text-dim:   #999999;
+  --text-muted: #555555;
+  --text-faint: #333333;
+}
+
+/* ── Layout ───────────────────────────────────────────────────── */
+.root { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.body { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+
+/* ── Selection ────────────────────────────────────────────────── */
+::selection { background: rgba(255,255,255,.15); color: #f2f2f2; }
+
+/* ── Focus ring ───────────────────────────────────────────────── */
+:focus-visible { outline: 2px solid rgba(255,255,255,.2); outline-offset: 2px; border-radius: 6px; }
+:focus:not(:focus-visible) { outline: none; }
+
+/* ── Sidebar ──────────────────────────────────────────────────── */
+.side { display: flex; flex-direction: column; background: var(--bg2); border-right: 1px solid var(--border); }
+.side-hd { height: 48px; flex-shrink: 0; display: flex; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--border); justify-content: space-between; }
+.side-logo { font-size: 11px; font-weight: 700; letter-spacing: .14em; color: var(--text); font-family: 'JetBrains Mono', monospace; user-select: none; }
+.side-list { flex: 1; overflow-y: auto; padding: 6px 10px 10px; }
+.side-label { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: var(--text-faint); text-transform: uppercase; font-family: 'JetBrains Mono', monospace; padding: 2px 4px 6px; }
+.side-foot { padding: 8px 14px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text-faint); }
+
+/* Runbox item */
+.rb-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 10px; cursor: pointer; transition: all .1s; margin-bottom: 2px; border: 1px solid transparent; }
+.rb-item:hover { background: var(--bg3); }
+.rb-item.on { background: var(--bg4); border-color: var(--border2); }
+.rb-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--text-faint); transition: all .2s; }
+.rb-item.on .rb-dot { background: var(--text); }
+.rb-name { font-size: 13px; color: var(--text-dim); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.rb-item.on .rb-name { color: var(--text); font-weight: 600; }
+
+/* New runbox button */
+.new-btn { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 9px 14px; background: transparent; border: 1px solid var(--border); border-radius: 10px; color: var(--text-dim); font-size: 12px; font-weight: 500; transition: all .12s; margin-bottom: 8px; }
+.new-btn:hover { background: var(--bg3); border-color: var(--border2); color: var(--text); }
+.new-btn-plus { font-size: 17px; font-weight: 300; line-height: 1; }
+
+/* ── Tab bar ──────────────────────────────────────────────────── */
+.tabbar { display: flex; align-items: center; height: 42px; background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 6px; gap: 3px; overflow: hidden; flex-shrink: 0; }
+.tab { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 12px; height: 30px; border-radius: 8px; cursor: pointer; flex-shrink: 0; border: 1px solid transparent; transition: all .1s; }
+.tab:hover { background: var(--bg3); }
+.tab.on { background: var(--bg4); border-color: var(--border2); }
+.tab-label { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+.tab.on .tab-label { color: var(--text); }
+.tab-x { background: none; border: none; color: var(--text-faint); font-size: 13px; padding: 0 1px; line-height: 1; opacity: 0; transition: all .1s; }
+.tab:hover .tab-x { opacity: 1; }
+.tab-x:hover { color: #e05555; }
+
+/* Branch pill */
+.branch-pill { display: flex; align-items: center; gap: 5px; padding: 4px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; font-size: 10px; font-family: 'JetBrains Mono', monospace; color: var(--text-muted); }
+
+/* ── Strip icons (right panel icons) ─────────────────────────── */
+.strip { width: 48px; flex-shrink: 0; background: var(--bg2); border-left: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
+.strip-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid transparent; cursor: pointer; transition: all .12s; margin: 2px 0; }
+.strip-icon:hover { background: var(--bg3); }
+.strip-icon.on { background: var(--bg4); border-color: var(--border2); }
+
+/* ── Panel container ──────────────────────────────────────────── */
+.panel { display: flex; flex-direction: column; height: 100%; background: var(--bg2); }
+.panel-hd { height: 48px; padding: 0 14px; flex-shrink: 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.panel-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+.panel-close { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: none; background: none; color: var(--text-muted); font-size: 14px; transition: all .1s; }
+.panel-close:hover { background: var(--bg4); color: var(--text); }
+
+/* ── Stats row (used in all panels) ──────────────────────────── */
+.stats-row { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.stat-cell { flex: 1; padding: 10px 14px; border-right: 1px solid var(--border); }
+.stat-cell:last-child { border-right: none; }
+.stat-lbl { font-size: 9px; font-family: 'JetBrains Mono', monospace; letter-spacing: .10em; color: var(--text-faint); margin-bottom: 3px; }
+.stat-val { font-size: 18px; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--text); letter-spacing: -.02em; }
+
+/* ── Cards (compact, used in file/git panels) ─────────────────── */
+.card { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; transition: all .12s; }
+.card:hover { background: var(--bg4); border-color: var(--border2); }
+.card.active { border-color: var(--border2); }
+
+/* ── Filter tabs (pill switcher) ──────────────────────────────── */
+.filter-tabs { display: flex; background: var(--bg); border-radius: 10px; padding: 3px; }
+.filter-tab { flex: 1; padding: 6px 0; border-radius: 7px; border: none; background: transparent; color: var(--text-faint); font-size: 11px; font-family: 'DM Sans', system-ui, sans-serif; font-weight: 400; cursor: pointer; transition: all .1s; }
+.filter-tab.on { background: var(--bg4); color: var(--text); font-weight: 600; }
+
+/* ── Input ────────────────────────────────────────────────────── */
+.inp { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 12px; padding: 8px 10px; transition: border-color .15s; width: 100%; box-sizing: border-box; }
+.inp:focus { border-color: var(--border3); }
+.inp::placeholder { color: var(--text-faint); }
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+.btn { padding: 8px 16px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); font-size: 12px; font-family: 'DM Sans', system-ui, sans-serif; font-weight: 500; transition: all .12s; cursor: pointer; }
+.btn:hover { background: var(--bg4); border-color: var(--border2); color: var(--text); }
+.btn.primary { background: var(--text); color: var(--bg); border-color: transparent; font-weight: 700; }
+.btn.primary:hover { background: #e0e0e0; }
+.btn.primary:disabled { background: var(--bg5); color: var(--text-faint); cursor: default; }
+.btn:disabled { color: var(--text-faint); cursor: default; }
+
+/* ── Empty state ──────────────────────────────────────────────── */
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px 20px; text-align: center; }
+.empty svg { opacity: .3; }
+.empty-title { font-size: 13px; color: var(--text-dim); font-family: 'DM Sans', system-ui, sans-serif; }
+
+/* ── Commit timeline dot ──────────────────────────────────────── */
+.timeline-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
+.timeline-dot.active { background: var(--text); }
+.timeline-line { width: 1px; height: 18px; background: var(--border); margin: 3px auto 0; }
+
+/* ── Diff viewer ──────────────────────────────────────────────── */
+.diff-add { background: rgba(255,255,255,.03); }
+.diff-del { background: rgba(180,60,60,.12); }
+.diff-add-gutter { color: rgba(255,255,255,.3); }
+.diff-del-gutter { color: #cc5555; }
+
+/* ── Terminal (Warp-inspired) ─────────────────────────────────── */
+.term-topbar { height: 34px; background: #111; border-bottom: 1px solid rgba(255,255,255,.05); display: flex; align-items: center; padding: 0 14px; gap: 8px; flex-shrink: 0; }
+.term-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.12); flex-shrink: 0; }
+.term-dot.on { background: rgba(255,255,255,.55); }
+.term-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: rgba(255,255,255,.3); letter-spacing: .04em; }
+
+/* ── Animations for panels ────────────────────────────────────── */
+.slide-in { animation: slideIn .14s ease-out; }
+.fade-down { animation: fadeDown .12s ease; }
+
+/* ── Tooltip ──────────────────────────────────────────────────── */
+[title] { cursor: default; }
+
+/* ── No color utility classes ─────────────────────────────────── */
+.mono { font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace; }
+.sans { font-family: 'DM Sans', 'Outfit', -apple-system, system-ui, sans-serif; }
+.text-0 { color: var(--text); }
+.text-1 { color: var(--text-dim); }
+.text-2 { color: var(--text-muted); }
+.text-3 { color: var(--text-faint); }
+.border-b { border-bottom: 1px solid var(--border); }
