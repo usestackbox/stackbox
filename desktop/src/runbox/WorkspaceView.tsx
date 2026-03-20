@@ -54,7 +54,7 @@ function ResizeHandle({ onResize }: { onResize: (w: number) => void }) {
     const onMove = (e: MouseEvent) => {
       if (!dragging.current) return;
       const w = window.innerWidth - e.clientX - 48;
-      if (w > 200 && w < 680) onResize(w);
+      if (w > 200 && w < 780) onResize(w);
     };
     const onUp = () => { dragging.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
@@ -167,7 +167,7 @@ export function WorkspaceView({
   const [sidePanel,  setSidePanel]  = useState<SidePanel>(null);
   const [filesView,  setFilesView]  = useState<FilesView>("list");
   const [activeDiff, setActiveDiff] = useState<DiffTab | null>(null);
-  const [panelWidth, setPanelWidth] = useState(320);
+  const [panelWidth, setPanelWidth] = useState(450);
 
   const slotMapRef  = useRef<Record<string, HTMLDivElement>>({});
   const [termRects, setTermRects]   = useState<Record<string, TermRect>>({});
@@ -285,11 +285,25 @@ export function WorkspaceView({
           </div>
         </div>
 
-        {/* Files panel */}
+        {/* Files panel — rounded card */}
         {sidePanel === "files" && (
-          <div style={{ width: panelWidth, flexShrink: 0, borderLeft: `1px solid ${C.border}`, display: "flex", background: filesView === "diff" ? C.bg0 : C.bg1, animation: "slideIn .14s ease-out" }}>
+          <div style={{
+            width: panelWidth, flexShrink: 0,
+            display: "flex", alignItems: "stretch",
+            borderLeft: `1px solid ${C.border}`,
+            animation: "slideIn .14s ease-out",
+          }}>
             <ResizeHandle onResize={setPanelWidth} />
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <div style={{
+              flex: 1, minWidth: 0,
+              display: "flex", flexDirection: "column",
+              background: filesView === "diff" ? C.bg0 : C.bg1,
+              border: `1px solid ${C.borderMd}`,
+              borderRadius: 10,
+              overflow: "hidden",
+              margin: "8px 8px 8px 4px",
+              boxShadow: "0 4px 20px rgba(0,0,0,.4)",
+            }}>
               {filesView === "list" && (
                 <>
                   <PanelHeader title="Changed Files" icon={<IcoFiles on />}
@@ -306,11 +320,25 @@ export function WorkspaceView({
           </div>
         )}
 
-        {/* Other panels */}
+        {/* Other panels — rounded card */}
         {sidePanel && sidePanel !== "files" && (
-          <div style={{ width: panelWidth, flexShrink: 0, borderLeft: `1px solid ${C.border}`, display: "flex", background: C.bg1, animation: "slideIn .14s ease-out" }}>
+          <div style={{
+            width: panelWidth, flexShrink: 0,
+            display: "flex", alignItems: "stretch",
+            borderLeft: `1px solid ${C.border}`,
+            animation: "slideIn .14s ease-out",
+          }}>
             <ResizeHandle onResize={setPanelWidth} />
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <div style={{
+              flex: 1, minWidth: 0,
+              display: "flex", flexDirection: "column",
+              background: C.bg1,
+              border: `1px solid ${C.borderMd}`,
+              borderRadius: 10,
+              overflow: "hidden",
+              margin: "8px 8px 8px 4px",
+              boxShadow: "0 4px 20px rgba(0,0,0,.4)",
+            }}>
               {sidePanel === "git"    && <GitWorktreePanel runboxCwd={runbox.cwd} runboxId={runbox.id} branch={branch} onClose={() => setSidePanel(null)} />}
               {sidePanel === "search" && <SearchPanel runboxId={runbox.id} onClose={() => setSidePanel(null)} />}
               {sidePanel === "memory" && <MemoryPanel runboxId={runbox.id} runboxName={runbox.name} runboxes={memoryRunboxes} onClose={() => setSidePanel(null)} />}

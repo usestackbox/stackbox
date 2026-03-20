@@ -273,7 +273,6 @@ export default function RunPane({
       onMouseDown={handleMouseDown}
       onPaste={handlePaste}
     >
-      {/* Warp-style per-pane top bar */}
       <div className="sbx-topbar">
         <div className={`sbx-topbar-dot${isActive ? " on" : ""}`} />
         <span className="sbx-topbar-label">{shortCwd}</span>
