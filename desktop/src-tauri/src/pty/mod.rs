@@ -22,7 +22,7 @@ use crate::{
     db::sessions::{session_start, session_end},
 };
 
-use detection::{strip_ansi, ResponseCapture, on_command_result};
+use detection::{strip_ansi, ResponseCapture, OutputClassifier, MemoryKind, on_command_result};
 
 pub fn expand_cwd(raw: &str) -> String {
     let s = raw.trim();
@@ -201,6 +201,7 @@ pub async fn spawn(
         let mut buf           = [0u8; 4096];
         let mut detected_kind = agent_kind.clone();
         let mut capture       = ResponseCapture::new();
+        let mut classifier    = OutputClassifier::new();
 
         while let Ok(n) = reader.read(&mut buf) {
             if n == 0 { break; }
@@ -231,6 +232,26 @@ pub async fn spawn(
                 tauri::async_runtime::spawn(async move {
                     if memory::memory_add(&rb2, &sid2, &summary).await.is_ok() {
                         crate::agent::globals::emit_memory_added(&rb2);
+                    }
+                });
+            }
+
+            // Auto-classify output: Decision / Failure / Preference
+            let classified = classifier.feed(&text);
+            if !classified.is_empty() {
+                let rb2   = rb_id.clone();
+                let sid2  = sid.clone();
+                let aname = detected_kind.display_name().to_string();
+                tauri::async_runtime::spawn(async move {
+                    for (kind, content) in classified {
+                        let kind_str = match kind {
+                            MemoryKind::Decision   => "decision",
+                            MemoryKind::Failure    => "failure",
+                            MemoryKind::Preference => "preference",
+                        };
+                        crate::agent::supercontext::save_classified(
+                            &rb2, &sid2, &aname, kind_str, &content,
+                        ).await;
                     }
                 });
             }

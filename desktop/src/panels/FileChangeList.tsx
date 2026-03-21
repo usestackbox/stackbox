@@ -50,6 +50,7 @@ function reltime(ms: number) {
 
 // Change type — monochrome only
 const CHANGE_LABEL = { created: "A", modified: "M", deleted: "D" };
+const CHANGE_COLOR  = { created: "#4a9955", modified: "#888888", deleted: "#cc5555" };
 
 export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
   runboxId: string; runboxCwd: string; onFileClick: (fc: LiveDiffFile) => void;
@@ -131,8 +132,8 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
             <div key={label} style={{ flex:1, padding:"8px 12px" }}>
               <div style={{ fontSize:9, fontFamily:MONO, letterSpacing:".10em", color:C.t3, marginBottom:3 }}>{label}</div>
               <div style={{ display:"flex", gap:5 }}>
-                {totalIns > 0 && <span style={{ fontSize:13, fontFamily:MONO, fontWeight:700, color:"rgba(255,255,255,.4)" }}>+{totalIns}</span>}
-                {totalDel > 0 && <span style={{ fontSize:13, fontFamily:MONO, fontWeight:700, color:"rgba(255,255,255,.25)" }}>-{totalDel}</span>}
+                {totalIns > 0 && <span style={{ fontSize:13, fontFamily:MONO, fontWeight:700, color:"#4a9955" }}>+{totalIns}</span>}
+                {totalDel > 0 && <span style={{ fontSize:13, fontFamily:MONO, fontWeight:700, color:"#cc5555" }}>-{totalDel}</span>}
               </div>
             </div>
           ) : null)}
@@ -211,7 +212,7 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
                 onMouseLeave={e => { const el=e.currentTarget as HTMLElement; el.style.background=C.bg2; el.style.borderColor=C.border; }}>
 
                 {/* Change letter */}
-                <span style={{ fontSize:10, fontFamily:MONO, fontWeight:700, color:C.t2, width:12, flexShrink:0, textAlign:"center" }}>{letter}</span>
+                <span style={{ fontSize:10, fontFamily:MONO, fontWeight:700, color:CHANGE_COLOR[fc.change_type], width:12, flexShrink:0, textAlign:"center" }}>{letter}</span>
 
                 {/* File info */}
                 <div style={{ flex:1, minWidth:0 }}>
@@ -228,8 +229,8 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
 
                 {/* Stats */}
                 <div style={{ display:"flex", gap:5, flexShrink:0 }}>
-                  {fc.insertions > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"rgba(255,255,255,.35)", fontWeight:600 }}>+{fc.insertions}</span>}
-                  {fc.deletions  > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"rgba(255,255,255,.2)",  fontWeight:600 }}>-{fc.deletions}</span>}
+                  {fc.insertions > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"#4a9955", fontWeight:600 }}>+{fc.insertions}</span>}
+                  {fc.deletions  > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"#cc5555", fontWeight:600 }}>-{fc.deletions}</span>}
                 </div>
 
                 {/* Time */}

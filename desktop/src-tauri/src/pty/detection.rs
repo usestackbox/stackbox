@@ -160,3 +160,142 @@ pub fn capture_response(
     // Kept to avoid compile errors if anything still calls it.
     None
 }
+
+// ── Output Classifier ─────────────────────────────────────────────────────────
+// Scans agent PTY output in real-time and classifies chunks into memory types.
+// Decision / Failure / Preference — saved automatically, zero user action.
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MemoryKind {
+    Decision,
+    Failure,
+    Preference,
+}
+
+pub struct OutputClassifier {
+    buf:      String,
+    emitted:  std::collections::HashSet<String>,
+}
+
+impl OutputClassifier {
+    pub fn new() -> Self {
+        Self { buf: String::new(), emitted: std::collections::HashSet::new() }
+    }
+
+    /// Feed a PTY chunk. Returns a list of (kind, content) to save as memories.
+    pub fn feed(&mut self, text: &str) -> Vec<(MemoryKind, String)> {
+        let stripped = strip_ansi(text);
+        self.buf.push_str(&stripped);
+
+        // Keep buffer bounded — only last 4KB matters for context
+        if self.buf.len() > 4096 {
+            let trim_at = self.buf.len() - 4096;
+            let safe = (trim_at..=self.buf.len())
+                .find(|&i| self.buf.is_char_boundary(i))
+                .unwrap_or(self.buf.len());
+            self.buf = self.buf[safe..].to_string();
+        }
+
+        let mut results = Vec::new();
+
+        // Collect all lines so we can grab context window around matches
+        let all_lines: Vec<&str> = stripped.lines().collect();
+
+        for (idx, line) in all_lines.iter().enumerate() {
+            let t = line.trim();
+            if t.len() < 4 { continue; }
+
+            let lower = t.to_lowercase();
+
+            // ── Failure patterns ──────────────────────────────────────────────
+            let is_failure = lower.contains("error:") ||
+                lower.contains("parsererror") ||
+                lower.contains("failed to") ||
+                lower.contains("cannot find") ||
+                lower.contains("could not find") ||
+                lower.contains("permission denied") ||
+                lower.contains("port already in use") ||
+                lower.contains("address already in use") ||
+                lower.contains("enoent") ||
+                lower.contains("panicked at") ||
+                lower.contains("no such file") ||
+                (lower.contains("error[") && lower.contains("]")) ||
+                lower.contains("compilation failed") ||
+                lower.contains("build failed") ||
+                lower.contains("fullyqualifiederrorid") ||
+                lower.contains("exception") && lower.contains("thrown") ||
+                lower.contains("is not recognized as the name") ||
+                lower.contains("is not recognized as an internal") ||
+                lower.contains("command not found") ||
+                lower.contains("commandnotfoundexception") ||
+                lower.contains("access is denied") ||
+                lower.contains("syntax error") ||
+                lower.contains("typeerror:") ||
+                lower.contains("referenceerror:") ||
+                lower.contains("uncaught ") && lower.contains("error");
+
+            // ── Decision patterns ─────────────────────────────────────────────
+            let is_decision = lower.contains("i'll use") ||
+                lower.contains("i will use") ||
+                lower.contains("i've decided") ||
+                lower.contains("switching to") ||
+                lower.contains("instead of") ||
+                lower.contains("i chose") ||
+                lower.contains("going with") ||
+                lower.contains("the approach is") ||
+                lower.contains("using ") && (lower.contains(" because") || lower.contains(" since") || lower.contains(" as it"));
+
+            // ── Preference patterns ───────────────────────────────────────────
+            let is_pref = lower.contains("i prefer") ||
+                lower.contains("best practice") ||
+                lower.contains("always use") ||
+                lower.contains("never use") ||
+                lower.contains("should always") ||
+                lower.contains("should never") ||
+                lower.contains("recommend using") ||
+                lower.contains("the convention is");
+
+            let kind = if is_failure {
+                Some(MemoryKind::Failure)
+            } else if is_decision {
+                Some(MemoryKind::Decision)
+            } else if is_pref {
+                Some(MemoryKind::Preference)
+            } else {
+                None
+            };
+
+            if let Some(k) = kind {
+                // Deduplicate by first line key
+                let key: String = t.chars().take(80).collect();
+                if !self.emitted.contains(&key) {
+                    self.emitted.insert(key);
+
+                    // For failures: grab context window (2 lines before + 4 lines after)
+                    // so we capture the full error block, not just the matching line.
+                    let content = if k == MemoryKind::Failure {
+                        let start = idx.saturating_sub(2);
+                        let end   = (idx + 5).min(all_lines.len());
+                        let block: Vec<&str> = all_lines[start..end]
+                            .iter()
+                            .map(|l| l.trim())
+                            .filter(|l| !l.is_empty())
+                            .collect();
+                        let joined = block.join("\n");
+                        // Clean residual control chars
+                        joined.chars().filter(|c| *c >= ' ' || *c == '\t' || *c == '\n').collect()
+                    } else {
+                        // Decisions / preferences: just the single clean line
+                        t.chars().filter(|c| *c >= ' ' || *c == '\t').collect()
+                    };
+
+                    if content.len() >= 8 {
+                        results.push((k, content));
+                    }
+                }
+            }
+        }
+
+        results
+    }
+}

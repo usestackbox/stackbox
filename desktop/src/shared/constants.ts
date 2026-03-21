@@ -71,7 +71,7 @@ export function reltime(ms: number): string {
   const d = Date.now() - ms;
   if (d < 60_000)    return "just now";
   if (d < 3600_000)  return `${Math.floor(d / 60_000)}m ago`;
-  if (d < 86400_000) return `${Math.floor(d / 3600_000)}h ago`;
+  if (d < 86400_000) return `${Math.floor(d / 3600_000)}h  ago`;
   return `${Math.floor(d / 86400_000)}d ago`;
 }
 

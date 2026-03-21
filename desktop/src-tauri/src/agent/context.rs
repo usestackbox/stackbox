@@ -69,6 +69,17 @@ pub async fn inject(
     }
 
     eprintln!("[agent::context] injected context for {:?} in {cwd}", agent);
+
+    // ── Supercontext: Git cold ingest ─────────────────────────────────────────
+    // Runs async, non-blocking. Idempotent — skips if already ingested.
+    if *agent != AgentKind::Shell {
+        let rb2  = runbox_id.to_string();
+        let cwd2 = cwd.to_string();
+        tauri::async_runtime::spawn(async move {
+            crate::agent::supercontext::git_cold_ingest(&rb2, &cwd2).await;
+        });
+    }
+
     Ok(())
 }
 

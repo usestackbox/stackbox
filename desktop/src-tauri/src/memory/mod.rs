@@ -6,6 +6,7 @@ pub mod store;
 pub use schema::Memory;
 pub use store::{
     init,
+    is_ready,
     memory_add,
     memory_add_full,
     memory_add_with_embedding,
@@ -20,4 +21,5 @@ pub use store::{
     memory_update,
     memory_update_tags,
     memory_move_branch,
+    memories_search_global,
 };

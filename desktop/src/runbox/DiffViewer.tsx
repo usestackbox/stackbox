@@ -77,15 +77,14 @@ function StatBar({ ins, del }: { ins: number; del: number }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
       <span style={{ fontSize: 10, fontFamily: MONO, fontWeight: 600, display: "flex", gap: 4 }}>
-        <span style={{ color: "#909090" }}>+{ins}</span>
-        {/* FIX: was #663333 — nearly invisible on dark bg */}
-        <span style={{ color: "#cc5555" }}>-{del}</span>
+        <span style={{ color: "#4a9955" }}>+{ins}</span>
+        <span style={{ color: "#e05555" }}>-{del}</span>
       </span>
       <div style={{ display: "flex", gap: 1.5 }}>
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} style={{
             width: 8, height: 8, borderRadius: 2,
-            background: i < g ? "rgba(255,255,255,.28)" : "rgba(200,70,70,.55)",
+            background: i < g ? "rgba(60,180,90,.60)" : "rgba(200,60,60,.55)",
           }} />
         ))}
       </div>
@@ -125,21 +124,21 @@ function Unified({ lines }: { lines: Line[] }) {
             // FIX: deletion row bg was rgba(180,60,60,.09) — near-invisible on #0d0d0d
             // Increased to .18 so the reddish tint is actually perceptible
             const rowBg = isAdd
-              ? "rgba(255,255,255,.032)"
+              ? "rgba(40,160,80,.10)"
               : isRem
-              ? "rgba(180,60,60,.18)"
+              ? "rgba(200,60,60,.16)"
               : row.kind === "hunk" ? "rgba(255,255,255,.018)"
               : "transparent";
 
             // FIX: deletion gutter bg was .14 — bumped to .26 for clear visual band
             const gutterBg = isAdd
-              ? "rgba(255,255,255,.05)"
-              : isRem ? "rgba(180,60,60,.26)"
+              ? "rgba(40,160,80,.18)"
+              : isRem ? "rgba(200,60,60,.28)"
               : "rgba(255,255,255,.018)";
 
             // FIX: deletion text was #9a9a9a — still readable but warm it up slightly
-            const textColor = isAdd ? "#c8c8c8"
-              : isRem ? "#c0b0b0"
+            const textColor = isAdd ? "#b8ddb8"
+              : isRem ? "#ddb8b8"
               : row.kind === "hunk" ? "#505050"
               : row.kind === "meta" ? "#3a3a3a"
               : "#707070";
@@ -154,7 +153,7 @@ function Unified({ lines }: { lines: Line[] }) {
                   {isMeta ? "" : (row.newNum ?? "")}
                 </td>
                 {/* FIX: deletion gutter '−' was #883333 — very dark red, barely visible */}
-                <td style={{ textAlign: "center", fontFamily: MONO, fontSize: 11, color: isAdd ? "#3a6a3a" : isRem ? "#cc5555" : "transparent", userSelect: "none", background: gutterBg, borderRight: `1px solid ${C.border}`, lineHeight: "20px" }}>
+                <td style={{ textAlign: "center", fontFamily: MONO, fontSize: 11, color: isAdd ? "#4db864" : isRem ? "#e05555" : "transparent", userSelect: "none", background: gutterBg, borderRight: `1px solid ${C.border}`, lineHeight: "20px" }}>
                   {isAdd ? "+" : isRem ? "−" : ""}
                 </td>
                 <td style={{ paddingLeft: 10, paddingRight: 8, lineHeight: "20px", verticalAlign: "top" }}>
@@ -189,9 +188,9 @@ export function DiffViewer({
   const dirPart  = tab.path.slice(0, tab.path.length - fileName.length);
   const ec       = extColor(tab.path);
 
-  const badgeColor = tab.changeType === "deleted" ? "#994444"
-                   : tab.changeType === "created" ? "#606060"
-                   : "#484848";
+  const badgeColor = tab.changeType === "deleted" ? "#cc5555"
+                   : tab.changeType === "created" ? "#4a9955"
+                   : "#666666";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg0 }}>
@@ -293,9 +292,9 @@ export function DiffViewer({
         </span>
         {(tab.insertions > 0 || tab.deletions > 0) && (
           <span style={{ display: "flex", gap: 6, flexShrink: 0, fontSize: 10, fontFamily: MONO }}>
-            {tab.insertions > 0 && <span style={{ color: "#909090" }}>+{tab.insertions}</span>}
+            {tab.insertions > 0 && <span style={{ color: "#4a9955" }}>+{tab.insertions}</span>}
             {/* FIX: was #663333 — too dark on #0d0d0d background */}
-            {tab.deletions  > 0 && <span style={{ color: "#cc5555" }}>-{tab.deletions}</span>}
+            {tab.deletions  > 0 && <span style={{ color: "#e05555" }}>-{tab.deletions}</span>}
           </span>
         )}
       </div>

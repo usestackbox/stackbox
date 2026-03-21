@@ -12,13 +12,14 @@ export interface Memory {
 }
 
 const AGENT_COLOR: Record<string, { fg: string; bg: string }> = {
-  "claude code":      { fg: "#b89050", bg: "rgba(184,144,80,.12)"  },
-  "openai codex cli": { fg: "#60a060", bg: "rgba(96,160,96,.12)"   },
-  "gemini cli":       { fg: "#5880b8", bg: "rgba(88,128,184,.12)"  },
-  "cursor agent":     { fg: "#9868b8", bg: "rgba(152,104,184,.12)" },
-  "github copilot":   { fg: "#5878b8", bg: "rgba(88,120,184,.12)"  },
-  "opencode":         { fg: "#888888", bg: "rgba(128,128,128,.10)" },
-  "human":            { fg: "#666666", bg: "rgba(102,102,102,.10)" },
+  "claude code":      { fg: "#e8b84b", bg: "rgba(232,184,75,.16)"  },
+  "openai codex cli": { fg: "#5ecb6b", bg: "rgba(94,203,107,.14)"  },
+  "gemini cli":       { fg: "#6aaee8", bg: "rgba(106,174,232,.14)" },
+  "cursor agent":     { fg: "#c47ee8", bg: "rgba(196,126,232,.14)" },
+  "github copilot":   { fg: "#6a9ee8", bg: "rgba(106,158,232,.14)" },
+  "opencode":         { fg: "#a0a0a0", bg: "rgba(160,160,160,.12)" },
+  "human":            { fg: "#888888", bg: "rgba(136,136,136,.10)" },
+  "git":              { fg: "#888888", bg: "rgba(136,136,136,.10)" },
 };
 function agentStyle(name: string) {
   return AGENT_COLOR[name.toLowerCase()] ?? { fg: "#555", bg: "rgba(85,85,85,.10)" };
@@ -46,7 +47,7 @@ const tbtn: React.CSSProperties = {
 };
 
 // ── Tag ───────────────────────────────────────────────────────────────────────
-function Tag({ label, active, onClick }: { label: string; active?: boolean; onClick?: () => void }) {
+function Tag({ label, active, onClick, style: extraStyle }: { label: string; active?: boolean; onClick?: () => void; style?: React.CSSProperties }) {
   const [hov, setHov] = useState(false);
   return (
     <span onClick={onClick}
@@ -57,6 +58,7 @@ function Tag({ label, active, onClick }: { label: string; active?: boolean; onCl
         background: active ? C.bg4 : hov ? C.bg3 : C.bg2,
         border: `1px solid ${active ? C.borderMd : C.border}`,
         color: active ? C.t0 : C.t2, transition: "all .1s",
+        ...extraStyle,
       }}>
       {label}
     </span>
@@ -120,7 +122,8 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
 
   const isMilestone  = mem.commit_type === "milestone";
   const isCheckpoint = mem.commit_type === "checkpoint";
-  const isLong       = mem.content.length > 200;
+  const isFailure    = mem.tags.includes("failure");
+  const isLong       = mem.content.length > 300;
   const tags         = mem.tags.split(",").map(t => t.trim()).filter(Boolean);
   const as           = mem.agent_name ? agentStyle(mem.agent_name) : null;
 
@@ -129,14 +132,15 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => { setHov(false); setShowMove(false); }}
       style={{
-        background: isMilestone ? C.bg3 : isCheckpoint ? C.bg2 : C.bg2,
-        border: `1px solid ${isMilestone ? C.borderMd : isCheckpoint ? C.border : C.border}`,
+        background: isMilestone ? C.bg3 : isFailure ? "rgba(200,60,60,.06)" : C.bg2,
+        border: `1px solid ${isMilestone ? C.borderMd : isFailure ? "rgba(200,60,60,.35)" : isCheckpoint ? C.border : C.border}`,
         borderRadius: 12,
         padding: "12px 14px",
         display: "flex", flexDirection: "column", gap: 9,
         transition: "border-color .15s",
-        ...(hov ? { borderColor: C.borderMd } : {}),
+        ...(hov ? { borderColor: isMilestone ? C.borderHi : isFailure ? "rgba(200,60,60,.6)" : C.borderMd } : {}),
         position: "relative", overflow: "visible",
+        borderLeft: isFailure ? "3px solid rgba(200,60,60,.6)" : undefined,
       }}>
 
       {/* Top stripe for milestone */}
@@ -154,8 +158,8 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
 
         {/* Branch */}
         <span style={{
-          fontSize: 10, fontFamily: MONO, color: C.t3,
-          background: C.bg4, border: `1px solid ${C.border}`,
+          fontSize: 10, fontFamily: MONO, color: C.t2,
+          background: C.bg4, border: `1px solid ${C.borderMd}`,
           borderRadius: 6, padding: "1px 6px",
         }}>⎇ {mem.branch}</span>
 
@@ -164,7 +168,7 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
           <span style={{
             fontSize: 10, fontFamily: MONO, fontWeight: 600,
             color: as.fg, background: as.bg,
-            border: `1px solid ${as.fg}25`,
+            border: `1px solid ${as.fg}99`,
             borderRadius: 6, padding: "1px 7px",
             letterSpacing: ".02em",
           }}>{mem.agent_name}</span>
@@ -175,7 +179,7 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
         )}
         {mem.pinned && <span style={{ fontSize: 11 }}>📌</span>}
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 10, fontFamily: MONO, color: C.t3 }}>{reltime(mem.timestamp)}</span>
+        <span style={{ fontSize: 10, fontFamily: MONO, color: C.t2 }}>{reltime(mem.timestamp)}</span>
       </div>
 
       {/* Content */}
@@ -185,14 +189,14 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
           onKeyDown={e => { if (e.key === "Escape") { setEditing(false); setEditContent(mem.content); } if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveEdit(); }}
           style={{ background: C.bg0, border: `1px solid ${C.borderHi}`, borderRadius: 8, color: C.t0, fontSize: 12.5, padding: "9px 11px", resize: "vertical", fontFamily: MONO, outline: "none", lineHeight: 1.65, width: "100%", boxSizing: "border-box" }} />
       ) : (
-        <p style={{ margin: 0, fontSize: 12.5, color: isMilestone ? C.t0 : C.t1, lineHeight: 1.65, fontFamily: MONO, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: isLong && !expanded ? 80 : "none", overflow: "hidden" }}>
+        <p style={{ margin: 0, fontSize: 12.5, color: isMilestone ? C.t0 : isFailure ? "#f0d0d0" : "#d4d4d4", lineHeight: 1.65, fontFamily: MONO, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: isLong && !expanded ? 240 : "none", overflow: "hidden" }}>
           {mem.content}
         </p>
       )}
 
       {!editing && isLong && (
         <button onClick={() => setExpanded(v => !v)}
-          style={{ ...tbtn, padding: "0", fontSize: 10, color: C.t2, alignSelf: "flex-start" }}>
+          style={{ ...tbtn, padding: "0", fontSize: 10, color: "#6090d0", alignSelf: "flex-start" }}>
           {expanded ? "↑ less" : `↓ show more`}
         </button>
       )}
@@ -206,7 +210,10 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
           onBlur={e  => e.currentTarget.style.borderColor = C.border} />
       ) : tags.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {tags.map(t => <Tag key={t} label={t} onClick={() => onTagClick(t)} />)}
+          {tags.map(t => {
+            const tagColor = t === "failure" ? "#cc5555" : t === "decision" ? "#6090d0" : t === "preference" ? "#8060c0" : undefined;
+            return <Tag key={t} label={t} onClick={() => onTagClick(t)} style={tagColor ? { color: tagColor, borderColor: tagColor + "44", background: tagColor + "15" } : undefined} />;
+          })}
         </div>
       )}
 
@@ -422,6 +429,74 @@ export default function MemoryPanel({ runboxId, runboxName, runboxes, onClose }:
   const [search,       setSearch]       = useState("");
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState<string | null>(null);
+  const [dbReady,      setDbReady]      = useState(false);
+  const [retryKey,     setRetryKey]     = useState(0);
+  const [globalSearch, setGlobalSearch] = useState(false);
+  const [globalResults,setGlobalResults]= useState<Memory[]>([]);
+  const [globalLoading,setGlobalLoading]= useState(false);
+  const [failureToast, setFailureToast] = useState<string | null>(null);
+  const [memTab,       setMemTab]       = useState<"all"|"failures"|"decisions"|"git"|"manual">("all");
+
+  // ── Wait for backend memory DB to finish initialising ─────────────────────
+  useEffect(() => {
+    let cancelled = false;
+
+    // 1. Listen for the definitive backend event (emitted from lib.rs)
+    const readyUnsub = listen<void>("memory-ready", () => {
+      if (!cancelled) setDbReady(true);
+    });
+    const errorUnsub = listen<string>("memory-error", ({ payload }) => {
+      if (!cancelled) {
+        setError(`Memory backend error: ${payload}`);
+        setLoading(false);
+      }
+    });
+
+    // 2. Poll as a fallback — now safe because ensure_init() returns
+    //    immediately (no blocking), so invokes won't hang forever.
+    let attempt = 0;
+    const DELAYS = [300, 600, 1000, 1500, 2000, 2500, 3000, 3000, 3000, 3000];
+    const MAX_RETRIES = DELAYS.length;
+
+    const poll = async () => {
+      while (!cancelled) {
+        try {
+          await invoke("memory_list", { runboxId });
+          if (!cancelled) setDbReady(true);
+          return;
+        } catch (e) {
+          const msg = String(e).toLowerCase();
+          const isNotReady = msg.includes("not initialised") || msg.includes("not initialized");
+
+          if (isNotReady && attempt < MAX_RETRIES) {
+            const delay = DELAYS[attempt++];
+            await new Promise(r => setTimeout(r, delay));
+          } else if (!isNotReady) {
+            // Real error (not just "not ready yet")
+            if (!cancelled) {
+              setError(`Memory backend error: ${String(e)}`);
+              setLoading(false);
+            }
+            return;
+          } else {
+            // Exhausted retries
+            if (!cancelled) {
+              setError("Memory took too long to initialise. Click Retry.");
+              setLoading(false);
+            }
+            return;
+          }
+        }
+      }
+    };
+    poll();
+
+    return () => {
+      cancelled = true;
+      readyUnsub.then(f => f());
+      errorUnsub.then(f => f());
+    };
+  }, [runboxId, retryKey]);
 
   const loadAll = useCallback(async () => {
     setLoading(true); setError(null);
@@ -440,13 +515,42 @@ export default function MemoryPanel({ runboxId, runboxName, runboxes, onClose }:
     finally { setLoading(false); }
   }, [runboxId]);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { if (dbReady) loadAll(); }, [dbReady, loadAll]);
+
+  // ── Cross-pane failure broadcast ──────────────────────────────────────────
   useEffect(() => {
+    const u = listen<{ runbox_id: string; content: string }>("supercontext:failure", ({ payload }) => {
+      if (payload.runbox_id !== runboxId) {
+        setFailureToast(`⚡ Failure in another pane: ${payload.content.slice(0, 80)}`);
+        setTimeout(() => setFailureToast(null), 6000);
+      }
+    });
+    return () => { u.then(f => f()); };
+  }, [runboxId]);
+
+  // ── Global search ─────────────────────────────────────────────────────────
+  const runGlobalSearch = useCallback(async (q: string) => {
+    if (!q.trim()) { setGlobalResults([]); return; }
+    setGlobalLoading(true);
+    try {
+      const r = await invoke<Memory[]>("memory_search_global", { query: q, limit: 40 });
+      setGlobalResults(r);
+    } catch { setGlobalResults([]); }
+    finally { setGlobalLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (!globalSearch) { setGlobalResults([]); return; }
+    const t = setTimeout(() => runGlobalSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search, globalSearch, runGlobalSearch]);
+  useEffect(() => {
+    if (!dbReady) return;
     const u = listen<{ runbox_id: string }>("memory-added", ({ payload }) => {
       if (payload.runbox_id === runboxId || payload.runbox_id === "__global__") loadAll();
     });
     return () => { u.then(f => f()); };
-  }, [runboxId, loadAll]);
+  }, [dbReady, runboxId, loadAll]);
 
   const handleDelete = useCallback(async (id: string) => {
     await invoke("memory_delete", { id });
@@ -484,116 +588,234 @@ export default function MemoryPanel({ runboxId, runboxName, runboxes, onClose }:
     return b.timestamp - a.timestamp;
   });
 
-  const filtered = all.filter(m => {
+  // ── Tab bucketing ──────────────────────────────────────────────────────────
+  const buckets = {
+    failures:  all.filter(m => m.tags.includes("failure")),
+    decisions: all.filter(m => m.tags.includes("decision") || m.tags.includes("preference")),
+    git:       all.filter(m => m.agent_name === "git"),
+    manual:    all.filter(m => m.agent_name === "human" || m.agent_name === ""),
+  };
+
+  const tabList = all.filter(m => {
+    if (memTab === "failures")  return m.tags.includes("failure");
+    if (memTab === "decisions") return m.tags.includes("decision") || m.tags.includes("preference");
+    if (memTab === "git")       return m.agent_name === "git";
+    if (memTab === "manual")    return m.agent_name === "human" || m.agent_name === "";
+    return true; // "all"
+  });
+
+  const filtered = tabList.filter(m => {
     if (activeBranch !== "all" && m.branch !== activeBranch) return false;
-    if (activeTag && !m.tags.split(",").map(t => t.trim()).includes(activeTag)) return false;
-    if (search.trim() && !m.content.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search.trim() && !m.content.toLowerCase().includes(search.toLowerCase()) &&
+        !m.tags.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
+
+  const TAB_META: { id: "all"|"failures"|"decisions"|"git"|"manual"; label: string; count: number; accent?: string }[] = [
+    { id: "all",       label: "All",       count: all.length },
+    { id: "failures",  label: "⚠ Failures",  count: buckets.failures.length,  accent: "#cc5555" },
+    { id: "decisions", label: "◈ Decisions", count: buckets.decisions.length, accent: "#6090d0" },
+    { id: "git",       label: "⎇ Git",       count: buckets.git.length,       accent: "#888888" },
+    { id: "manual",    label: "✎ Manual",    count: buckets.manual.length },
+  ];
+
+  if (!dbReady) return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg1, alignItems: "center", justifyContent: "center", gap: 12, padding: "0 24px" }}>
+      {!error ? (
+        <>
+          <div style={{ width: 18, height: 18, borderRadius: "50%", border: `2px solid ${C.border}`, borderTopColor: C.t1, animation: "spin .7s linear infinite" }} />
+          <span style={{ fontSize: 12, color: C.t2, fontFamily: SANS }}>Initialising memory…</span>
+        </>
+      ) : (
+        <>
+          <span style={{ fontSize: 11, color: C.t2, fontFamily: SANS, textAlign: "center", lineHeight: 1.6 }}>{error}</span>
+          <button onClick={() => { setError(null); setDbReady(false); setLoading(true); setRetryKey(k => k + 1); }}
+            style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg2, color: C.t1, fontSize: 11, fontFamily: SANS, cursor: "pointer" }}>
+            Retry
+          </button>
+        </>
+      )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg1 }}>
 
       {/* Header */}
-      <div style={{ padding: "14px 16px 13px", flexShrink: 0, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: C.t0, flex: 1, fontFamily: SANS, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div style={{ padding: "12px 14px 11px", flexShrink: 0, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: C.t0, flex: 1, fontFamily: SANS, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {runboxName}
         </span>
+        {loading && <div style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${C.border}`, borderTopColor: C.t1, animation: "spin .7s linear infinite", flexShrink: 0 }} />}
         <button onClick={onClose}
-          style={{ ...{ background: "none", border: "none", color: C.t2, cursor: "pointer", padding: "4px 6px", borderRadius: 8, fontSize: 14, display: "flex", alignItems: "center", transition: "all .1s" } }}
+          style={{ background: "none", border: "none", color: C.t2, cursor: "pointer", padding: "4px 6px", borderRadius: 8, fontSize: 14, display: "flex", alignItems: "center", transition: "all .1s" }}
           onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.bg3; el.style.color = C.t0; }}
           onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = C.t2; }}>✕</button>
       </div>
 
-      {/* Stats */}
-      <Stats memories={all} />
+      {/* Cross-pane failure toast */}
+      {failureToast && (
+        <div style={{ margin: "6px 10px 0", padding: "8px 11px", background: "rgba(200,60,60,.12)", border: `1px solid rgba(200,60,60,.28)`, borderRadius: 8, fontSize: 11, color: "#e07070", fontFamily: SANS, display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span style={{ flex: 1, lineHeight: 1.4 }}>{failureToast}</span>
+          <button onClick={() => setFailureToast(null)} style={{ background: "none", border: "none", color: "#e07070", cursor: "pointer", fontSize: 14, padding: 0, flexShrink: 0 }}>×</button>
+        </div>
+      )}
 
-      {/* Branch selector */}
-      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-        <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
-          {["all", ...branches].map(b => {
-            const on = activeBranch === b;
+      {/* ── Memory type tabs ── */}
+      <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+        <div style={{ display: "flex", background: C.bg0, borderRadius: 8, padding: 3, gap: 2 }}>
+          {TAB_META.map(({ id, label, count, accent }) => {
+            const on = memTab === id;
             return (
-              <button key={b} onClick={() => { setActiveBranch(b); setActiveTag(null); }}
+              <button key={id} onClick={() => setMemTab(id)}
                 style={{
-                  flexShrink: 0, padding: "5px 11px", borderRadius: 8, border: `1px solid ${on ? C.borderMd : C.border}`,
-                  background: on ? C.bg3 : "transparent", color: on ? C.t0 : C.t2,
-                  fontSize: 11, fontFamily: MONO, cursor: "pointer", transition: "all .1s",
+                  flex: 1, padding: "5px 2px", borderRadius: 6, border: "none",
+                  background: on ? C.bg4 : "transparent",
+                  color: on ? (accent ?? C.t0) : C.t2,
+                  fontSize: 10, fontFamily: MONO, fontWeight: on ? 700 : 400,
+                  cursor: "pointer", transition: "all .1s",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: 1,
                 }}>
-                {b === "all" ? "all" : `⎇ ${b}`}
+                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%", padding: "0 2px" }}>{label}</span>
+                {count > 0 && (
+                  <span style={{ fontSize: 9, fontFamily: MONO, color: on ? (accent ?? C.t1) : C.t3, fontWeight: 400 }}>{count}</span>
+                )}
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Tag filter */}
-      {allTags.length > 0 && (
-        <div style={{ padding: "8px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {activeTag && <Tag label={`✕ ${activeTag}`} active onClick={() => setActiveTag(null)} />}
-          {allTags.filter(t => t !== activeTag).map(t => <Tag key={t} label={t} onClick={() => setActiveTag(t)} />)}
+      {/* Branch filter — shown for all tabs */}
+      {branches.length > 1 && (
+        <div style={{ padding: "6px 10px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
+            {["all", ...branches].map(b => {
+              const on = activeBranch === b;
+              return (
+                <button key={b} onClick={() => setActiveBranch(b)}
+                  style={{ flexShrink: 0, padding: "4px 10px", borderRadius: 7, border: `1px solid ${on ? C.borderMd : C.border}`, background: on ? C.bg3 : "transparent", color: on ? C.t0 : C.t2, fontSize: 10, fontFamily: MONO, cursor: "pointer", transition: "all .1s" }}>
+                  {b === "all" ? "all branches" : `⎇ ${b}`}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Search */}
-      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-        <div style={{ position: "relative" }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.t2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-            style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+      {/* Search + global toggle */}
+      <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.border}`, flexShrink: 0, display: "flex", gap: 6, alignItems: "center" }}>
+        <div style={{ flex: 1, position: "relative" }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={C.t2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter memories…"
-            style={{ width: "100%", boxSizing: "border-box", background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, color: C.t0, fontSize: 12, padding: "8px 10px 8px 32px", outline: "none", fontFamily: MONO, transition: "border-color .15s" }}
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder={globalSearch ? "Search all runboxes…" : "Search memories…"}
+            style={{ width: "100%", boxSizing: "border-box", background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.t0, fontSize: 11, padding: "7px 28px 7px 28px", outline: "none", fontFamily: MONO, transition: "border-color .15s" }}
             onFocus={e => e.currentTarget.style.borderColor = C.borderHi}
             onBlur={e  => e.currentTarget.style.borderColor = C.border} />
           {search && (
-            <button onClick={() => setSearch("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: C.t2, fontSize: 14 }}>×</button>
+            <button onClick={() => setSearch("")} style={{ position: "absolute", right: 7, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: C.t2, fontSize: 13, padding: 0 }}>×</button>
           )}
         </div>
+        <button onClick={() => setGlobalSearch(v => !v)}
+          title={globalSearch ? "Global search ON — searching all runboxes" : "Click to search across all runboxes"}
+          style={{ padding: "7px 9px", borderRadius: 8, border: `1px solid ${globalSearch ? C.borderMd : C.border}`, background: globalSearch ? C.bg3 : "transparent", color: globalSearch ? C.t0 : C.t2, fontSize: 10, fontFamily: MONO, cursor: "pointer", transition: "all .1s", flexShrink: 0, fontWeight: globalSearch ? 700 : 400 }}>
+          {globalSearch ? "◉ ALL" : "○ ALL"}
+        </button>
+        {globalLoading && <div style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${C.border}`, borderTopColor: C.t1, animation: "spin .7s linear infinite", flexShrink: 0 }} />}
       </div>
 
-      {/* List */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-        <AddForm runboxId={runboxId} sessionId={`manual-${runboxId}`} branches={branches} onAdded={loadAll} />
+      {/* Global search results panel */}
+      {globalSearch && search.trim() && (
+        <div style={{ borderBottom: `1px solid ${C.border}`, padding: "8px 10px", flexShrink: 0, maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 9, fontFamily: MONO, letterSpacing: ".10em", color: C.t3, marginBottom: 2 }}>ALL RUNBOXES</div>
+          {globalResults.length === 0 && !globalLoading && (
+            <div style={{ fontSize: 11, color: C.t2, fontFamily: SANS }}>No results found.</div>
+          )}
+          {globalResults.map(mem => {
+            const isFailure  = mem.tags.includes("failure");
+            const isDecision = mem.tags.includes("decision");
+            const isGit      = mem.agent_name === "git";
+            return (
+              <div key={mem.id} style={{ padding: "7px 10px", background: C.bg2, border: `1px solid ${isFailure ? "rgba(200,60,60,.25)" : C.border}`, borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontFamily: MONO, color: isFailure ? "#dda0a0" : C.t1, lineHeight: 1.5, wordBreak: "break-word" }}>
+                  {mem.content.slice(0, 140)}{mem.content.length > 140 ? "…" : ""}
+                </div>
+                <div style={{ display: "flex", gap: 5, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
+                  {isGit      && <span style={{ fontSize: 9, fontFamily: MONO, color: "#888", background: C.bg4, borderRadius: 3, padding: "1px 5px" }}>⎇ git</span>}
+                  {isFailure  && <span style={{ fontSize: 9, fontFamily: MONO, color: "#cc5555", background: "rgba(200,60,60,.1)", borderRadius: 3, padding: "1px 5px" }}>failure</span>}
+                  {isDecision && <span style={{ fontSize: 9, fontFamily: MONO, color: "#6090d0", background: "rgba(60,90,200,.1)", borderRadius: 3, padding: "1px 5px" }}>decision</span>}
+                  {mem.runbox_id !== runboxId && <span style={{ fontSize: 9, fontFamily: MONO, color: C.t3, background: C.bg4, borderRadius: 3, padding: "1px 5px" }}>other pane</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
+      {/* ── Tab content ── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "10px 10px 16px", display: "flex", flexDirection: "column", gap: 7 }}>
+
+        {/* Add form — only on All and Manual tabs */}
+        {(memTab === "all" || memTab === "manual") && (
+          <AddForm runboxId={runboxId} sessionId={`manual-${runboxId}`} branches={branches} onAdded={loadAll} />
+        )}
+
+        {/* Tab description pills */}
+        {memTab === "failures" && (
+          <div style={{ padding: "8px 12px", background: "rgba(200,60,60,.07)", border: `1px solid rgba(200,60,60,.18)`, borderRadius: 8, fontSize: 11, color: "#cc8888", fontFamily: SANS, lineHeight: 1.5 }}>
+            Auto-captured when agents hit errors. Shared across panes.
+          </div>
+        )}
+        {memTab === "decisions" && (
+          <div style={{ padding: "8px 12px", background: "rgba(60,90,200,.07)", border: `1px solid rgba(60,90,200,.18)`, borderRadius: 8, fontSize: 11, color: "#8090c0", fontFamily: SANS, lineHeight: 1.5 }}>
+            Decisions &amp; preferences auto-captured from agent output.
+          </div>
+        )}
+        {memTab === "git" && (
+          <div style={{ padding: "8px 12px", background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 11, color: C.t2, fontFamily: SANS, lineHeight: 1.5 }}>
+            Ingested from git log on first agent spawn. Read-only history.
+          </div>
+        )}
+
+        {/* Loading */}
         {loading && (
           <div style={{ padding: "32px 0", display: "flex", justifyContent: "center" }}>
             <div style={{ width: 18, height: 18, borderRadius: "50%", border: `2px solid ${C.border}`, borderTopColor: C.t1, animation: "spin .7s linear infinite" }} />
           </div>
         )}
 
+        {/* Error */}
         {!loading && error && (
-          <div style={{ padding: "12px 14px", background: "rgba(200,80,80,.08)", border: `1px solid rgba(200,80,80,.18)`, borderRadius: 10, fontSize: 12, color: C.red, fontFamily: SANS }}>
-            {error}
-          </div>
+          <div style={{ padding: "12px 14px", background: "rgba(200,80,80,.08)", border: `1px solid rgba(200,80,80,.18)`, borderRadius: 10, fontSize: 12, color: C.red, fontFamily: SANS }}>{error}</div>
         )}
 
+        {/* Empty state */}
         {!loading && !error && filtered.length === 0 && (
-          <div style={{ padding: "32px 0", textAlign: "center", fontSize: 12, color: C.t2, fontFamily: SANS }}>
-            {search || activeTag ? "No memories match." : "No memories yet. Add one above."}
+          <div style={{ padding: "40px 0", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 22, opacity: .3 }}>
+              {memTab === "failures" ? "✓" : memTab === "git" ? "⎇" : memTab === "decisions" ? "◈" : "○"}
+            </span>
+            <span style={{ fontSize: 12, color: C.t2, fontFamily: SANS }}>
+              {search ? "No memories match." :
+               memTab === "failures"  ? "No failures captured yet." :
+               memTab === "decisions" ? "No decisions captured yet." :
+               memTab === "git"       ? "No git history ingested yet." :
+               memTab === "manual"    ? "No manual memories added yet." :
+               "No memories yet. Add one above."}
+            </span>
           </div>
         )}
 
-        {!loading && !error && filtered.map((mem, idx) => {
-          const prev = filtered[idx - 1];
-          const showDivider = mem.commit_type !== "memory" && (!prev || prev.commit_type !== mem.commit_type || prev.branch !== mem.branch);
-          return (
-            <div key={mem.id}>
-              {showDivider && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "4px 0" }}>
-                  <div style={{ flex: 1, height: 1, background: C.border }} />
-                  <span style={{ fontSize: 9, fontFamily: MONO, color: C.t3, textTransform: "uppercase", letterSpacing: ".10em" }}>
-                    {mem.commit_type === "milestone" ? "◆ milestone" : "● checkpoint"}
-                  </span>
-                  <div style={{ flex: 1, height: 1, background: C.border }} />
-                </div>
-              )}
-              <MemCard mem={mem} allBranches={branches}
-                onDelete={handleDelete} onPin={handlePin} onEdit={handleEdit}
-                onTagClick={t => setActiveTag(t)} onMoveBranch={handleMoveBranch} onUpdateTags={handleUpdateTags} />
-            </div>
-          );
-        })}
+        {/* Memory cards */}
+        {!loading && !error && filtered.map(mem => (
+          <MemCard key={mem.id} mem={mem} allBranches={branches}
+            onDelete={handleDelete} onPin={handlePin} onEdit={handleEdit}
+            onTagClick={() => {}} onMoveBranch={handleMoveBranch} onUpdateTags={handleUpdateTags} />
+        ))}
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

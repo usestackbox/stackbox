@@ -23,44 +23,116 @@ fn db_dir() -> String {
 }
 
 pub async fn init() -> Result<(), String> {
-    let dir = db_dir();
-    std::fs::create_dir_all(&dir).ok();
-    let conn = connect(&dir).execute().await.map_err(|e| e.to_string())?;
-    let tables = conn.table_names().execute().await.map_err(|e| e.to_string())?;
+    DB.get_or_try_init(|| async {
+        let dir = db_dir();
+        std::fs::create_dir_all(&dir).ok();
+        let conn = connect(&dir).execute().await.map_err(|e| e.to_string())?;
+        let tables = conn.table_names().execute().await.map_err(|e| e.to_string())?;
 
-    if tables.contains(&"memories".to_string()) {
-        let t = conn.open_table("memories").execute().await.map_err(|e| e.to_string())?;
-        let schema = t.schema().await.map_err(|e| e.to_string())?;
-        let has_branch     = schema.fields().iter().any(|f| f.name() == "branch");
-        let has_agent_name = schema.fields().iter().any(|f| f.name() == "agent_name");
+        if tables.contains(&"memories".to_string()) {
+            let t = conn.open_table("memories").execute().await.map_err(|e| e.to_string())?;
+            let schema = t.schema().await.map_err(|e| e.to_string())?;
+            let has_branch     = schema.fields().iter().any(|f| f.name() == "branch");
+            let has_agent_name = schema.fields().iter().any(|f| f.name() == "agent_name");
 
-        if !has_branch || !has_agent_name {
-            // Schema changed — back up and recreate
-            let backup = if !has_branch { "memories_v1" } else { "memories_v2" };
-            eprintln!("[memory] migrating schema — old data backed up as {backup}");
-            conn.rename_table("memories", backup).await.ok();
+            if !has_branch || !has_agent_name {
+                let backup = if !has_branch { "memories_v1" } else { "memories_v2" };
+                eprintln!("[memory] migrating schema — old data backed up as {backup}");
+                conn.rename_table("memories", backup).await.ok();
+                create_empty_table(&conn).await?;
+                if let Err(e) = migrate_old_to_new(&conn, backup).await {
+                    eprintln!("[memory] migration failed (old data preserved in {backup}): {e}");
+                }
+            }
+        } else {
             create_empty_table(&conn).await?;
-            migrate_old_to_new(&conn, backup).await.ok();
         }
-    } else {
-        create_empty_table(&conn).await?;
-    }
 
-    DB.set(conn).map_err(|_| "memory db already initialised".to_string())?;
-    Ok(())
+        Ok(conn)
+    }).await.map(|_| ())
 }
 
 async fn create_empty_table(conn: &Connection) -> Result<(), String> {
     let schema = memory_schema();
     let batch  = RecordBatch::new_empty(schema.clone());
     let reader = RecordBatchIterator::new(vec![Ok(batch)], schema);
-    conn.create_table("memories", reader).execute().await.map_err(|e| e.to_string())?;
-    Ok(())
+    match conn.create_table("memories", reader).execute().await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let msg = e.to_string().to_lowercase();
+            if msg.contains("already exists") || msg.contains("table exists") {
+                eprintln!("[memory] create_empty_table: table already exists, skipping");
+                Ok(())
+            } else {
+                Err(e.to_string())
+            }
+        }
+    }
 }
 
+// ── Safe column helpers ───────────────────────────────────────────────────────
+// LanceDB does NOT guarantee column order in query results.
+// Always look up columns by name, never by index.
+
+fn str_col<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a StringArray, String> {
+    let idx = batch.schema().index_of(name)
+        .map_err(|_| format!("[memory] column '{}' not found in batch", name))?;
+    batch.column(idx).as_any().downcast_ref::<StringArray>()
+        .ok_or_else(|| format!("[memory] column '{}' is not StringArray", name))
+}
+
+fn bool_col<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a BooleanArray, String> {
+    let idx = batch.schema().index_of(name)
+        .map_err(|_| format!("[memory] column '{}' not found in batch", name))?;
+    batch.column(idx).as_any().downcast_ref::<BooleanArray>()
+        .ok_or_else(|| format!("[memory] column '{}' is not BooleanArray", name))
+}
+
+fn i64_col<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a Int64Array, String> {
+    let idx = batch.schema().index_of(name)
+        .map_err(|_| format!("[memory] column '{}' not found in batch", name))?;
+    batch.column(idx).as_any().downcast_ref::<Int64Array>()
+        .ok_or_else(|| format!("[memory] column '{}' is not Int64Array", name))
+}
+
+fn batch_to_memory(batch: &RecordBatch, i: usize) -> Result<Memory, String> {
+    // Required columns — these must exist or we return an error.
+    let id      = str_col(batch, "id")?.value(i).to_string();
+    let content = str_col(batch, "content")?.value(i).to_string();
+
+    // Optional columns — present in current schema but may be absent in old data
+    // that was written before a migration or when the table was partially upgraded.
+    // Fall back to sensible defaults so reads never hard-fail on schema drift.
+    let str_or  = |name: &str, default: &str| -> String {
+        str_col(batch, name).map(|c| c.value(i).to_string()).unwrap_or_else(|_| default.to_string())
+    };
+    let bool_or = |name: &str, default: bool| -> bool {
+        bool_col(batch, name).map(|c| c.value(i)).unwrap_or(default)
+    };
+    let i64_or  = |name: &str, default: i64| -> i64 {
+        i64_col(batch, name).map(|c| c.value(i)).unwrap_or(default)
+    };
+
+    Ok(Memory {
+        id,
+        runbox_id:   str_or("runbox_id",   ""),
+        session_id:  str_or("session_id",  ""),
+        content,
+        pinned:      bool_or("pinned",     false),
+        timestamp:   i64_or("timestamp",   0),
+        branch:      str_or("branch",      "main"),
+        commit_type: str_or("commit_type", "memory"),
+        tags:        str_or("tags",        ""),
+        parent_id:   str_or("parent_id",   ""),
+        agent_name:  str_or("agent_name",  ""),
+    })
+}
+
+// ── Migration ─────────────────────────────────────────────────────────────────
+
 async fn migrate_old_to_new(conn: &Connection, backup_name: &str) -> Result<(), String> {
-    let old   = conn.open_table(backup_name).execute().await.map_err(|e| e.to_string())?;
-    let new   = conn.open_table("memories").execute().await.map_err(|e| e.to_string())?;
+    let old    = conn.open_table(backup_name).execute().await.map_err(|e| e.to_string())?;
+    let new    = conn.open_table("memories").execute().await.map_err(|e| e.to_string())?;
     let schema = memory_schema();
 
     let stream  = old.query().execute().await.map_err(|e: lancedb::Error| e.to_string())?;
@@ -68,36 +140,56 @@ async fn migrate_old_to_new(conn: &Connection, backup_name: &str) -> Result<(), 
 
     for batch in &batches {
         let n = batch.num_rows(); if n == 0 { continue; }
-        let col = |i: usize| batch.column(i);
-        let ids        = col(0).as_any().downcast_ref::<StringArray>().unwrap();
-        let runbox_ids = col(1).as_any().downcast_ref::<StringArray>().unwrap();
-        let sess_ids   = col(2).as_any().downcast_ref::<StringArray>().unwrap();
-        let contents   = col(3).as_any().downcast_ref::<StringArray>().unwrap();
-        let pinneds    = col(4).as_any().downcast_ref::<BooleanArray>().unwrap();
-        let timestamps = col(5).as_any().downcast_ref::<Int64Array>().unwrap();
-        // Columns 6-9 may not exist in v1 (no branch/commit_type/tags/parent_id)
-        let has_branch = batch.num_columns() > 6;
 
-        let branches     = if has_branch { Some(col(6).as_any().downcast_ref::<StringArray>()) } else { None };
-        let commit_types = if has_branch { Some(col(7).as_any().downcast_ref::<StringArray>()) } else { None };
-        let tags_col     = if has_branch { Some(col(8).as_any().downcast_ref::<StringArray>()) } else { None };
-        let parent_ids   = if has_branch { Some(col(9).as_any().downcast_ref::<StringArray>()) } else { None };
-        // agent_name may not exist (v2 didn't have it either)
-        let has_agent    = batch.num_columns() > 10 && batch.schema().field(10).name() == "agent_name";
-        let agent_names  = if has_agent { Some(col(10).as_any().downcast_ref::<StringArray>()) } else { None };
+        // Old schema may be missing columns — use by-name access with fallbacks.
+        // Bind schema to a named variable so field_names borrows live long enough.
+        let batch_schema = batch.schema();
+        let field_names: Vec<&str> = batch_schema.fields().iter()
+            .map(|f| f.name().as_str()).collect();
+
+        let get_str = |name: &str, fallback: &'static str| -> Vec<String> {
+            if field_names.contains(&name) {
+                if let Ok(col) = str_col(batch, name) {
+                    return (0..n).map(|i| col.value(i).to_string()).collect();
+                }
+            }
+            vec![fallback.to_string(); n]
+        };
+
+        let ids        = get_str("id", "");
+        let runbox_ids = get_str("runbox_id", "");
+        let sess_ids   = get_str("session_id", "");
+        let contents   = get_str("content", "");
+        let branches   = get_str("branch", "main");
+        let commit_types = get_str("commit_type", "memory");
+        let tags_vec   = get_str("tags", "");
+        let parent_ids = get_str("parent_id", "");
+        let agent_names = get_str("agent_name", "");
+
+        let pinneds: Vec<bool> = if field_names.contains(&"pinned") {
+            if let Ok(col) = bool_col(batch, "pinned") {
+                (0..n).map(|i| col.value(i)).collect()
+            } else { vec![false; n] }
+        } else { vec![false; n] };
+
+        let timestamps: Vec<i64> = if field_names.contains(&"timestamp") {
+            if let Ok(col) = i64_col(batch, "timestamp") {
+                (0..n).map(|i| col.value(i)).collect()
+            } else { vec![0i64; n] }
+        } else { vec![0i64; n] };
 
         let new_batch = RecordBatch::try_new(schema.clone(), vec![
-            Arc::new(StringArray::from((0..n).map(|i| ids.value(i)).collect::<Vec<_>>())),
-            Arc::new(StringArray::from((0..n).map(|i| runbox_ids.value(i)).collect::<Vec<_>>())),
-            Arc::new(StringArray::from((0..n).map(|i| sess_ids.value(i)).collect::<Vec<_>>())),
-            Arc::new(StringArray::from((0..n).map(|i| contents.value(i)).collect::<Vec<_>>())),
-            Arc::new(BooleanArray::from((0..n).map(|i| pinneds.value(i)).collect::<Vec<_>>())),
-            Arc::new(Int64Array::from((0..n).map(|i| timestamps.value(i)).collect::<Vec<_>>())),
-            Arc::new(StringArray::from((0..n).map(|i| branches.and_then(|c| c).map(|c| c.value(i)).unwrap_or("main")).collect::<Vec<_>>())),
-            Arc::new(StringArray::from((0..n).map(|i| commit_types.and_then(|c| c).map(|c| c.value(i)).unwrap_or("memory")).collect::<Vec<_>>())),
-            Arc::new(StringArray::from((0..n).map(|i| tags_col.and_then(|c| c).map(|c| c.value(i)).unwrap_or("")).collect::<Vec<_>>())),
-            Arc::new(StringArray::from((0..n).map(|i| parent_ids.and_then(|c| c).map(|c| c.value(i)).unwrap_or("")).collect::<Vec<_>>())),
-            Arc::new(StringArray::from((0..n).map(|i| agent_names.and_then(|c| c).map(|c| c.value(i)).unwrap_or("")).collect::<Vec<_>>())),
+            Arc::new(StringArray::from(ids.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+            Arc::new(StringArray::from(runbox_ids.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+            Arc::new(StringArray::from(sess_ids.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+            Arc::new(StringArray::from(contents.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+            Arc::new(BooleanArray::from(pinneds)),
+            Arc::new(Int64Array::from(timestamps)),
+            Arc::new(StringArray::from(branches.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+            Arc::new(StringArray::from(commit_types.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+            Arc::new(StringArray::from(tags_vec.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+            Arc::new(StringArray::from(parent_ids.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+            Arc::new(StringArray::from(agent_names.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
             null_vector()?,
         ]).map_err(|e| e.to_string())?;
 
@@ -106,6 +198,13 @@ async fn migrate_old_to_new(conn: &Connection, backup_name: &str) -> Result<(), 
     }
     eprintln!("[memory] migration complete");
     Ok(())
+}
+
+// ── Non-blocking readiness check ──────────────────────────────────────────────
+
+/// Returns true once init() has succeeded. Non-blocking.
+pub fn is_ready() -> bool {
+    DB.get().is_some()
 }
 
 fn get_conn() -> Result<&'static Connection, String> {
@@ -268,30 +367,11 @@ async fn memories_query(
 
     for batch in &batches {
         let n = batch.num_rows(); if n == 0 { continue; }
-        let col = |i: usize| batch.column(i);
-        let ids          = col(0).as_any().downcast_ref::<StringArray>().unwrap();
-        let runbox_ids   = col(1).as_any().downcast_ref::<StringArray>().unwrap();
-        let sess_ids     = col(2).as_any().downcast_ref::<StringArray>().unwrap();
-        let contents     = col(3).as_any().downcast_ref::<StringArray>().unwrap();
-        let pinneds      = col(4).as_any().downcast_ref::<BooleanArray>().unwrap();
-        let timestamps   = col(5).as_any().downcast_ref::<Int64Array>().unwrap();
-        let branches     = col(6).as_any().downcast_ref::<StringArray>().unwrap();
-        let commit_types = col(7).as_any().downcast_ref::<StringArray>().unwrap();
-        let tags_col     = col(8).as_any().downcast_ref::<StringArray>().unwrap();
-        let parent_ids   = col(9).as_any().downcast_ref::<StringArray>().unwrap();
-        let agent_names  = col(10).as_any().downcast_ref::<StringArray>().unwrap();
-
         for i in 0..n {
-            let id = ids.value(i).to_string();
-            let ts = timestamps.value(i);
-            let mem = Memory {
-                id: id.clone(), runbox_id: runbox_ids.value(i).into(),
-                session_id: sess_ids.value(i).into(), content: contents.value(i).into(),
-                pinned: pinneds.value(i), timestamp: ts,
-                branch: branches.value(i).into(), commit_type: commit_types.value(i).into(),
-                tags: tags_col.value(i).into(), parent_id: parent_ids.value(i).into(),
-                agent_name: agent_names.value(i).into(),
-            };
+            // batch_to_memory uses column-by-name — safe regardless of LanceDB column ordering.
+            let mem = batch_to_memory(batch, i)?;
+            let id  = mem.id.clone();
+            let ts  = mem.timestamp;
             seen.entry(id)
                 .and_modify(|e| { if ts >= e.timestamp { *e = mem.clone(); } })
                 .or_insert(mem);
@@ -370,20 +450,8 @@ async fn fetch_one(id: &str) -> Result<Option<Memory>, String> {
         Some(b) if b.num_rows() > 0 => b,
         _ => return Ok(None),
     };
-    let col = |i: usize| batch.column(i);
-    Ok(Some(Memory {
-        id:          col(0).as_any().downcast_ref::<StringArray>().unwrap().value(0).into(),
-        runbox_id:   col(1).as_any().downcast_ref::<StringArray>().unwrap().value(0).into(),
-        session_id:  col(2).as_any().downcast_ref::<StringArray>().unwrap().value(0).into(),
-        content:     col(3).as_any().downcast_ref::<StringArray>().unwrap().value(0).into(),
-        pinned:      col(4).as_any().downcast_ref::<BooleanArray>().unwrap().value(0),
-        timestamp:   col(5).as_any().downcast_ref::<Int64Array>().unwrap().value(0),
-        branch:      col(6).as_any().downcast_ref::<StringArray>().unwrap().value(0).into(),
-        commit_type: col(7).as_any().downcast_ref::<StringArray>().unwrap().value(0).into(),
-        tags:        col(8).as_any().downcast_ref::<StringArray>().unwrap().value(0).into(),
-        parent_id:   col(9).as_any().downcast_ref::<StringArray>().unwrap().value(0).into(),
-        agent_name:  col(10).as_any().downcast_ref::<StringArray>().unwrap().value(0).into(),
-    }))
+    // Use name-based access — same reason as memories_query.
+    Ok(Some(batch_to_memory(&batch, 0)?))
 }
 
 async fn insert_updated(
@@ -412,4 +480,35 @@ async fn insert_updated(
     let reader = RecordBatchIterator::new(vec![Ok(new_batch)], schema);
     get_table().await?.add(reader).execute().await.map_err(|e: lancedb::Error| e.to_string())?;
     Ok(())
+}
+
+// ── Global Search ──────────────────────────────────────────────────────────────
+
+pub async fn memories_search_global(query: &str, limit: usize) -> Result<Vec<Memory>, String> {
+    let query_lower = query.to_lowercase();
+    // Fetch a broad set and filter in-app for now (Phase 2 will use ANN vector search)
+    let stream = get_table().await?
+        .query()
+        .limit(500)
+        .execute().await.map_err(|e: lancedb::Error| e.to_string())?;
+
+    let batches: Vec<arrow_array::RecordBatch> = stream.try_collect().await.map_err(|e| e.to_string())?;
+    let mut results: Vec<Memory> = Vec::new();
+
+    for batch in &batches {
+        let n = batch.num_rows(); if n == 0 { continue; }
+        for i in 0..n {
+            let mem = batch_to_memory(batch, i)?;
+            // Skip git-ingested noise unless query is specific
+            if mem.agent_name == "git" && query.len() < 4 { continue; }
+            let haystack = format!("{} {} {}", mem.content, mem.tags, mem.agent_name).to_lowercase();
+            if haystack.contains(&query_lower) {
+                results.push(mem);
+            }
+        }
+    }
+
+    results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    results.truncate(limit);
+    Ok(results)
 }

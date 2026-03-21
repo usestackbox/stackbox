@@ -168,7 +168,7 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
             ["worktrees", `Trees (${worktrees.length})`],
           ] as [Tab, string][]).map(([t, label]) => (
             <button key={t} onClick={() => setTab(t)}
-              style={{ flex:1, padding:"5px 0", borderRadius:6, border:"none", background:tab===t?C.bg4:"transparent", color:tab===t?C.t0:C.t3, fontSize:11, fontFamily:SANS, fontWeight:tab===t?600:400, cursor:"pointer", transition:"all .1s" }}>
+              style={{ flex:1, padding:"5px 0", borderRadius:6, border:"none", background:tab===t?C.bg4:"transparent", color:tab===t?C.t0:C.t2, fontSize:11, fontFamily:SANS, fontWeight:tab===t?600:400, cursor:"pointer", transition:"all .1s" }}>
               {label}
             </button>
           ))}
@@ -192,8 +192,8 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
                 <div style={{ flex:1, padding:"6px 12px" }}>
                   <div style={{ fontSize:8, fontFamily:MONO, letterSpacing:".10em", color:C.t3, marginBottom:2 }}>LINES</div>
                   <div style={{ display:"flex", gap:4 }}>
-                    {totalIns > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"rgba(255,255,255,.4)" }}>+{totalIns}</span>}
-                    {totalDel > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"rgba(255,255,255,.25)" }}>-{totalDel}</span>}
+                    {totalIns > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"#4a9955" }}>+{totalIns}</span>}
+                    {totalDel > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"#cc5555" }}>-{totalDel}</span>}
                   </div>
                 </div>
               )}
@@ -231,20 +231,22 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
             {files.map(fc => {
               const fileName = fc.path.split(/[/\\]/).pop() ?? fc.path;
               const dirPart  = fc.path.slice(0, fc.path.length - fileName.length);
-              const letter   = { created:"A", modified:"M", deleted:"D" }[fc.change_type];
+              const letter      = { created:"A", modified:"M", deleted:"D" }[fc.change_type];
+              const letterColor = { created:"#4a9955", modified:"#888888", deleted:"#cc5555" }[fc.change_type];
               return (
                 <div key={fc.path} onClick={() => onFileClick?.(fc)}
                   style={{ background:C.bg2, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", cursor:"pointer", transition:"all .1s", display:"flex", alignItems:"center", gap:8 }}
                   onMouseEnter={e => { const el=e.currentTarget as HTMLElement; el.style.background=C.bg3; el.style.borderColor=C.borderMd; }}
                   onMouseLeave={e => { const el=e.currentTarget as HTMLElement; el.style.background=C.bg2; el.style.borderColor=C.border; }}>
-                  <span style={{ fontSize:10, fontFamily:MONO, color:C.t2, width:10, flexShrink:0, textAlign:"center" }}>{letter}</span>
+                  <span style={{ fontSize:10, fontFamily:MONO, fontWeight:700, color:letterColor, width:10, flexShrink:0, textAlign:"center" }}>{letter}</span>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:12, fontFamily:MONO, color:C.t0, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fileName}</div>
-                    {dirPart && <div style={{ fontSize:10, fontFamily:MONO, color:C.t3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{dirPart}</div>}
+                    {dirPart && <div style={{ fontSize:10, fontFamily:MONO, color:C.t2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginTop:1 }}>{dirPart}</div>}
                   </div>
-                  <span style={{ fontSize:10, fontFamily:MONO, color:C.t3, flexShrink:0 }}>
-                    {fc.insertions>0?`+${fc.insertions} `:""}{fc.deletions>0?`-${fc.deletions}`:""}
-                  </span>
+                  <div style={{ display:"flex", gap:5, flexShrink:0 }}>
+                    {fc.insertions > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"#4a9955", fontWeight:600 }}>+{fc.insertions}</span>}
+                    {fc.deletions  > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"#cc5555", fontWeight:600 }}>-{fc.deletions}</span>}
+                  </div>
                 </div>
               );
             })}

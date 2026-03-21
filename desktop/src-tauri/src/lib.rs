@@ -19,7 +19,7 @@ mod commands;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -40,12 +40,16 @@ pub fn run() {
             let sessions_handle = app.state::<state::AppState>().sessions.clone();
 
             // ── Init memory FIRST, then start server ──────────────────────────
-            // Previously memory::init() was spawned independently, so the server
-            // could receive memory calls before the LanceDB connection was ready,
-            // causing "memory db not initialised — call init() first".
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = memory::init().await {
-                    eprintln!("[memory] init failed: {e}");
+                match memory::init().await {
+                    Ok(_) => {
+                        eprintln!("[memory] init complete");
+                        app_handle.emit("memory-ready", ()).ok();
+                    }
+                    Err(e) => {
+                        eprintln!("[memory] init failed: {e}");
+                        app_handle.emit("memory-error", e).ok();
+                    }
                 }
                 server::start(app_handle, db_handle, sessions_handle).await;
             });
@@ -73,6 +77,7 @@ pub fn run() {
             commands::memory::memory_update_tags,
             commands::memory::memory_move_branch,
             commands::memory::memory_delete_for_runbox,
+            commands::memory::memory_search_global,
             commands::db::db_sessions_for_runbox,
             commands::db::db_events_for_runbox,
             git::commands::git_ensure,
