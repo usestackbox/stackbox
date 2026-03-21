@@ -12,14 +12,14 @@ export interface Memory {
 }
 
 const AGENT_COLOR: Record<string, { fg: string; bg: string }> = {
-  "claude code":      { fg: "#e8b84b", bg: "rgba(232,184,75,.16)"  },
-  "openai codex cli": { fg: "#5ecb6b", bg: "rgba(94,203,107,.14)"  },
-  "gemini cli":       { fg: "#6aaee8", bg: "rgba(106,174,232,.14)" },
-  "cursor agent":     { fg: "#c47ee8", bg: "rgba(196,126,232,.14)" },
-  "github copilot":   { fg: "#6a9ee8", bg: "rgba(106,158,232,.14)" },
-  "opencode":         { fg: "#a0a0a0", bg: "rgba(160,160,160,.12)" },
-  "human":            { fg: "#888888", bg: "rgba(136,136,136,.10)" },
-  "git":              { fg: "#888888", bg: "rgba(136,136,136,.10)" },
+  "claude code":      { fg: "#a88840", bg: "rgba(168,136,64,.10)"  },
+  "openai codex cli": { fg: "#4a8f55", bg: "rgba(74,143,85,.10)"   },
+  "gemini cli":       { fg: "#4a78a8", bg: "rgba(74,120,168,.10)"  },
+  "cursor agent":     { fg: "#8850a8", bg: "rgba(136,80,168,.10)"  },
+  "github copilot":   { fg: "#4a68a8", bg: "rgba(74,104,168,.10)"  },
+  "opencode":         { fg: "#686868", bg: "rgba(104,104,104,.10)" },
+  "human":            { fg: "#585858", bg: "rgba(88,88,88,.10)"    },
+  "git":              { fg: "#505050", bg: "rgba(80,80,80,.10)"     },
 };
 function agentStyle(name: string) {
   return AGENT_COLOR[name.toLowerCase()] ?? { fg: "#555", bg: "rgba(85,85,85,.10)" };
@@ -57,7 +57,7 @@ function Tag({ label, active, onClick, style: extraStyle }: { label: string; act
         cursor: onClick ? "pointer" : "default", userSelect: "none",
         background: active ? C.bg4 : hov ? C.bg3 : C.bg2,
         border: `1px solid ${active ? C.borderMd : C.border}`,
-        color: active ? C.t0 : C.t2, transition: "all .1s",
+        color: active ? C.t0 : C.t1, transition: "all .1s",
         ...extraStyle,
       }}>
       {label}
@@ -99,7 +99,6 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
   onEdit: (id: string, c: string) => void; onTagClick: (t: string) => void;
   onMoveBranch: (id: string, b: string) => void; onUpdateTags: (id: string, t: string) => void;
 }) {
-  const [hov,         setHov]         = useState(false);
   const [expanded,    setExpanded]    = useState(false);
   const [editing,     setEditing]     = useState(false);
   const [editContent, setEditContent] = useState(mem.content);
@@ -129,16 +128,15 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
 
   return (
     <div
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => { setHov(false); setShowMove(false); }}
+      onMouseLeave={() => { setShowMove(false); }}
       style={{
         background: isMilestone ? C.bg3 : isFailure ? "rgba(200,60,60,.06)" : C.bg2,
-        border: `1px solid ${isMilestone ? C.borderMd : isFailure ? "rgba(200,60,60,.35)" : isCheckpoint ? C.border : C.border}`,
+        border: "none",
         borderRadius: 12,
         padding: "12px 14px",
         display: "flex", flexDirection: "column", gap: 9,
         transition: "border-color .15s",
-        ...(hov ? { borderColor: isMilestone ? C.borderHi : isFailure ? "rgba(200,60,60,.6)" : C.borderMd } : {}),
+
         position: "relative", overflow: "visible",
         borderLeft: isFailure ? "3px solid rgba(200,60,60,.6)" : undefined,
       }}>
@@ -168,7 +166,7 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
           <span style={{
             fontSize: 10, fontFamily: MONO, fontWeight: 600,
             color: as.fg, background: as.bg,
-            border: `1px solid ${as.fg}99`,
+            border: `1px solid ${as.fg}55`,
             borderRadius: 6, padding: "1px 7px",
             letterSpacing: ".02em",
           }}>{mem.agent_name}</span>
@@ -211,14 +209,26 @@ function MemCard({ mem, allBranches, onDelete, onPin, onEdit, onTagClick, onMove
       ) : tags.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           {tags.map(t => {
-            const tagColor = t === "failure" ? "#cc5555" : t === "decision" ? "#6090d0" : t === "preference" ? "#8060c0" : undefined;
-            return <Tag key={t} label={t} onClick={() => onTagClick(t)} style={tagColor ? { color: tagColor, borderColor: tagColor + "44", background: tagColor + "15" } : undefined} />;
+            const tagStyle = (() => {
+              if (t === "failure" || t.startsWith("failure"))
+                return { color: "#e07070", borderColor: "rgba(200,60,60,.35)", background: "rgba(200,60,60,.10)" };
+              if (t === "decision")
+                return { color: "#7090d0", borderColor: "rgba(80,120,200,.35)", background: "rgba(80,120,200,.10)" };
+              if (t === "preference")
+                return { color: "#9070c0", borderColor: "rgba(130,80,180,.35)", background: "rgba(130,80,180,.10)" };
+              if (t === "git-history")
+                return { color: "#666666", borderColor: "rgba(100,100,100,.30)", background: "rgba(80,80,80,.10)" };
+              if (t.startsWith("conflict"))
+                return { color: "#d09050", borderColor: "rgba(180,120,40,.35)", background: "rgba(180,120,40,.10)" };
+              return undefined;
+            })();
+            return <Tag key={t} label={t} onClick={() => onTagClick(t)} style={tagStyle} />;
           })}
         </div>
       )}
 
       {/* Actions */}
-      <div style={{ display: "flex", gap: 3, alignItems: "center", opacity: hov || editing ? 1 : 0, transition: "opacity .15s", pointerEvents: hov || editing ? "auto" : "none" }}>
+      <div style={{ display: "flex", gap: 3, alignItems: "center", opacity: 1 }}>
         {editing ? (
           <>
             <button onClick={saveEdit} disabled={saving}

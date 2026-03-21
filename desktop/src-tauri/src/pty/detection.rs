@@ -235,15 +235,21 @@ impl OutputClassifier {
                 lower.contains("uncaught ") && lower.contains("error");
 
             // ── Decision patterns ─────────────────────────────────────────────
+            // Keep patterns specific — require subject + verb to avoid false positives.
+            // e.g. "instead of a gradient" (CSS description) must NOT match.
             let is_decision = lower.contains("i'll use") ||
                 lower.contains("i will use") ||
                 lower.contains("i've decided") ||
-                lower.contains("switching to") ||
-                lower.contains("instead of") ||
+                lower.contains("i'm switching to") ||
+                lower.contains("switching from") ||
+                (lower.contains("instead of") && (lower.contains("i'll") || lower.contains("we'll") || lower.contains("i've") || lower.contains("decided") || lower.contains("chose"))) ||
                 lower.contains("i chose") ||
-                lower.contains("going with") ||
-                lower.contains("the approach is") ||
-                lower.contains("using ") && (lower.contains(" because") || lower.contains(" since") || lower.contains(" as it"));
+                lower.contains("i'm going with") ||
+                lower.contains("the approach will be") ||
+                lower.contains("we're using") ||
+                (lower.contains("using ") && lower.contains(" because") && lower.contains("i")) ||
+                lower.contains("opted for") ||
+                lower.contains("decided to use");
 
             // ── Preference patterns ───────────────────────────────────────────
             let is_pref = lower.contains("i prefer") ||
@@ -273,7 +279,7 @@ impl OutputClassifier {
 
                     // For failures: grab context window (2 lines before + 4 lines after)
                     // so we capture the full error block, not just the matching line.
-                    let content = if k == MemoryKind::Failure {
+                    let content: String = if k == MemoryKind::Failure {
                         let start = idx.saturating_sub(2);
                         let end   = (idx + 5).min(all_lines.len());
                         let block: Vec<&str> = all_lines[start..end]
