@@ -8,10 +8,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 
-// ── Theme — monochrome ────────────────────────────────────────────────────────
 const THEME = {
   background:          "#0c0c0c",
-  foreground:          "#d8d8d8",
+  foreground:          "#e8e8e8",
   cursor:              "#c8c8c8",
   cursorAccent:        "#0c0c0c",
   selectionBackground: "rgba(255,255,255,.13)",
@@ -19,131 +18,136 @@ const THEME = {
   black:   "#181818", brightBlack:   "#484848",
   red:     "#c07070", brightRed:     "#d88888",
   green:   "#80a880", brightGreen:   "#98c098",
-  yellow:  "#a89060", brightYellow:  "#c0a870",
+  yellow: "#ffd700",  brightYellow: "#ffec3d",
   blue:    "#6888a8", brightBlue:    "#80a0c0",
   magenta: "#9870a0", brightMagenta: "#b088b8",
-  cyan:    "#489898", brightCyan:    "#60b0b0",
-  white:   "#c8c8c8", brightWhite:   "#e8e8e8",
+  cyan:    "#00e5ff", brightCyan:    "#18ffff",
+  white:      "#c8c8c8",  brightWhite: "#e8e8e8",
 };
 
-// ── CSS ───────────────────────────────────────────────────────────────────────
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap');
 
-/* ── Root ── */
-.sbx-wrap {
+.rp-win {
   width: 100%; height: 100%;
   background: #0c0c0c;
   display: flex; flex-direction: column;
   overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.06);
+  transition: border-color .15s, background .15s;
+  box-sizing: border-box;
+}
+.rp-win.rp-active {
+  border: 1.5px solid rgba(255,255,255,.32);
+  background: #0e0e0e;
 }
 
-/* ── Output area ── */
-.sbx-output {
-  flex: 1; min-height: 0; position: relative; overflow: hidden;
-  background: #0c0c0c;
-  display: flex; flex-direction: column;
-}
-
-/* Active top accent strip */
-.sbx-output-header {
-  height: 2px; flex-shrink: 0;
-  margin: 5px 9px 0;
-  border-radius: 1px 1px 0 0;
-  background: rgba(255,255,255,.06);
-  transition: background .2s;
-}
-.sbx-wrap.active .sbx-output-header {
-  background: rgba(255,255,255,.20);
-}
-
-/* Active left accent */
-.sbx-wrap.active .sbx-output::before {
-  content: '';
-  position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
-  background: linear-gradient(to bottom,
-    transparent 0%,
-    rgba(255,255,255,.09) 20%,
-    rgba(255,255,255,.09) 80%,
-    transparent 100%);
-  z-index: 6; pointer-events: none;
-}
-
-/* Output card */
-.sbx-output-card {
-  flex: 1; min-height: 0; position: relative;
-  margin: 0 7px 3px 9px;
-  border-radius: 0 0 9px 9px;
-  border: 1px solid rgba(255,255,255,.07);
-  border-top: none;
-  background: #0d0d0d;
-  overflow: hidden;
-  box-shadow: 0 4px 24px rgba(0,0,0,.7);
-}
-.sbx-wrap.active .sbx-output-card {
-  border-color: rgba(255,255,255,.11);
-  border-top: none;
-}
-
-/* Top/bottom fades */
-.sbx-fade-top {
-  position: absolute; top: 0; left: 0; right: 0; height: 20px;
-  background: linear-gradient(to bottom, #0d0d0d 0%, transparent 100%);
-  z-index: 4; pointer-events: none;
-}
-.sbx-fade-bottom {
-  position: absolute; bottom: 0; left: 0; right: 0; height: 28px;
-  background: linear-gradient(to top, #0c0c0c 0%, transparent 100%);
-  z-index: 4; pointer-events: none;
-}
-
-/* xterm canvas — this is where real input happens */
-.sbx-term-inner {
-  position: absolute; inset: 0;
-  padding: 12px 8px 12px 14px;
-  box-sizing: border-box; cursor: text;
-}
-.sbx-term-inner .xterm,
-.sbx-term-inner .xterm-viewport,
-.sbx-term-inner .xterm-screen { background: transparent !important; }
-.sbx-term-inner .xterm-viewport::-webkit-scrollbar { width: 3px; }
-.sbx-term-inner .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
-.sbx-term-inner .xterm-viewport::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,.08); border-radius: 3px;
-}
-.sbx-term-inner .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: rgba(255,255,255,.16);
-}
-
-/* Inactive dim */
-.sbx-inactive-overlay {
-  position: absolute; inset: 0;
-  background: rgba(0,0,0,.40);
-  pointer-events: none; z-index: 8;
-  border-radius: 0 0 9px 9px;
-}
-
-/* ── Status strip ── */
-.sbx-status {
+/* ── Title bar ── */
+.rp-titlebar {
+  height: 36px; flex-shrink: 0;
   display: flex; align-items: center;
-  height: 20px; flex-shrink: 0;
-  padding: 0 16px; gap: 8px;
-  user-select: none;
+  padding: 0 12px; gap: 10px;
+  background: rgba(255,255,255,.025);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  cursor: grab; user-select: none;
+  border-radius: 10px 10px 0 0;
+  transition: background .15s;
 }
-.sbx-st {
-  font-size: 9.5px; font-family: 'JetBrains Mono', monospace;
-  color: rgba(255,255,255,.14); white-space: nowrap;
-  display: flex; align-items: center; gap: 4px;
+.rp-win.rp-active .rp-titlebar {
+  background: rgba(255,255,255,.05);
+  border-bottom-color: rgba(255,255,255,.1);
 }
-.sbx-st-dot {
-  width: 4px; height: 4px; border-radius: 50%;
-  background: rgba(255,255,255,.15); flex-shrink: 0;
+.rp-titlebar:active { cursor: grabbing; }
+
+.rp-lights { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.rp-light {
+  width: 12px; height: 12px; border-radius: 50%;
+  cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: filter .12s;
 }
-.sbx-st-dot.on { background: rgba(255,255,255,.45); }
-.sbx-st-sep { width: 1px; height: 8px; background: rgba(255,255,255,.06); }
+.rp-win:not(.rp-active) .rp-light { filter: grayscale(1) brightness(.35); }
+.rp-win.rp-active .rp-light:hover { filter: brightness(1.25); }
+.rp-light::after { font-size: 8px; font-weight: 700; color: rgba(0,0,0,.55); opacity: 0; transition: opacity .12s; line-height: 1; }
+.rp-light-r::after { content: '×'; }
+.rp-light-y::after { content: '−'; font-size: 9px; }
+.rp-light-g::after { content: '+'; }
+.rp-win.rp-active .rp-lights:hover .rp-light::after { opacity: 1; }
+.rp-light-r { background: #ff5f57; }
+.rp-light-y { background: #febc2e; }
+.rp-light-g { background: #27c93f; }
+
+.rp-vsep { width: 1px; height: 12px; background: rgba(255,255,255,.08); flex-shrink: 0; }
+.rp-cwd {
+  flex: 1; min-width: 0;
+  font-size: 11px; font-family: 'JetBrains Mono', monospace;
+  color: rgba(255,255,255,.22); letter-spacing: .015em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color .15s;
+}
+.rp-win.rp-active .rp-cwd { color: rgba(255,255,255,.6); }
+.rp-chip {
+  font-size: 9px; font-family: 'JetBrains Mono', monospace;
+  letter-spacing: .05em; flex-shrink: 0;
+  color: rgba(255,255,255,.18);
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 4px; padding: 1px 7px;
+  transition: all .15s;
+}
+.rp-win.rp-active .rp-chip {
+  color: rgba(255,255,255,.45);
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.15);
+}
+
+/* ── Body ── */
+.rp-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  border-radius: 0 0 9px 9px;
+  background: #0c0c0c;
+}
+.rp-win.rp-active .rp-body { background: #0e0e0e; }
+.rp-win:not(.rp-active) .rp-body { opacity: 0.42; }
+
+/* xterm host — full fill, zero padding so row count is correct */
+.rp-xterm {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  overflow: hidden;
+}
+.rp-xterm .xterm,
+.rp-xterm .xterm-viewport,
+.rp-xterm .xterm-screen { background: transparent !important; }
+
+/* xterm v5 custom scrollbar */
+.xterm .scrollbar.vertical { width: 6px !important; }
+.xterm .scrollbar.vertical .slider { width: 6px !important; border-radius: 3px !important; background: rgba(255,255,255,.25) !important; }
+.xterm .scrollbar.horizontal { height: 0 !important; display: none !important; }
+
+/* Edge fades */
+.rp-fade-t { position: absolute; top: 0; left: 0; right: 0; height: 14px; background: linear-gradient(to bottom, #0c0c0c, transparent); pointer-events: none; z-index: 4; }
+.rp-fade-b { position: absolute; bottom: 0; left: 0; right: 0; height: 20px; background: linear-gradient(to top, #0c0c0c, transparent); pointer-events: none; z-index: 4; }
+.rp-win.rp-active .rp-fade-t { background: linear-gradient(to bottom, #0e0e0e, transparent); }
+.rp-win.rp-active .rp-fade-b { background: linear-gradient(to top, #0e0e0e, transparent); }
+
+/* ── Resize handles ── */
+.rp-resize { position: absolute; z-index: 100; }
+.rp-resize-r  { top: 8px; right: -3px;  width: 6px; height: calc(100% - 16px); cursor: ew-resize; }
+.rp-resize-l  { top: 8px; left: -3px;   width: 6px; height: calc(100% - 16px); cursor: ew-resize; }
+.rp-resize-b  { bottom: -3px; left: 8px; width: calc(100% - 16px); height: 6px; cursor: ns-resize; }
+.rp-resize-t  { top: -3px; left: 8px; width: calc(100% - 16px); height: 6px; cursor: ns-resize; }
+.rp-resize-br { bottom: -3px; right: -3px; width: 14px; height: 14px; cursor: nwse-resize; }
+.rp-resize-bl { bottom: -3px; left: -3px;  width: 14px; height: 14px; cursor: nesw-resize; }
+.rp-resize-tr { top: -3px; right: -3px;    width: 14px; height: 14px; cursor: nesw-resize; }
+.rp-resize-tl { top: -3px; left: -3px;     width: 14px; height: 14px; cursor: nwse-resize; }
 `;
 
-// ── OSC 7 ─────────────────────────────────────────────────────────────────────
 function parseOsc7(data: string): string | null {
   const m = data.match(/\x1b]7;file:\/\/[^/]*([^\x07\x1b]+)[\x07\x1b]/);
   if (!m) return null;
@@ -158,41 +162,52 @@ function parseOsc7(data: string): string | null {
   } catch { return null; }
 }
 
-// ── RunPane ───────────────────────────────────────────────────────────────────
 export default function RunPane({
   runboxCwd    = "~/",
   runboxId     = "default",
   sessionId,
+  label        = "",
   onCwdChange,
   onSessionChange,
   isActive,
   onActivate,
+  onClose,
+  onMinimize,
+  onMaximize,
+  onDragStart,
+  onResizeStart,
 }: {
   runboxCwd?:       string;
   runboxId?:        string;
   sessionId?:       string;
+  label?:           string;
   onCwdChange?:     (cwd: string) => void;
   onSessionChange?: (sid: string) => void;
   isActive?:        boolean;
   onActivate?:      () => void;
+  onClose?:         () => void;
+  onMinimize?:      () => void;
+  onMaximize?:      () => void;
+  onDragStart?:     (e: React.MouseEvent) => void;
+  onResizeStart?:   (e: React.MouseEvent, dir: string) => void;
 }) {
-  const termElRef  = useRef<HTMLDivElement>(null);
-  const termRef    = useRef<Terminal | null>(null);
-  const fitRef     = useRef<FitAddon | null>(null);
-  const sidRef     = useRef<string>(sessionId ?? `${runboxId}-${crypto.randomUUID()}`);
-  const gone       = useRef(false);
-
-  const [liveCwd,   setLiveCwd]   = useState(runboxCwd);
-  const [exitCode,  setExitCode]  = useState<number | null>(null);
+  const termElRef = useRef<HTMLDivElement>(null);
+  const termRef   = useRef<Terminal | null>(null);
+  const fitRef    = useRef<FitAddon | null>(null);
+  const sidRef    = useRef<string>(sessionId ?? `${runboxId}-${crypto.randomUUID()}`);
+  const gone      = useRef(false);
+  const spawned   = useRef(false);
+  const [liveCwd, setLiveCwd] = useState(runboxCwd);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { onSessionChange?.(sidRef.current); }, []);
 
   useEffect(() => {
-    ["sbx-css","sbx-css-v2","sbx-css-v3","sbx-css-v4","sbx-css-v5"]
+    ["sbx-css","sbx-css-v2","sbx-css-v3","sbx-css-v4","sbx-css-v5",
+     "rp-css-v1","rp-css-v2","rp-css-v3","rp-css-v4","rp-css-v5","rp-css-v6","rp-css-v7"]
       .forEach(id => document.getElementById(id)?.remove());
     const s = document.createElement("style");
-    s.id = "sbx-css-v5"; s.textContent = CSS;
+    s.id = "rp-css-v7"; s.textContent = CSS;
     document.head.appendChild(s);
   }, []);
 
@@ -204,65 +219,60 @@ export default function RunPane({
     invoke("pty_write", { sessionId: sidRef.current, data: text }).catch(() => {});
   }, []);
 
-  // ── Terminal init ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!termElRef.current) return;
-    gone.current = false;
+    gone.current    = false;
+    spawned.current = false;
 
     const term = new Terminal({
-      cursorBlink:           true,
-      cursorStyle:           "bar",
-      cursorWidth:           2,
-      fontSize:              13.5,
-      fontFamily:            "'JetBrains Mono','Cascadia Code','Fira Code','Consolas',monospace",
-      lineHeight:            1.65,
-      letterSpacing:         0.2,
-      theme:                 THEME,
-      convertEol:            true,
-      scrollback:            12000,
-      allowTransparency:     true,
-      macOptionIsMeta:       true,
-      rightClickSelectsWord: true,
-      disableStdin:          false,   // ← xterm handles ALL raw input: TUI, tab, arrows
+      cursorBlink: true, cursorStyle: "bar", cursorWidth: 1.3,
+      fontSize: 13, lineHeight: 1.5, letterSpacing: 0.2,
+      fontWeight: "normal",
+      fontWeightBold: "800",
+      fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+      theme: THEME,
+      convertEol: true, scrollback: 12000, allowTransparency: true,
+      macOptionIsMeta: true, rightClickSelectsWord: true, disableStdin: false,
     });
 
-    const fit   = new FitAddon();
-    const links = new WebLinksAddon();
+    const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(links);
+    term.loadAddon(new WebLinksAddon());
     term.open(termElRef.current);
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch { /**/ }
+    try { const w = new WebglAddon(); w.onContextLoss(() => w.dispose()); term.loadAddon(w); } catch { /**/ }
 
     termRef.current = term;
     fitRef.current  = fit;
-
-    // ALL keystrokes → PTY (tab completion, TUI arrows, everything works)
     term.onData(data => sendRaw(data));
 
-    requestAnimationFrame(() => {
-      try { fit.fit(); } catch { /**/ }
-      term.focus();
-    });
+    const container = termElRef.current;
 
-    const ro = new ResizeObserver(() => {
-      try {
-        fit.fit();
-        invoke("pty_resize", {
-          sessionId: sidRef.current, cols: term.cols, rows: term.rows,
-        }).catch(() => {});
-      } catch { /**/ }
-    });
-    ro.observe(termElRef.current!);
+    // Scrollbar styling
+    const styleScrollbar = () => {
+      const vS  = container?.querySelector('.scrollbar.vertical') as HTMLElement;
+      const vSl = container?.querySelector('.scrollbar.vertical .slider') as HTMLElement;
+      const hS  = container?.querySelector('.scrollbar.horizontal') as HTMLElement;
+     if (vS)  vS.style.width = '6px';
+if (vSl) { vSl.style.width = '6px'; vSl.style.borderRadius = '3px'; vSl.style.background = 'rgba(255,255,255,.25)'; }
+      if (hS)  hS.style.display = 'none';
+    };
+    const sbObs = new MutationObserver(styleScrollbar);
+    sbObs.observe(container!, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
 
-    let unlistenOutput: UnlistenFn | null = null;
-    let unlistenEnded:  UnlistenFn | null = null;
+    // Apply top margin to xterm-screen so text has gap from top border
+    // This does NOT affect row calculation — only visual offset
+    const applyScreenMargin = () => {
+      const screen = container?.querySelector('.xterm-screen') as HTMLElement;
+      if (screen) {
+        screen.style.marginTop  = '8px';
+        screen.style.marginLeft = '10px';
+      }
+    };
+
     const sid = sidRef.current;
-    let spawnedAt = 0;
-    const osc133Re = /\x1b\]133;([A-D])(?:;(\d+))?[\x07\x1b\\]/g;
+    let unO: UnlistenFn | null = null;
+    let unE: UnlistenFn | null = null;
+    const osc133 = /\x1b\]133;([A-D])(?:;(\d+))?[\x07\x1b\\]/g;
 
     Promise.all([
       listen<string>(`pty://output/${sid}`, ({ payload }) => {
@@ -270,40 +280,62 @@ export default function RunPane({
         term.write(payload);
         const cwd = parseOsc7(payload);
         if (cwd) { setLiveCwd(cwd); onCwdChange?.(cwd); }
-        osc133Re.lastIndex = 0;
+        osc133.lastIndex = 0;
         let m: RegExpExecArray | null;
-        while ((m = osc133Re.exec(payload)) !== null) {
-          if (m[1] === "D" && m[2] !== undefined) {
-            setExitCode(parseInt(m[2], 10));
-          }
-        }
+        while ((m = osc133.exec(payload)) !== null) { /* exit tracking */ }
       }),
       listen<void>(`pty://ended/${sid}`, () => {
         if (gone.current) return;
-        if (Date.now() - spawnedAt < 2000) return;
         const w = Math.min((termRef.current?.cols ?? 80) - 2, 60);
         term.write(`\r\n\x1b[38;5;238m${"─".repeat(w)}\x1b[0m\r\n`);
         term.write(`\x1b[38;5;242m  session ended  ·  press any key to restart\x1b[0m\r\n`);
         term.write(`\x1b[38;5;238m${"─".repeat(w)}\x1b[0m\r\n`);
-        setExitCode(null); spawnedAt = 0;
+        spawned.current = false;
         const d = term.onData(() => {
-          d.dispose(); spawnedAt = Date.now();
-          invoke("pty_spawn", { sessionId: sid, runboxId, cwd: runboxCwd }).catch(() => {});
+          d.dispose();
+          if (!gone.current && term.cols > 0) {
+            spawned.current = true;
+            invoke("pty_spawn", {
+              sessionId: sid, runboxId, cwd: runboxCwd,
+              cols: term.cols, rows: term.rows,
+            }).catch(() => {});
+          }
         });
       }),
-    ]).then(([a, b]) => {
-      unlistenOutput = a; unlistenEnded = b;
-      spawnedAt = Date.now();
-      return invoke("pty_spawn", { sessionId: sid, runboxId, cwd: runboxCwd });
-    }).catch(err => {
-      if (!gone.current) term.write(`\r\n\x1b[38;5;196m[error: ${err}]\x1b[0m\r\n`);
+    ]).then(([a, b]) => { unO = a; unE = b; });
+
+    // Spawn only when container has real dimensions
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width <= 0 || height <= 0) return;
+
+      try { fit.fit(); } catch { return; }
+      if (term.cols <= 0 || term.rows <= 0) return;
+
+      invoke("pty_resize", { sessionId: sid, cols: term.cols, rows: term.rows }).catch(() => {});
+
+      if (!spawned.current && !gone.current) {
+        spawned.current = true;
+        styleScrollbar();
+        applyScreenMargin();
+        term.focus();
+        invoke("pty_spawn", {
+          sessionId: sid, runboxId, cwd: runboxCwd,
+          cols: term.cols, rows: term.rows,
+        }).catch(err => {
+          if (!gone.current) term.write(`\r\n\x1b[38;5;196m[error: ${err}]\x1b[0m\r\n`);
+        });
+      }
     });
+    ro.observe(termElRef.current!);
 
     return () => {
       gone.current = true;
       ro.disconnect();
-      unlistenOutput?.();
-      unlistenEnded?.();
+      sbObs.disconnect();
+      unO?.(); unE?.();
       invoke("pty_kill", { sessionId: sid }).catch(() => {});
       term.dispose();
       termRef.current = null;
@@ -312,44 +344,51 @@ export default function RunPane({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handlePaneClick = useCallback(() => {
-    onActivate?.();
-    setTimeout(() => termRef.current?.focus(), 0);
-  }, [onActivate]);
-
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    const text = e.clipboardData.getData("text");
-    if (text) { e.preventDefault(); sendRaw(text); termRef.current?.focus(); }
+    const t = e.clipboardData.getData("text");
+    if (t) { e.preventDefault(); sendRaw(t); termRef.current?.focus(); }
   }, [sendRaw]);
 
-  const displayCwd = liveCwd || runboxCwd;
-  const shortCwd   = displayCwd.split("/").filter(Boolean).pop() ?? "~";
+  const DIRS = ["r","l","b","t","br","bl","tr","tl"] as const;
 
   return (
     <div
-      className={`sbx-wrap${isActive ? " active" : ""}`}
-      onMouseDown={handlePaneClick}
+      className={`rp-win${isActive ? " rp-active" : ""}`}
+      onMouseDown={() => onActivate?.()}
       onPaste={handlePaste}
     >
-      {/* ── Output ── */}
-      <div className="sbx-output">
-        <div className="sbx-output-header" />
-        <div className="sbx-output-card">
-          <div className="sbx-fade-top" />
-          <div className="sbx-term-inner" ref={termElRef} />
-          <div className="sbx-fade-bottom" />
-          {!isActive && <div className="sbx-inactive-overlay" />}
+      {DIRS.map(dir => (
+        <div key={dir} className={`rp-resize rp-resize-${dir}`}
+          onMouseDown={e => { e.stopPropagation(); onResizeStart?.(e, dir); }} />
+      ))}
+
+      <div
+        className="rp-titlebar"
+        onMouseDown={e => {
+          if ((e.target as HTMLElement).closest('.rp-light')) return;
+          onDragStart?.(e);
+        }}
+      >
+        <div className="rp-lights">
+          <div className="rp-light rp-light-r" title="Close"
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onClose?.(); }} />
+          <div className="rp-light rp-light-y" title="Minimize"
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onMinimize?.(); }} />
+          <div className="rp-light rp-light-g" title="Maximize / Restore"
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onMaximize?.(); }} />
         </div>
+        <div className="rp-vsep" />
+        <span className="rp-cwd">{liveCwd || runboxCwd}</span>
+        {label && <span className="rp-chip">{label}</span>}
       </div>
 
-      {/* ── Status strip ── */}
-      <div className="sbx-status">
-        <span className="sbx-st">
-          <div className={`sbx-st-dot${isActive ? " on" : ""}`} />
-          {isActive ? "active" : "idle"}
-        </span>
-        <div className="sbx-st-sep" />
-        <span className="sbx-st">{sidRef.current.slice(-6)}</span>
+      <div className="rp-body">
+        <div className="rp-fade-t" />
+        <div className="rp-xterm" ref={termElRef} />
+        <div className="rp-fade-b" />
       </div>
     </div>
   );

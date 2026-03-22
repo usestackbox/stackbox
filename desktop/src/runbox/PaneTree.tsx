@@ -1,4 +1,5 @@
-import { useRef, useEffect } from "react";
+// src/runbox/PaneTree.tsx
+import { useRef, useEffect, useState, useCallback } from "react";
 import { C, tbtn } from "../shared/constants";
 import type { PaneNode, TermNode } from "../shared/types";
 
@@ -32,6 +33,108 @@ export function collectIds(node: PaneNode): string[] {
   return [...collectIds(node.a), ...collectIds(node.b)];
 }
 
+// ── Drag handle ──────────────────────────────────────────────────────────────
+function DragHandle({
+  dir,
+  onResize,
+}: {
+  dir: "h" | "v";
+  onResize: (delta: number) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const [hovered,  setHovered]  = useState(false);
+  const startPos = useRef(0);
+  const isH = dir === "h";
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    startPos.current = isH ? e.clientX : e.clientY;
+
+    const onMove = (ev: MouseEvent) => {
+      const current = isH ? ev.clientX : ev.clientY;
+      const delta   = current - startPos.current;
+      startPos.current = current;
+      onResize(delta);
+      // Fire resize event so every RunPane's ResizeObserver
+      // triggers fit.fit() + pty_resize — fixes bash line re-wrapping
+      window.dispatchEvent(new Event("resize"));
+    };
+
+    const onUp = () => {
+      setDragging(false);
+      // One final resize event on mouse up to ensure clean state
+      window.dispatchEvent(new Event("resize"));
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [isH, onResize]);
+
+  const isLit = dragging || hovered;
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        flexShrink: 0,
+        width:      isH ? 9 : "100%",
+        height:     isH ? "100%" : 9,
+        cursor:     isH ? "col-resize" : "row-resize",
+        position:   "relative",
+        display:    "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 10,
+        background: "transparent",
+      }}
+    >
+      {/* Single clean 1px visible line */}
+      <div style={{
+        position:  "absolute",
+        top:       isH ? 0 : "50%",
+        left:      isH ? "50%" : 0,
+        transform: isH ? "translateX(-50%)" : "translateY(-50%)",
+        width:     isH ? 1 : "100%",
+        height:    isH ? "100%" : 1,
+        background: isLit
+          ? "rgba(255,255,255,.2)"
+          : "rgba(255,255,255,.07)",
+        transition: "background .2s",
+        pointerEvents: "none",
+      }} />
+
+      {/* Grip dots — appear on hover/drag */}
+      <div style={{
+        position:      "relative",
+        zIndex:        2,
+        display:       "flex",
+        flexDirection: isH ? "column" : "row",
+        gap:           3,
+        opacity:       isLit ? 1 : 0,
+        transition:    "opacity .2s",
+        pointerEvents: "none",
+      }}>
+        {[0, 1, 2].map(i => (
+          <div key={i} style={{
+            width:        2,
+            height:       2,
+            borderRadius: "50%",
+            background:   dragging
+              ? "rgba(255,255,255,.7)"
+              : "rgba(255,255,255,.4)",
+            flexShrink: 0,
+          }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── PaneLeaf ─────────────────────────────────────────────────────────────────
 interface PaneLeafProps {
   node:          TermNode;
@@ -42,9 +145,13 @@ interface PaneLeafProps {
   onSplitV:      (id: string) => void;
   onSlotMount:   (id: string, el: HTMLDivElement) => void;
   onSlotUnmount: (id: string) => void;
+  flex?:         number;
 }
 
-function PaneLeaf({ node, activePane, onActivate, onClose, onSplitH, onSplitV, onSlotMount, onSlotUnmount }: PaneLeafProps) {
+function PaneLeaf({
+  node, activePane, onActivate, onClose, onSplitH, onSplitV,
+  onSlotMount, onSlotUnmount, flex = 1,
+}: PaneLeafProps) {
   const slotRef  = useRef<HTMLDivElement>(null);
   const isActive = node.id === activePane;
 
@@ -58,11 +165,9 @@ function PaneLeaf({ node, activePane, onActivate, onClose, onSplitH, onSplitV, o
     <div
       onClick={() => onActivate(node.id)}
       style={{
-        flex: 1, display: "flex", flexDirection: "column",
+        flex, display: "flex", flexDirection: "column",
         minHeight: 0, minWidth: 0, position: "relative",
-        // Subtle teal ring on active pane — no harsh white border
-        outline: isActive ? "1px solid rgba(63,182,139,.12)" : "none",
-        outlineOffset: -1,
+        overflow: "hidden",
       }}
     >
       {/* Split / close controls — visible only when active */}
@@ -75,28 +180,93 @@ function PaneLeaf({ node, activePane, onActivate, onClose, onSplitH, onSplitV, o
         transition: "opacity .15s",
         pointerEvents: isActive ? "auto" : "none",
       }}>
-        <button title="Split right" onClick={e => { e.stopPropagation(); onSplitH(node.id); }} style={tbtn}
+        <button
+          title="Split right"
+          onClick={e => { e.stopPropagation(); onSplitH(node.id); }}
+          style={tbtn}
           onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = C.tealText}
-          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t2}>
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t2}
+        >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <rect x="1" y="2" width="14" height="12" rx="2"/><line x1="8" y1="2" x2="8" y2="14"/>
           </svg>
         </button>
-        <button title="Split down" onClick={e => { e.stopPropagation(); onSplitV(node.id); }} style={tbtn}
+        <button
+          title="Split down"
+          onClick={e => { e.stopPropagation(); onSplitV(node.id); }}
+          style={tbtn}
           onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = C.tealText}
-          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t2}>
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t2}
+        >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <rect x="1" y="2" width="14" height="12" rx="2"/><line x1="1" y1="8" x2="15" y2="8"/>
           </svg>
         </button>
-        <button title="Close pane" onClick={e => { e.stopPropagation(); onClose(node.id); }} style={tbtn}
+        <button
+          title="Close pane"
+          onClick={e => { e.stopPropagation(); onClose(node.id); }}
+          style={tbtn}
           onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = C.red}
-          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t2}>
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t2}
+        >
           ×
         </button>
       </div>
 
-      <div ref={slotRef} style={{ flex: 1, minHeight: 0, minWidth: 0, opacity: isActive ? 1 : 0.3, transition: "opacity .2s" }} />
+      <div
+        ref={slotRef}
+        style={{
+          flex: 1, minHeight: 0, minWidth: 0,
+          opacity: isActive ? 1 : 0.3,
+          transition: "opacity .2s",
+        }}
+      />
+    </div>
+  );
+}
+
+// ── PaneSplit — own component so hooks are never called conditionally ─────────
+interface PaneSplitProps {
+  node:          Extract<PaneNode, { type: "split" }>;
+  activePane:    string;
+  onActivate:    (id: string) => void;
+  onClose:       (id: string) => void;
+  onSplitH:      (id: string) => void;
+  onSplitV:      (id: string) => void;
+  onSlotMount:   (id: string, el: HTMLDivElement) => void;
+  onSlotUnmount: (id: string) => void;
+  flex?:         number;
+}
+
+function PaneSplit({ node, flex = 1, ...rest }: PaneSplitProps) {
+  const isH          = node.dir === "h";
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [splitPct, setSplitPct] = useState(50);
+
+  const handleResize = useCallback((delta: number) => {
+    if (!containerRef.current) return;
+    const total = isH
+      ? containerRef.current.offsetWidth
+      : containerRef.current.offsetHeight;
+    if (total === 0) return;
+    const deltaPct = (delta / total) * 100;
+    setSplitPct(prev => Math.min(85, Math.max(15, prev + deltaPct)));
+  }, [isH]);
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        display:       "flex",
+        flexDirection: isH ? "row" : "column",
+        flex,
+        minHeight: 0,
+        minWidth:  0,
+      }}
+    >
+      <PaneTree {...rest} node={node.a} flex={splitPct} />
+      <DragHandle dir={node.dir} onResize={handleResize} />
+      <PaneTree {...rest} node={node.b} flex={100 - splitPct} />
     </div>
   );
 }
@@ -111,37 +281,15 @@ interface PaneTreeProps {
   onSplitV:      (id: string) => void;
   onSlotMount:   (id: string, el: HTMLDivElement) => void;
   onSlotUnmount: (id: string) => void;
+  flex?:         number;
 }
 
 export function PaneTree(props: PaneTreeProps) {
-  const { node, ...rest } = props;
+  const { node, flex = 1, ...rest } = props;
+
   if (node.type === "split") {
-    const isH = node.dir === "h";
-    return (
-      <div style={{ display: "flex", flexDirection: isH ? "row" : "column", flex: 1, minHeight: 0, minWidth: 0 }}>
-        {/*
-         * ── No border here — the PaneLeaf outline handles the active indicator.
-         * Using a 1px border between panes showed as a bright "white line" against
-         * the black terminal background. Instead we use a 2px transparent gap so
-         * the terminal backgrounds butt up cleanly with just the subtle teal
-         * outline on the active leaf to mark which pane is focused.
-         */}
-        <div style={{
-          flex: 1, display: "flex", minHeight: 0, minWidth: 0,
-          paddingRight:  isH ? 1 : 0,
-          paddingBottom: !isH ? 1 : 0,
-        }}>
-          <PaneTree node={node.a} {...rest} />
-        </div>
-        <div style={{
-          flex: 1, display: "flex", minHeight: 0, minWidth: 0,
-          paddingLeft: isH ? 1 : 0,
-          paddingTop:  !isH ? 1 : 0,
-        }}>
-          <PaneTree node={node.b} {...rest} />
-        </div>
-      </div>
-    );
+    return <PaneSplit node={node} flex={flex} {...rest} />;
   }
-  return <PaneLeaf node={node} {...rest} />;
+
+  return <PaneLeaf node={node} flex={flex} {...rest} />;
 }

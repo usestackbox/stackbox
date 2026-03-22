@@ -39,12 +39,22 @@ pub fn run() {
             let db_handle       = app.state::<state::AppState>().db.clone();
             let sessions_handle = app.state::<state::AppState>().sessions.clone();
 
+            // ── Orphan worktree cleanup on startup ───────────────────────────
+            git::cleanup::prune_orphan_worktrees(&app.state::<state::AppState>().db);
+
             // ── Init memory FIRST, then start server ──────────────────────────
             tauri::async_runtime::spawn(async move {
                 match memory::init().await {
                     Ok(_) => {
                         eprintln!("[memory] init complete");
                         app_handle.emit("memory-ready", ()).ok();
+                        // Week 3: warm embedding model after memory init
+                        // Downloads nomic-embed-text-v1.5 (~200MB) on first run
+                        tauri::async_runtime::spawn(async {
+                            agent::embedder::init_embedder().await;
+                            // Week 4: prune expired + stale memories after model ready
+                            agent::scorer::decay_prune().await;
+                        });
                     }
                     Err(e) => {
                         eprintln!("[memory] init failed: {e}");
@@ -78,6 +88,13 @@ pub fn run() {
             commands::memory::memory_move_branch,
             commands::memory::memory_delete_for_runbox,
             commands::memory::memory_search_global,
+            commands::memory::memory_add_typed_cmd,
+            commands::memory::memory_list_by_type,
+            commands::memory::memory_active_blockers,
+            commands::memory::memory_resolve_blocker,
+            commands::memory::memory_get_context,
+            commands::memory::memory_confirm_env,
+            commands::memory::memory_decay_prune,
             commands::db::db_sessions_for_runbox,
             commands::db::db_events_for_runbox,
             git::commands::git_ensure,
@@ -101,6 +118,12 @@ pub fn run() {
             commands::fs::open_directory_dialog,
             commands::fs::open_in_editor,
             commands::fs::read_text_file,
+            commands::fs::fs_list_dir,
+            commands::fs::fs_rename,
+            commands::fs::fs_delete,
+            commands::fs::fs_create_dir,
+            commands::fs::fs_create_file,
+            commands::fs::copy_to_clipboard,
             browser::webview::browser_create,
             browser::webview::browser_destroy,
             browser::webview::browser_navigate,

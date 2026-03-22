@@ -1,13 +1,8 @@
+// src/core/BrowsePane.tsx
+// Localhost-only preview pane. No general browsing — only shows dev servers.
 import { useEffect, useRef, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-
-const C = {
-  bg0: "#0d0d0d", bg1: "#141414", bg2: "#1a1a1a",
-  border: "rgba(255,255,255,.07)", borderHi: "rgba(255,255,255,.18)",
-  text0: "#f0f0f0", text2: "#555",
-  red: "#e05252", blue: "#79b8ff",
-};
 
 export interface BrowserHandle {
   navigateTo: (url: string) => void;
@@ -16,34 +11,34 @@ export interface BrowserHandle {
 
 interface BrowsePanelProps {
   paneId:                 string;
+  runboxId?:              string;
   isActive:               boolean;
   onActivate:             () => void;
   onClose:                (id: string) => void;
   agentRef?:              React.MutableRefObject<BrowserHandle | null>;
   onUrlChange?:           (url: string) => void;
-  // ── NEW: external URL pushed from parent (e.g. PTY URL detection) ──
   externalUrl?:           string | null;
   onExternalUrlConsumed?: () => void;
 }
 
-function toUrl(raw: string): string {
-  const t = raw.trim();
-  if (/^https?:\/\//.test(t)) return t;
-  if (/^[^\s]+\.[^\s]{2,}$/.test(t) && !t.includes(" ")) return `https://${t}`;
-  return `https://www.google.com/search?q=${encodeURIComponent(t)}`;
+function isLocalhost(url: string): boolean {
+  return url.includes("localhost") || url.includes("127.0.0.1") || url.includes("0.0.0.0");
 }
 
 export default function BrowsePane({
-  paneId, isActive, onActivate, onClose,
+  paneId, runboxId, isActive, onActivate, onClose,
   agentRef, onUrlChange,
   externalUrl, onExternalUrlConsumed,
 }: BrowsePanelProps) {
   const slotRef      = useRef<HTMLDivElement>(null);
-  const urlRef       = useRef("https://google.com");
+  const urlRef       = useRef("http://localhost:3000");
   const isActiveRef  = useRef(isActive);
   const createdRef   = useRef(false);
-  const [urlInput, setUrlInput] = useState("https://google.com");
-  const [loading,  setLoading]  = useState(true);
+  // ── FIX: hold any URL that arrived before the webview existed ──────────────
+  const pendingNavRef = useRef<string | null>(null);
+  const [urlInput,  setUrlInput]  = useState("http://localhost:3000");
+  const [loading,   setLoading]   = useState(true);
+  const [connError, setConnError] = useState(false);
 
   useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
 
@@ -54,23 +49,31 @@ export default function BrowsePane({
     return { x: r.left, y: r.top, width: r.width, height: r.height };
   }, []);
 
-  // ── Navigate (defined early so other effects can reference it) ─────────────
   const navigate = useCallback(async (raw: string) => {
-    const url = toUrl(raw);
+    const url = raw.trim().startsWith("http") ? raw.trim() : `http://${raw.trim()}`;
+    if (!isLocalhost(url)) return;
+    setConnError(false);
     urlRef.current = url;
     setUrlInput(url);
     onUrlChange?.(url);
-    await invoke("browser_navigate", { id: paneId, url });
+    await invoke("browser_navigate", { id: paneId, url }).catch(() => setConnError(true));
   }, [paneId, onUrlChange]);
 
-  // ── Handle external URL (from PTY detection or BROWSER shim) ──────────────
+  // ── FIX: consume externalUrl immediately; if webview not ready, queue it ──
   useEffect(() => {
-    if (!externalUrl || !createdRef.current) return;
-    navigate(externalUrl);
+    if (!externalUrl) return;
+    // Signal the parent right away so it doesn't hold a stale pendingUrl
     onExternalUrlConsumed?.();
-  }, [externalUrl]);
+    if (!isLocalhost(externalUrl)) return;
+    if (createdRef.current) {
+      navigate(externalUrl);
+    } else {
+      // Webview not yet created — store for drain after creation
+      pendingNavRef.current = externalUrl;
+    }
+  }, [externalUrl]); // intentionally omit navigate/onExternalUrlConsumed to avoid double-fire
 
-  // ── Listen for URL changes from native webview (url bar sync) ─────────────
+  // URL change from webview
   useEffect(() => {
     const unsub = listen<{ id: string; url: string }>("browser-url-changed", ({ payload }) => {
       if (payload.id !== paneId) return;
@@ -81,38 +84,35 @@ export default function BrowsePane({
     return () => { unsub.then(f => f()); };
   }, [paneId, onUrlChange]);
 
-  // ── Create webview — retries until slot has real dimensions ────────────────
+  // Create webview
   useEffect(() => {
     let alive = true;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-
     const tryCreate = async () => {
       if (!alive || createdRef.current) return;
       await new Promise(r => requestAnimationFrame(r));
       if (!alive) return;
       const rect = getRect();
       if (!rect || rect.width < 1 || rect.height < 1) {
-        retryTimer = setTimeout(tryCreate, 50);
-        return;
+        retryTimer = setTimeout(tryCreate, 50); return;
       }
       try {
-        await invoke("browser_create", { id: paneId, url: urlRef.current, ...rect });
+        await invoke("browser_create", { id: paneId, url: urlRef.current, ...rect, runboxId: runboxId ?? paneId });
         if (!alive) return;
         createdRef.current = true;
         setLoading(false);
-        if (isActiveRef.current) {
-          invoke("browser_show", { id: paneId, ...rect }).catch(() => {});
-        } else {
-          invoke("browser_hide", { id: paneId }).catch(() => {});
+        // ── FIX: drain any URL that arrived while we were still creating ────
+        if (pendingNavRef.current) {
+          navigate(pendingNavRef.current);
+          pendingNavRef.current = null;
         }
-      } catch (e) {
-        console.error("[browser] create failed", e);
+        if (isActiveRef.current) invoke("browser_show", { id: paneId, ...rect }).catch(() => {});
+        else invoke("browser_hide", { id: paneId }).catch(() => {});
+      } catch {
         if (alive) retryTimer = setTimeout(tryCreate, 200);
       }
     };
-
     tryCreate();
-
     return () => {
       alive = false;
       if (retryTimer) clearTimeout(retryTimer);
@@ -124,23 +124,20 @@ export default function BrowsePane({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paneId]);
 
-  // ── Reposition on resize ───────────────────────────────────────────────────
+  // Reposition
   useEffect(() => {
-    const slot = slotRef.current;
-    if (!slot) return;
+    const slot = slotRef.current; if (!slot) return;
     const obs = new ResizeObserver(() => {
       if (!createdRef.current) return;
       const rect = getRect();
       if (!rect || rect.width < 1) return;
-      if (isActiveRef.current) {
-        invoke("browser_set_bounds", { id: paneId, ...rect }).catch(() => {});
-      }
+      if (isActiveRef.current) invoke("browser_set_bounds", { id: paneId, ...rect }).catch(() => {});
     });
     obs.observe(slot);
     return () => obs.disconnect();
   }, [paneId, getRect]);
 
-  // ── Show / hide when tab switches ─────────────────────────────────────────
+  // Show/hide
   useEffect(() => {
     if (!createdRef.current) return;
     if (isActive) {
@@ -151,79 +148,105 @@ export default function BrowsePane({
     }
   }, [isActive, paneId, getRect]);
 
-  const goBack    = useCallback(() => invoke("browser_go_back",    { id: paneId }).catch(() => {}), [paneId]);
-  const goForward = useCallback(() => invoke("browser_go_forward", { id: paneId }).catch(() => {}), [paneId]);
-  const reload    = useCallback(() => invoke("browser_reload",     { id: paneId }).catch(() => {}), [paneId]);
-
-  // ── Agent handle ───────────────────────────────────────────────────────────
+  // Agent handle
   useEffect(() => {
     if (!agentRef) return;
     agentRef.current = { navigateTo: navigate, currentUrl: () => urlRef.current };
   }, [agentRef, navigate]);
 
-  return (
-    <div onClick={onActivate} style={{
-      display: "flex", flexDirection: "column",
-      width: "100%", height: "100%",
-      outline: isActive ? `1px solid rgba(255,255,255,.15)` : "none",
-      outlineOffset: -1,
-    }}>
-      {/* Toolbar */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 4,
-        padding: "0 6px", height: 34, flexShrink: 0,
-        background: C.bg1, borderBottom: `1px solid ${C.border}`,
-        position: "relative", zIndex: 10,
-      }}>
-        <Btn title="Back"    onClick={e => { e.stopPropagation(); goBack(); }}>‹</Btn>
-        <Btn title="Forward" onClick={e => { e.stopPropagation(); goForward(); }}>›</Btn>
-        <Btn title="Reload"  onClick={e => { e.stopPropagation(); reload(); }}>↻</Btn>
+  const reload = useCallback(() => {
+    setConnError(false);
+    invoke("browser_reload", { id: paneId }).catch(() => {});
+  }, [paneId]);
 
+  const portFromUrl = (url: string) => {
+    try { return new URL(url).port || "80"; } catch { return ""; }
+  };
+
+  return (
+    <div onClick={onActivate} style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%" }}>
+
+      {/* Minimal toolbar */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        padding: "0 8px", height: 32, flexShrink: 0,
+        background: "#0e0e0e",
+        borderBottom: "1px solid rgba(255,255,255,.06)",
+      }}>
+        {/* Port badge */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: "3px 8px", borderRadius: 5,
+          background: connError ? "rgba(200,60,60,.12)" : "rgba(80,160,80,.10)",
+          border: `1px solid ${connError ? "rgba(200,60,60,.2)" : "rgba(80,160,80,.15)"}`,
+          flexShrink: 0,
+        }}>
+          <div style={{
+            width: 5, height: 5, borderRadius: "50%",
+            background: connError ? "#cc5555" : "#5a9a5a",
+            boxShadow: connError ? "none" : "0 0 4px #5a9a5a",
+          }} />
+          <span style={{ fontSize: 10, fontFamily: "'JetBrains Mono', monospace", color: connError ? "#cc8888" : "#88bb88" }}>
+            :{portFromUrl(urlInput)}
+          </span>
+        </div>
+
+        {/* URL — localhost path only */}
         <input
           value={urlInput}
           onChange={e => setUrlInput(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter") navigate(urlInput); }}
           onClick={e => { e.stopPropagation(); (e.target as HTMLInputElement).select(); }}
           style={{
-            flex: 1, background: C.bg2, border: `1px solid ${C.border}`,
-            borderRadius: 5, color: C.text0, fontSize: 12,
-            padding: "4px 10px", outline: "none",
-            fontFamily: "ui-monospace,'SF Mono',monospace",
+            flex: 1, background: "transparent", border: "none",
+            color: "rgba(255,255,255,.45)", fontSize: 11,
+            padding: "3px 0", outline: "none",
+            fontFamily: "'JetBrains Mono', monospace",
+            cursor: "text",
           }}
-          onFocus={e => e.currentTarget.style.borderColor = C.borderHi}
-          onBlur={e  => e.currentTarget.style.borderColor = C.border}
+          onFocus={e => e.currentTarget.style.color = "rgba(255,255,255,.75)"}
+          onBlur={e  => e.currentTarget.style.color = "rgba(255,255,255,.45)"}
         />
+
+        {/* Reload */}
+        <button onClick={e => { e.stopPropagation(); reload(); }}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,.3)", fontSize: 14, padding: "2px 4px", borderRadius: 4, lineHeight: 1 }}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,.7)"}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,.3)"}>
+          ↻
+        </button>
+
+        {/* Close */}
+        <button onClick={e => { e.stopPropagation(); onClose(paneId); }}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,.25)", fontSize: 14, padding: "2px 4px", borderRadius: 4, lineHeight: 1 }}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = "#cc5555"}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,.25)"}>
+          ×
+        </button>
       </div>
 
       {/* Loading bar */}
       {loading && (
-        <div style={{ height: 2, background: C.bg2, flexShrink: 0, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: "35%", background: C.blue,
-            animation: "bpSlide 1.1s ease-in-out infinite" }} />
+        <div style={{ height: 1.5, background: "#111", flexShrink: 0, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: "40%", background: "rgba(80,160,80,.6)", animation: "bpSlide 1.1s ease-in-out infinite" }} />
         </div>
       )}
 
-      {/* Slot — native webview sits over this */}
-      <div ref={slotRef} style={{ flex: 1, minHeight: 0, minWidth: 0, background: "#111", pointerEvents: "none" }} />
+      {/* Connection error state */}
+      {connError && !loading && (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, background: "#0c0c0c" }}>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,.3)", fontFamily: "'JetBrains Mono', monospace" }}>
+            {urlInput} — not reachable
+          </span>
+          <button onClick={reload} style={{ fontSize: 10, color: "rgba(255,255,255,.4)", background: "none", border: "1px solid rgba(255,255,255,.1)", borderRadius: 5, padding: "4px 12px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>
+            retry
+          </button>
+        </div>
+      )}
+
+      {/* Slot */}
+      <div ref={slotRef} style={{ flex: 1, minHeight: 0, minWidth: 0, background: "#0c0c0c", pointerEvents: "none" }} />
       <style>{`@keyframes bpSlide{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}`}</style>
     </div>
-  );
-}
-
-function Btn({ children, title, onClick, style }: {
-  children: React.ReactNode; title?: string;
-  onClick?: React.MouseEventHandler; style?: React.CSSProperties;
-}) {
-  const [hov, setHov] = useState(false);
-  return (
-    <button title={title} onClick={onClick}
-      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-      style={{
-        background: "none", border: "none", cursor: "pointer",
-        padding: "2px 7px", borderRadius: 4, fontSize: 16, lineHeight: 1,
-        color: hov ? "#f0f0f0" : (style?.color ?? "#666"),
-        display: "flex", alignItems: "center", justifyContent: "center",
-        transition: "color .1s", ...style,
-      }}>{children}</button>
   );
 }

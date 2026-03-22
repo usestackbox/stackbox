@@ -1,4 +1,5 @@
 // src-tauri/src/workspace/context.rs
+// Supercontext V2 — build() calls injector for ranked context block.
 
 use crate::agent::kind::AgentKind;
 
@@ -28,9 +29,20 @@ pub async fn build(
     let short_sid  = &session_id[..session_id.len().min(8)];
     let agent_name = agent.display_name();
 
-    // ── Context injection: pull top memories ──────────────────────────────────
+    let pane_port: u16 = {
+        let mut hash: u32 = 0x811c9dc5;
+        for b in runbox_id.as_bytes() { hash ^= *b as u32; hash = hash.wrapping_mul(0x01000193); }
+        3100u16 + (hash % 900) as u16
+    };
+
+    // ── Ranked memory context via injector ────────────────────────────────────
     let memory_block = if *agent != AgentKind::Shell {
-        build_memory_context(runbox_id).await
+        let block = crate::agent::injector::build_context(runbox_id, "").await;
+        if block.trim().is_empty() {
+            build_first_session_context(cwd).await
+        } else {
+            format!("## Supercontext — Your Memory\n\n{block}\n")
+        }
     } else {
         String::new()
     };
@@ -44,36 +56,56 @@ r#"# Stackbox Agent Instructions
 {memory_block}
 ---
 
-## Before You Start
+## Memory Tools — Use These
 
-Run this before editing any files:
+You have 5 MCP tools for memory. Use them.
+
+**At session start — call this FIRST:**
+```
+memory_context(task="describe what you're about to do")
+```
+Returns: goal, blockers (dead ends — skip), failures (don't re-break), env facts, codebase map.
+
+**When you hit an error you can't solve:**
+```
+memory_write(content="Error: X. Tried: Y, Z. Do not retry Y or Z.", memory_type="blocker")
+```
+
+**When you fix something:**
+```
+memory_resolve(blocker_description="...", fix="root cause + exact fix")
+```
+
+**When you learn an env fact:**
+```
+memory_write(content="node=working\npy=broken\nport={pane_port}", memory_type="environment")
+```
+
+**When user tells you what to build:**
+```
+memory_goal(goal="...")
+```
+
+**When you need something specific:**
+```
+memory_search(query="port 3836")
+```
+
+---
+
+## Before You Start
 
 ```powershell
 git add -A
 ```
 
-This lets Stackbox track your changes (additions AND deletions).
-
----
-
-## Saving Memories
-
-After completing work, save a memory with this PowerShell command:
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:{port}/memory" -Method Post -ContentType "application/json" -Body (ConvertTo-Json @{{ runbox_id="{runbox_id}"; content="What you did, which files changed, any known issues." }})
-```
-
-Replace the `content` value with your actual summary (1–3 sentences).
-Do NOT use `curl` or `memory_write` — use `Invoke-RestMethod` as shown above.
-
----
-
 ## Rules
 
-- Always run `git add -A` before editing files
-- Never create temp files like `payload.json`, `rewrite_app.py`, `update_*.js`
-- Save a memory after completing significant work using the command above
+- Call `memory_context` before writing any code — every time
+- Your app port is **{pane_port}** — use `$env:PORT` or hardcode {pane_port}
+- Never create temp files like `payload.json`, `rewrite_app.py`
+- Write a `session` memory before ending — what changed, what's still open
+- Env facts: key=value format only. Never prose.
 
 ---
 
@@ -82,58 +114,36 @@ Do NOT use `curl` or `memory_write` — use `Invoke-RestMethod` as shown above.
     ))
 }
 
-async fn build_memory_context(runbox_id: &str) -> String {
-    // Pull recent memories — failures first, then decisions, then rest
-    let all = match crate::memory::memories_for_runbox(runbox_id).await {
-        Ok(m) => m,
-        Err(_) => return String::new(),
-    };
+async fn build_first_session_context(cwd: &str) -> String {
+    use crate::git::repo::git;
+    let log      = git(&["log", "--oneline", "--no-merges", "-20"], cwd, None).unwrap_or_default();
+    let status   = git(&["status", "--short"], cwd, None).unwrap_or_default();
+    let branches = git(&["branch", "-a", "--format=%(refname:short)"], cwd, None).unwrap_or_default();
 
-    if all.is_empty() { return String::new(); }
+    if log.is_empty() && status.is_empty() { return String::new(); }
 
-    // Separate by priority
-    let failures:    Vec<_> = all.iter().filter(|m| m.tags.contains("failure")).take(3).collect();
-    let decisions:   Vec<_> = all.iter().filter(|m| m.tags.contains("decision")).take(3).collect();
-    let git_history: Vec<_> = all.iter().filter(|m| m.agent_name == "git").take(5).collect();
-    let recent:      Vec<_> = all.iter()
-        .filter(|m| m.agent_name != "git" && !m.tags.contains("failure") && !m.tags.contains("decision"))
-        .take(3).collect();
+    let mut parts = vec!["## Project Context — First Session\n".to_string()];
 
-    let mut parts: Vec<String> = Vec::new();
-
-    if !failures.is_empty() {
-        parts.push("### ⚠ Known Failures".to_string());
-        for m in &failures {
-            parts.push(format!("- {}", m.content.lines().next().unwrap_or("").trim()));
+    if !log.is_empty() {
+        parts.push("### Recent Commits".to_string());
+        for line in log.lines().take(15) {
+            if !line.trim().is_empty() { parts.push(format!("- {}", line.trim())); }
         }
         parts.push(String::new());
     }
 
-    if !decisions.is_empty() {
-        parts.push("### 🔷 Prior Decisions".to_string());
-        for m in &decisions {
-            parts.push(format!("- {}", m.content.lines().next().unwrap_or("").trim()));
-        }
-        parts.push(String::new());
+    if !branches.is_empty() {
+        let blist: Vec<&str> = branches.lines().map(|b| b.trim()).filter(|b| !b.is_empty()).take(8).collect();
+        if !blist.is_empty() { parts.push(format!("### Branches: {}", blist.join(", "))); parts.push(String::new()); }
     }
 
-    if !git_history.is_empty() {
-        parts.push("### 📜 Recent Git History".to_string());
-        for m in &git_history {
-            parts.push(format!("- {}", m.content.lines().next().unwrap_or("").trim()));
+    if !status.is_empty() {
+        let dirty: Vec<&str> = status.lines().take(8).collect();
+        if !dirty.is_empty() {
+            parts.push("### Uncommitted Changes".to_string());
+            for l in dirty { parts.push(format!("- {}", l.trim())); }
         }
-        parts.push(String::new());
     }
 
-    if !recent.is_empty() {
-        parts.push("### 🧠 Recent Context".to_string());
-        for m in &recent {
-            parts.push(format!("- {}", m.content.lines().next().unwrap_or("").trim()));
-        }
-        parts.push(String::new());
-    }
-
-    if parts.is_empty() { return String::new(); }
-
-    format!("## Supercontext — What You Need to Know\n\n{}\n\n", parts.join("\n"))
+    format!("{}\n\n", parts.join("\n"))
 }

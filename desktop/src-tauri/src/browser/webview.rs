@@ -18,6 +18,7 @@ fn label(id: &str) -> String {
 pub async fn browser_create(
     app: AppHandle, id: String, url: String,
     x: f64, y: f64, width: f64, height: f64,
+    runbox_id: Option<String>,
 ) -> Result<(), String> {
     let lbl = label(&id);
     if let Some(wv) = app.get_webview(&lbl) { let _ = wv.close(); }
@@ -37,9 +38,10 @@ pub async fn browser_create(
     browsers().lock().unwrap().insert(id.clone(), lbl.clone());
 
     // Injection thread — URL tracking + link interception
-    let app2 = app.clone();
-    let id2  = id.clone();
-    let lbl2 = lbl.clone();
+    let app2      = app.clone();
+    let id2       = id.clone();
+    let lbl2      = lbl.clone();
+    let runbox_id2 = runbox_id.unwrap_or_else(|| id.clone());
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(800));
         loop {
@@ -48,6 +50,7 @@ pub async fn browser_create(
                 None    => break,
             };
             let script = format!(r#"(function(){{
+                // ── URL tracking ──────────────────────────────────────────────
                 if (!window._sbxTracking) {{
                     window._sbxTracking = true;
                     let _last = '';
@@ -58,6 +61,7 @@ pub async fn browser_create(
                         }}
                     }}, 600);
                 }}
+                // ── Link interception ─────────────────────────────────────────
                 if (!window._sbxLinks) {{
                     window._sbxLinks = true;
                     document.addEventListener('click', function(e) {{
@@ -75,7 +79,38 @@ pub async fn browser_create(
                         return null;
                     }};
                 }}
-            }})();"#, id = id2);
+                // ── Console error capture → Stackbox memory ───────────────────
+                // Captures console.error, uncaught exceptions, and promise rejections
+                // and saves them as failure memories so the next agent spawn knows.
+                if (!window._sbxConsole) {{
+                    window._sbxConsole = true;
+                    const _report = function(type, msg) {{
+                        const content = '[browser] ' + type + ': ' + String(msg).slice(0, 300);
+                        fetch('http://127.0.0.1:7547/memory', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{
+                                runbox_id: '{runbox_id}',
+                                content: content,
+                                tags: 'failure,browser-error',
+                                agent_name: 'browser',
+                                commit_type: 'memory'
+                            }})
+                        }}).catch(function(){{}});
+                    }};
+                    const _origError = console.error.bind(console);
+                    console.error = function() {{
+                        _origError.apply(console, arguments);
+                        _report('console.error', Array.from(arguments).join(' '));
+                    }};
+                    window.addEventListener('error', function(e) {{
+                        _report('uncaught', (e.message || '') + (e.filename ? ' in ' + e.filename.split('/').pop() + ':' + e.lineno : ''));
+                    }});
+                    window.addEventListener('unhandledrejection', function(e) {{
+                        _report('unhandled promise rejection', e.reason);
+                    }});
+                }}
+            }})();"#, id = id2, runbox_id = runbox_id2);
             let _ = wv.eval(&script);
             std::thread::sleep(std::time::Duration::from_millis(600));
         }

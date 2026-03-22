@@ -7,6 +7,7 @@ import { WorkspaceView }      from "./runbox/WorkspaceView";
 import { CreateRunboxModal }  from "./sidebar/CreateRunboxModal";
 
 import { C, SANS, loadRunboxes, saveRunboxes } from "./shared/constants";
+import { NotificationToasts }                    from "./shared/Notificationsystem";
 import { useDragResize }                        from "./shared/hooks";
 import type { Runbox }                          from "./shared/types";
 
@@ -114,6 +115,9 @@ export default function App() {
           />
         )}
       </div>
+
+      {/* Global floating agent-done toasts */}
+      <NotificationToasts />
 
       <style>{`
         @keyframes sbFadeUp { from{opacity:0;transform:translateY(8px) scale(.98)} to{opacity:1;transform:translateY(0) scale(1)} }

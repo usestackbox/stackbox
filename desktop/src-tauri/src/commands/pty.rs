@@ -1,8 +1,6 @@
 // src-tauri/src/commands/pty.rs
-
 use std::io::Write;
 use tauri::AppHandle;
-
 use crate::{
     agent::kind::AgentKind,
     db::sessions::session_end,
@@ -18,9 +16,11 @@ pub async fn pty_spawn(
     runbox_id:  String,
     cwd:        String,
     agent_cmd:  Option<String>,
+    cols:       Option<u16>,   // ← added
+    rows:       Option<u16>,   // ← added
     state:      tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    pty::spawn(app, session_id, runbox_id, cwd, agent_cmd, &state).await
+    pty::spawn(app, session_id, runbox_id, cwd, agent_cmd, cols, rows, &state).await
 }
 
 #[tauri::command]
@@ -30,13 +30,11 @@ pub fn pty_write(
     state:      tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let mut inject: Option<(String, String, AgentKind)> = None;
-
     {
         let mut sessions = state.sessions.lock().unwrap();
         if let Some(s) = sessions.get_mut(&session_id) {
             let _ = s.writer.write_all(data.as_bytes());
             let _ = s.writer.flush();
-
             for ch in data.chars() {
                 match ch {
                     '\r' | '\n' => {
@@ -58,7 +56,6 @@ pub fn pty_write(
             }
         }
     }
-
     if let Some((rb, cwd, kind)) = inject {
         let sid = session_id.clone();
         let db  = state.db.clone();
@@ -68,7 +65,6 @@ pub fn pty_write(
             }
         });
     }
-
     Ok(())
 }
 

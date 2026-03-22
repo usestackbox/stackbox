@@ -10,7 +10,7 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tauri::{AppHandle, Emitter};
 
 use crate::{
-    agent::{context::inject, kind::AgentKind},
+    agent::{context::inject, injector, kind::AgentKind},  // injector kept from Copy 1
     git::repo::{ensure_git_repo, ensure_worktree, remove_worktree},
     memory,
     mcp::config::write_mcp_config,
@@ -60,11 +60,22 @@ pub async fn spawn(
     runbox_id:  String,
     cwd:        String,
     agent_cmd:  Option<String>,
+    cols:       Option<u16>,   // from Copy 2
+    rows:       Option<u16>,   // from Copy 2
     state:      &AppState,
 ) -> Result<(), String> {
     let pty_system = native_pty_system();
-    let pair       = pty_system
-        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+
+    let init_cols = cols.unwrap_or(80);
+    let init_rows = rows.unwrap_or(24);
+
+    let pair = pty_system
+        .openpty(PtySize {
+            rows:         init_rows,
+            cols:         init_cols,
+            pixel_width:  0,
+            pixel_height: 0,
+        })
         .map_err(|e| e.to_string())?;
 
     let resolved_cwd = expand_cwd(&cwd);
@@ -76,8 +87,11 @@ pub async fn spawn(
     ensure_git_repo(&resolved_cwd, &runbox_id)
         .unwrap_or_else(|e| { eprintln!("[pty] ensure_git_repo: {e}"); String::new() });
 
+    // Use session_id for worktree naming — each agent spawn gets its own
+    // isolated worktree/branch even when multiple agents run in the same runbox.
+    // (from Copy 1 — Copy 2 mistakenly used &runbox_id which shared worktrees)
     let worktree_path = if agent_kind != AgentKind::Shell {
-        ensure_worktree(&resolved_cwd, &runbox_id)
+        ensure_worktree(&resolved_cwd, &session_id)
     } else {
         None
     };
@@ -106,7 +120,7 @@ pub async fn spawn(
         let ps       = format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", sys_root);
         let mut c    = CommandBuilder::new(&ps);
         c.args(&["-NoLogo", "-NoExit", "-NonInteractive", "-Command",
-            r#"function prompt { "~/\" + (Split-Path -Leaf (Get-Location)) + "> " }"#]);
+            r#"function prompt { "~\\" + (Split-Path -Leaf (Get-Location)) + "> " }"#]);
         for var in &["USERPROFILE","APPDATA","LOCALAPPDATA","TEMP","TMP","PATH","SystemRoot"] {
             c.env(var, std::env::var(var).unwrap_or_default());
         }
@@ -115,7 +129,22 @@ pub async fn spawn(
     };
 
     #[cfg(not(windows))]
-    let mut cmd = CommandBuilder::new("bash");
+    let mut cmd = {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let stackbox_zsh_dir = "/tmp/stackbox-zsh";
+        let _ = std::fs::create_dir_all(stackbox_zsh_dir);
+        let zshrc = r#"
+        [ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc"
+        PROMPT='%B%F{cyan}%1~%f%b %% '
+        zle_highlight=( region:bg=blue isearch:underline paste:standout suffix:bold default:fg=yellow )
+        chpwd() { printf '\e]7;file://%s%s\a' "$HOST" "$PWD" }
+        chpwd
+        "#;
+        let _ = std::fs::write(format!("{stackbox_zsh_dir}/.zshrc"), zshrc);
+        let mut c = CommandBuilder::new(&shell);
+        c.env("ZDOTDIR", stackbox_zsh_dir);
+        c
+    };
 
     cmd.cwd(&effective_cwd);
 
@@ -130,6 +159,24 @@ pub async fn spawn(
     }
 
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") { cmd.env("ANTHROPIC_API_KEY", key); }
+
+    // ── Per-pane stable port allocation ──────────────────────────────────────
+    let pane_port = {
+        let mut hash: u32 = 0x811c9dc5;
+        for b in runbox_id.as_bytes() {
+            hash ^= *b as u32;
+            hash = hash.wrapping_mul(0x01000193);
+        }
+        3100u16 + (hash % 900) as u16
+    };
+    cmd.env("PORT",               pane_port.to_string());
+    cmd.env("DEV_PORT",           pane_port.to_string());
+    cmd.env("VITE_PORT",          pane_port.to_string());
+    cmd.env("NEXT_PORT",          pane_port.to_string());
+    cmd.env("DEBUG_PORT",         (pane_port + 1000).to_string());
+    cmd.env("STACKBOX_PORT",      pane_port.to_string());
+    cmd.env("NODE_ENV",           "development");
+    cmd.env("STACKBOX_PANE_PORT", pane_port.to_string());
 
     let port     = crate::workspace::context::MEMORY_PORT;
     let ctx_file = format!("{effective_cwd}/.stackbox-context.md");
@@ -210,7 +257,10 @@ pub async fn spawn(
             if detected_kind == AgentKind::Shell {
                 let stripped = strip_ansi(&text);
                 if let Some(upgraded) = AgentKind::infer_from_output(&stripped) {
-                    detected_kind = upgraded;
+                    detected_kind = upgraded.clone();
+                    // Notify frontend so it can update the tab label (from Copy 1)
+                    let _ = app_pty.emit(&format!("pty://agent/{}", sid),
+                        upgraded.display_name().to_string());
                 }
             }
 
@@ -236,7 +286,6 @@ pub async fn spawn(
                 });
             }
 
-            // Auto-classify output: Decision / Failure / Preference
             let classified = classifier.feed(&text);
             if !classified.is_empty() {
                 let rb2   = rb_id.clone();
@@ -245,9 +294,12 @@ pub async fn spawn(
                 tauri::async_runtime::spawn(async move {
                     for (kind, content) in classified {
                         let kind_str = match kind {
-                            MemoryKind::Decision   => "decision",
-                            MemoryKind::Failure    => "failure",
-                            MemoryKind::Preference => "preference",
+                            MemoryKind::Failure     => "failure",
+                            MemoryKind::Blocker     => "blocker",
+                            MemoryKind::Environment => "environment",
+                            MemoryKind::Codebase    => "codebase",
+                            MemoryKind::Goal        => "goal",
+                            MemoryKind::Session     => "session",
                         };
                         crate::agent::supercontext::save_classified(
                             &rb2, &sid2, &aname, kind_str, &content,
@@ -272,25 +324,38 @@ pub async fn spawn(
             remove_worktree(wt);
         }
 
-        // Only write fallback memory if no real summary was captured
-        if agent_kind != AgentKind::Shell && !capture.already_emitted() {
-            let dur = if duration_ms < 60_000 {
-                format!("{}s", duration_ms / 1000)
-            } else {
-                format!("{}m {}s", duration_ms / 60_000, (duration_ms % 60_000) / 1000)
-            };
-            let summary = format!(
-                "{} session ended ({}). Check workspace_read for changes.",
-                agent_kind.display_name(), dur
-            );
-            let rb2  = rb_id.clone();
+        // Fallback memory: write if agent didn't emit its own summary (from Copy 2).
+        // Also run auto_session_summary + invalidate cache regardless (from Copy 1).
+        if agent_kind != AgentKind::Shell {
+            if !capture.already_emitted() {
+                let dur = if duration_ms < 60_000 {
+                    format!("{}s", duration_ms / 1000)
+                } else {
+                    format!("{}m {}s", duration_ms / 60_000, (duration_ms % 60_000) / 1000)
+                };
+                let summary = format!(
+                    "{} session ended ({}). Check workspace_read for changes.",
+                    agent_kind.display_name(), dur
+                );
+                let rb2  = rb_id.clone();
+                let sid2 = sid.clone();
+                let app2 = app_pty.clone();
+                tauri::async_runtime::spawn(async move {
+                    if memory::memory_add(&rb2, &sid2, &summary).await.is_ok() {
+                        crate::agent::globals::emit_memory_added(&rb2);
+                        let _ = app2.emit("memory-added", serde_json::json!({ "runbox_id": rb2 }));
+                    }
+                });
+            }
+
+            // V2: AI-generated session summary + cache invalidation (from Copy 1)
+            let rb2 = rb_id.clone();
             let sid2 = sid.clone();
-            let app2 = app_pty.clone();
+            let db2  = db_arc.clone();
+            let an2  = agent_kind.display_name().to_string();
             tauri::async_runtime::spawn(async move {
-                if memory::memory_add(&rb2, &sid2, &summary).await.is_ok() {
-                    crate::agent::globals::emit_memory_added(&rb2);
-                    let _ = app2.emit("memory-added", serde_json::json!({ "runbox_id": rb2 }));
-                }
+                crate::agent::supercontext::auto_session_summary(&rb2, &sid2, &an2, &db2).await;
+                injector::invalidate_cache(&rb2).await;
             });
         }
 
