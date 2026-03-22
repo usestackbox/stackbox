@@ -7,7 +7,7 @@ import { WorkspaceView }      from "./runbox/WorkspaceView";
 import { CreateRunboxModal }  from "./sidebar/CreateRunboxModal";
 
 import { C, SANS, loadRunboxes, saveRunboxes } from "./shared/constants";
-import { NotificationToasts }                    from "./shared/Notificationsystem";
+import { NotificationToasts, useMemorySummaryBackfill } from "./shared/Notificationsystem";
 import { useDragResize }                        from "./shared/hooks";
 import type { Runbox }                          from "./shared/types";
 
@@ -35,6 +35,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 
 export default function App() {
   const [runboxes,         setRunboxes]         = useState<Runbox[]>(() => loadRunboxes());
+  useMemorySummaryBackfill(); // fills notification summaries from memory-added events
   const [activeId,         setActiveId]         = useState<string | null>(() => loadRunboxes()[0]?.id ?? null);
   const [showModal,        setShowModal]        = useState(false);
   const [cwdMap,           setCwdMap]           = useState<Record<string, string>>({});

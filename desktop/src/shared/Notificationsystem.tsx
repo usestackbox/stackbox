@@ -8,6 +8,7 @@
 // without needing React context.
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { C, MONO, SANS, PORT } from "./constants";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -34,7 +35,7 @@ function notify(next: AppNotification[]) {
   _listeners.forEach(fn => fn(next));
 }
 
-function pushNote(note: Omit<AppNotification, "id" | "ts" | "read">) {
+export function pushNote(note: Omit<AppNotification, "id" | "ts" | "read">) {
   const n: AppNotification = {
     ...note,
     id:   crypto.randomUUID(),
@@ -63,108 +64,106 @@ function useNotifications() {
   return notes;
 }
 
-// ─── SSE monitor (one per runbox) ─────────────────────────────────────────────
+// ─── PTY session tracker ──────────────────────────────────────────────────────
+// Listens to real Tauri PTY events — pty://agent/{sid} (shell→agent upgrade)
+// and pty://ended/{sid} (session over). This is the reliable signal: it fires
+// every time regardless of whether the agent posts to the SSE bus.
+
+export interface PtySessionInfo {
+  sessionId:   string;   // same as what RunPane uses: `${runboxId}-${winId}`
+  runboxId:    string;
+  runboxName:  string;
+}
 
 interface RunboxRef { id: string; name: string; }
 
-function useAgentMonitor(runboxes: RunboxRef[]) {
-  const esMap  = useRef<Map<string, EventSource>>(new Map());
-  const rbMap  = useRef<Map<string, string>>(new Map()); // id → name
+// Called once from WorkspaceView — registers sessions and wires up listeners.
+export function usePtyNotifier(sessions: PtySessionInfo[]) {
+  // sessionId → agent display name (set when pty://agent fires)
+  const agentMap = useRef<Map<string, string>>(new Map());
+  // sessionId → runbox info
+  const infoMap  = useRef<Map<string, PtySessionInfo>>(new Map());
 
-  // Keep name map fresh
+  // Keep infoMap fresh whenever sessions list changes
   useEffect(() => {
-    runboxes.forEach(r => rbMap.current.set(r.id, r.name));
-  }, [runboxes]);
+    infoMap.current.clear();
+    sessions.forEach(s => infoMap.current.set(s.sessionId, s));
+  }, [sessions]);
 
+  // Subscribe to pty://agent/{sid} for every session — marks it as an agent
   useEffect(() => {
-    const ids = new Set(runboxes.map(r => r.id));
+    if (sessions.length === 0) return;
+    const cleanups: Array<() => void> = [];
 
-    // Close stale streams
-    for (const [id, es] of esMap.current) {
-      if (!ids.has(id)) { es.close(); esMap.current.delete(id); }
-    }
+    sessions.forEach(s => {
+      let unsub: (() => void) | null = null;
+      listen<string>(`pty://agent/${s.sessionId}`, ({ payload }) => {
+        // payload = agent display name e.g. "Claude Code"
+        agentMap.current.set(s.sessionId, payload || "agent");
+      }).then(fn => { unsub = fn; cleanups.push(fn); });
+    });
 
-    // Open new streams
-    for (const rb of runboxes) {
-      if (esMap.current.has(rb.id)) continue;
-
-      const connect = () => {
-        const since = Date.now() - 2000;
-        const es = new EventSource(
-          `http://localhost:${PORT}/bus/stream?runbox_id=${rb.id}&since_ms=${since}`
-        );
-
-        es.onmessage = (e) => {
-          try {
-            const msg = JSON.parse(e.data) as {
-              topic:     string;
-              from:      string;
-              payload:   string;
-              timestamp: number;
-            };
-
-            if (msg.topic === "agent.stopped" || msg.topic === "task.done") {
-              let summary = "";
-              try {
-                const p = JSON.parse(msg.payload);
-                summary = p.summary ?? p.task ?? p.result ?? "";
-              } catch {
-                summary = msg.payload?.slice(0, 120) ?? "";
-              }
-
-              const rbName    = rbMap.current.get(rb.id) ?? rb.id.slice(0, 8);
-              const agentName = msg.from?.slice(0, 8) ?? "agent";
-
-              pushNote({
-                runboxId:   rb.id,
-                runboxName: rbName,
-                agentName,
-                summary:    summary.slice(0, 160),
-                kind:       msg.topic === "task.done" ? "done" : "done",
-              });
-            }
-
-            if (msg.topic === "task.failed" || msg.topic === "error") {
-              let summary = "";
-              try {
-                const p = JSON.parse(msg.payload);
-                summary = p.error ?? p.message ?? p.task ?? "";
-              } catch {
-                summary = msg.payload?.slice(0, 120) ?? "";
-              }
-
-              const rbName    = rbMap.current.get(rb.id) ?? rb.id.slice(0, 8);
-              const agentName = msg.from?.slice(0, 8) ?? "agent";
-
-              pushNote({
-                runboxId:   rb.id,
-                runboxName: rbName,
-                agentName,
-                summary:    summary.slice(0, 160),
-                kind:       "failed",
-              });
-            }
-          } catch {}
-        };
-
-        es.onerror = () => {
-          es.close();
-          esMap.current.delete(rb.id);
-          setTimeout(connect, 4000);
-        };
-
-        esMap.current.set(rb.id, es);
-      };
-
-      connect();
-    }
-
-    return () => {
-      for (const es of esMap.current.values()) es.close();
-      esMap.current.clear();
-    };
+    return () => cleanups.forEach(fn => fn());
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runboxes.map(r => r.id).join(",")]);
+  }, [sessions.map(s => s.sessionId).join(",")]);
+
+  // Subscribe to pty://ended/{sid} for every session
+  useEffect(() => {
+    if (sessions.length === 0) return;
+    const cleanups: Array<() => void> = [];
+
+    sessions.forEach(s => {
+      listen<void>(`pty://ended/${s.sessionId}`, () => {
+        const agentName = agentMap.current.get(s.sessionId);
+        // Only notify if this session was an agent (shell exits are ignored)
+        if (!agentName) return;
+
+        const info = infoMap.current.get(s.sessionId);
+        pushNote({
+          runboxId:   info?.runboxId   ?? s.runboxId,
+          runboxName: info?.runboxName ?? s.runboxName,
+          agentName,
+          summary:    "",   // will be filled in by memory toast if available
+          kind:       "done",
+        });
+
+        // Clean up: this session is over
+        agentMap.current.delete(s.sessionId);
+      }).then(fn => cleanups.push(fn));
+    });
+
+    return () => cleanups.forEach(fn => fn());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions.map(s => s.sessionId).join(",")]);
+}
+
+// Also listen globally for the memory-added event — if a notification was just
+// pushed with no summary, backfill it with the memory summary.
+export function useMemorySummaryBackfill() {
+  useEffect(() => {
+    // memory-added carries { runbox_id, summary }
+    const unsub = listen<any>("memory-added", ({ payload }) => {
+      const rbId   = payload?.runbox_id ?? payload?.runboxId;
+      const text   = payload?.summary   ?? payload?.content ?? "";
+      if (!rbId || !text) return;
+
+      // Update the most-recent notification for this runbox that has no summary
+      _notes = _notes.map((n, i) => {
+        if (i === 0 && n.runboxId === rbId && !n.summary) {
+          return { ...n, summary: String(text).slice(0, 160) };
+        }
+        return n;
+      });
+      _listeners.forEach(fn => fn(_notes));
+    });
+    return () => { unsub.then(f => f()); };
+  }, []);
+}
+
+// ─── Legacy SSE monitor kept as secondary (optional) ──────────────────────────
+function useAgentMonitor(_runboxes: RunboxRef[]) {
+  // Intentionally empty — replaced by usePtyNotifier which is more reliable.
+  // Kept so the NotificationBell signature doesn't change.
 }
 
 // ─── Bell icon (put in sidebar header) ───────────────────────────────────────
@@ -437,6 +436,9 @@ export function NotificationToasts() {
   const [toasts, setToasts] = useState<(AppNotification & { visible: boolean })[]>([]);
   const seenIds = useRef<Set<string>>(new Set());
 
+  // Backfill summaries from memory-added events (runs once since this is a singleton)
+  useMemorySummaryBackfill();
+
   // Detect newly added notes and add them as toasts
   useEffect(() => {
     for (const n of notes) {
@@ -631,6 +633,7 @@ function Toast({
   );
 }
 
+// ─── Helper: live elapsed time ────────────────────────────────────────────────
 
 function useElapsed(ts: number): string {
   const [, forceUpdate] = useState(0);

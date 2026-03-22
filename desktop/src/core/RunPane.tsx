@@ -165,6 +165,7 @@ function parseOsc7(data: string): string | null {
 export default function RunPane({
   runboxCwd    = "~/",
   runboxId     = "default",
+  runboxName   = "runbox",
   sessionId,
   label        = "",
   onCwdChange,
@@ -179,6 +180,7 @@ export default function RunPane({
 }: {
   runboxCwd?:       string;
   runboxId?:        string;
+  runboxName?:      string;
   sessionId?:       string;
   label?:           string;
   onCwdChange?:     (cwd: string) => void;
@@ -195,8 +197,8 @@ export default function RunPane({
   const termRef   = useRef<Terminal | null>(null);
   const fitRef    = useRef<FitAddon | null>(null);
   const sidRef    = useRef<string>(sessionId ?? `${runboxId}-${crypto.randomUUID()}`);
-  const gone      = useRef(false);
-  const spawned   = useRef(false);
+  const gone           = useRef(false);
+  const spawned        = useRef(false);
   const [liveCwd, setLiveCwd] = useState(runboxCwd);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -2,13 +2,15 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import RunPane from "../core/RunPane";
+import BrowsePane from "../core/BrowsePane";
 import FileViewerPane from "../core/FileViewerPane";
 import { DiffViewer } from "./DiffViewer";
 import { FileChangeList } from "../panels/FileChangeList";
 import { GitWorktreePanel } from "../panels/Gitworktreepanel";
 import MemoryPanel from "../panels/MemoryPanel";
 import FileTreePanel from "../panels/FileTreePanel";
-import { C, MONO, SANS, PORT, tbtn } from "../shared/constants";
+import { C, MONO, SANS, tbtn } from "../shared/constants";
+import { usePtyNotifier } from "../shared/Notificationsystem";
 import type { Runbox, DiffTab } from "../shared/types";
 import { IcoBrain, IcoFiles, IcoGit } from "../shared/icons";
 
@@ -19,7 +21,7 @@ const MIN_H = 180;
 interface WinState {
   id:        string;
   label:     string;
-  kind:      "terminal" | "file";
+  kind:      "terminal" | "file" | "browser";
   filePath?: string;
   x:         number;
   y:         number;
@@ -60,6 +62,7 @@ function tileWindows(count: number, aw: number, ah: number) {
 }
 
 function winLabel(win: WinState) {
+  if (win.kind === "browser") return win.label ?? "browser";
   if (win.kind === "file" && win.filePath) {
     return win.filePath.split("/").pop() ?? win.filePath;
   }
@@ -126,76 +129,6 @@ function PanelResizeHandle({ onResize }: { onResize: (w: number) => void }) {
   );
 }
 
-// ── Search panel (restored from original) ────────────────────────────────────
-function Spinner() {
-  return <div style={{ width: 16, height: 16, border: `2px solid ${C.border}`, borderTopColor: C.t1, borderRadius: "50%", animation: "sp .7s linear infinite", margin: "0 auto" }} />;
-}
-function EmptyMsg({ text }: { text: string }) {
-  return <div style={{ padding: "28px 16px", textAlign: "center", color: C.t2, fontSize: 12, fontFamily: SANS, lineHeight: 1.7 }}>{text}</div>;
-}
-
-function SearchPanel({ runboxId, onClose }: { runboxId: string; onClose: () => void }) {
-  const [query,   setQuery]   = useState("");
-  const [results, setResults] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 60); }, []);
-
-  const search = useCallback(async (q: string) => {
-    if (!q.trim()) { setResults([]); return; }
-    setLoading(true);
-    try {
-      const r = await fetch(`http://localhost:${PORT}/events?runbox_id=${runboxId}&limit=200`);
-      const rows = await r.json();
-      const lo = q.toLowerCase();
-      setResults((rows as any[]).filter(evt => {
-        try { return JSON.stringify(JSON.parse(evt.payload_json)).toLowerCase().includes(lo) || evt.event_type.toLowerCase().includes(lo); }
-        catch { return evt.payload_json.toLowerCase().includes(lo); }
-      }).slice(0, 40));
-    } catch { setResults([]); }
-    finally { setLoading(false); }
-  }, [runboxId]);
-
-  useEffect(() => { const t = setTimeout(() => search(query), 250); return () => clearTimeout(t); }, [query, search]);
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg1 }}>
-      <PanelHeader title="Search" onClose={onClose} />
-      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-        <div style={{ position: "relative" }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.t2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-            style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="Search commands, files, events…"
-            style={{
-              width: "100%", boxSizing: "border-box",
-              background: C.bg2, border: `1px solid ${C.border}`,
-              borderRadius: 10, color: C.t0, fontSize: 12,
-              padding: "8px 10px 8px 32px", outline: "none", fontFamily: MONO,
-              transition: "border-color .15s",
-            }}
-            onFocus={e => e.currentTarget.style.borderColor = C.borderHi}
-            onBlur={e  => e.currentTarget.style.borderColor = C.border} />
-        </div>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        {loading && <div style={{ padding: "20px", textAlign: "center" }}><Spinner /></div>}
-        {!loading && query && results.length === 0 && <EmptyMsg text={`No results for "${query}"`} />}
-        {!loading && !query && <EmptyMsg text="Search workspace events, commands, and files." />}
-        {!loading && results.map((evt: any) => (
-          <div key={evt.id} style={{ padding: "8px 14px", borderBottom: `1px solid ${C.border}`, cursor: "default" }}
-            onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = C.bg2}
-            onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}>
-            <span style={{ fontSize: 9, fontWeight: 700, color: C.t3, fontFamily: MONO, textTransform: "uppercase", letterSpacing: ".07em", display: "block", marginBottom: 3 }}>{evt.event_type}</span>
-            <span style={{ fontSize: 11, fontFamily: MONO, color: C.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{evt.payload_json.slice(0, 80)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // ── Tab context menu ──────────────────────────────────────────────────────────
 function TabContextMenu({ x, y, win, isFirst, isLast, onClose, onCloseTab, onRestore, onMoveLeft, onMoveRight }: {
@@ -262,7 +195,7 @@ function TabContextMenu({ x, y, win, isFirst, isLast, onClose, onCloseTab, onRes
   );
 }
 
-type SidePanel = "files" | "git" | "search" | "memory" | "filetree" | null;
+type SidePanel = "files" | "git" | "memory" | "filetree" | null;
 type FilesView = "list" | "diff";
 
 export function WorkspaceView({
@@ -280,6 +213,7 @@ export function WorkspaceView({
   const [tabCtx,     setTabCtx]     = useState<{ x: number; y: number; win: WinState; idx: number } | null>(null);
   const [dragTabId,  setDragTabId]  = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [pendingBrowserUrl, setPendingBrowserUrl] = useState<Record<string, string | null>>({});
   const dragTabIdRef  = useRef<string | null>(null);
   const dragOverIdRef = useRef<string | null>(null);
   const initialized  = useRef(false);
@@ -344,6 +278,54 @@ export function WorkspaceView({
     return () => { unsub.then(fn => fn()); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDiff?.path]);
+
+
+  // ── Browser URL detection: listen for URLs emitted from PTY output ───────────
+  useEffect(() => {
+    const unsub = listen<string>("browser-open-url", ({ payload }) => {
+      const url = payload.trim();
+      if (!url.startsWith("http")) return;
+
+      const isLocal = url.includes("localhost") || url.includes("127.0.0.1") || url.includes("0.0.0.0");
+
+      if (!isLocal) {
+        // Non-localhost URLs: open in system browser via shell
+        window.open(url, "_blank");
+        return;
+      }
+
+      // Localhost URL → open or navigate a browser pane
+      setWins(prev => {
+        const existing = prev.find(w => w.kind === "browser");
+        if (existing) {
+          // Navigate the existing browser pane
+          setPendingBrowserUrl(p => ({ ...p, [existing.id]: url }));
+          setActiveId(existing.id);
+          return prev.map(w => w.id === existing.id ? { ...w, zIndex: nextZ() } : w);
+        }
+        // No browser pane yet — create one
+        const area = areaRef.current;
+        const id   = crypto.randomUUID();
+        setPendingBrowserUrl(p => ({ ...p, [id]: url }));
+        setActiveId(id);
+        return [...prev, {
+          id,
+          label:     "browser",
+          kind:      "browser" as const,
+          x:         GAP,
+          y:         GAP,
+          w:         area ? area.offsetWidth  - GAP * 2 : 800,
+          h:         area ? area.offsetHeight - GAP * 2 : 600,
+          minimized: false,
+          maximized: false,
+          cwd:       runbox.cwd,
+          zIndex:    nextZ(),
+        }];
+      });
+    });
+    return () => { unsub.then(f => f()); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runbox.id]);
 
   const focusWin = useCallback((id: string) => {
     setActiveId(id);
@@ -481,6 +463,16 @@ export function WorkspaceView({
 
   const memoryRunboxes = runboxes ?? [{ id: runbox.id, name: runbox.name }];
 
+  // ── Notify when any agent session finishes ────────────────────────────────
+  const ptySessionInfos = wins
+    .filter(w => w.kind === "terminal")
+    .map(w => ({
+      sessionId:   `${runbox.id}-${w.id}`,
+      runboxId:    runbox.id,
+      runboxName:  runbox.name,
+    }));
+  usePtyNotifier(ptySessionInfos);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
 
@@ -569,7 +561,14 @@ export function WorkspaceView({
                     background: "#fbbf24", boxShadow: "0 0 5px rgba(251,191,36,.6)",
                   }} />
                 )}
-                {!w.minimized && (w.kind === "file" ? (
+                {!w.minimized && (w.kind === "browser" ? (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+                    stroke={isActive ? "#00e5ff" : C.t3} strokeWidth="2" style={{ flexShrink: 0 }}>
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="2" y1="12" x2="22" y2="12"/>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                  </svg>
+                ) : w.kind === "file" ? (
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
                     stroke={isActive ? "#00e5ff" : C.t3} strokeWidth="2" style={{ flexShrink: 0 }}>
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -629,7 +628,25 @@ export function WorkspaceView({
         {/* Floating canvas */}
         <div ref={areaRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", background: C.bg0, overflow: "hidden" }}>
           {wins.map(win => (
-            win.kind === "file" && win.filePath ? (
+            win.kind === "browser" ? (
+              <div key={win.id} style={{
+                position:  "absolute",
+                left: win.x, top: win.y, width: win.w, height: win.h,
+                zIndex:    win.zIndex,
+                display:   win.minimized ? "none" : "block",
+                transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
+              }}>
+                <BrowsePane
+                  paneId={win.id}
+                  runboxId={runbox.id}
+                  isActive={activeId === win.id}
+                  onActivate={() => focusWin(win.id)}
+                  onClose={() => closeWin(win.id)}
+                  externalUrl={pendingBrowserUrl[win.id] ?? null}
+                  onExternalUrlConsumed={() => setPendingBrowserUrl(p => ({ ...p, [win.id]: null }))}
+                />
+              </div>
+            ) : win.kind === "file" && win.filePath ? (
               <div key={win.id} style={{ display: win.minimized ? "none" : "contents" }}>
                 <FileViewerPane
                   id={win.id}
@@ -652,7 +669,7 @@ export function WorkspaceView({
                 transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
               }}>
                 <RunPane
-                  runboxCwd={runbox.cwd} runboxId={runbox.id}
+                  runboxCwd={runbox.cwd} runboxId={runbox.id} runboxName={runbox.name}
                   sessionId={`${runbox.id}-${win.id}`}
                   label={win.label}
                   onCwdChange={cwd => {
@@ -701,7 +718,6 @@ export function WorkspaceView({
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: C.bg1, border: `1px solid ${C.borderMd}`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
               {sidePanel === "git"      && <GitWorktreePanel runboxCwd={runbox.cwd} runboxId={runbox.id} branch={branch} onClose={() => setSidePanel(null)} />}
               {sidePanel === "memory"   && <MemoryPanel runboxId={runbox.id} runboxName={runbox.name} onClose={() => setSidePanel(null)} />}
-              {sidePanel === "search"   && <SearchPanel runboxId={runbox.id} onClose={() => setSidePanel(null)} />}
               {sidePanel === "filetree" && <FileTreePanel cwd={runbox.cwd} onClose={() => setSidePanel(null)} onOpenFile={openFile} />}
             </div>
           </div>
@@ -717,13 +733,6 @@ export function WorkspaceView({
               stroke={sidePanel === "filetree" ? "#00e5ff" : "#ffffff"}
               strokeWidth="2" strokeLinecap="round">
               <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            </svg>
-          </StripIcon>
-          <StripIcon title="Search"        active={sidePanel === "search"}   onClick={() => toggleSide("search")}  >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-              stroke={sidePanel === "search" ? "#00e5ff" : "#ffffff"}
-              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
           </StripIcon>
           <div style={{ flex: 1 }} />
