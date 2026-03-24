@@ -1,6 +1,4 @@
 // src-tauri/src/lib.rs
-// Key fix: memory::init() is now awaited before server::start()
-// so "memory db not initialised" never appears.
 
 #![allow(dead_code, unused_imports, unused_variables, unused_assignments)]
 mod agent;
@@ -39,20 +37,15 @@ pub fn run() {
             let db_handle       = app.state::<state::AppState>().db.clone();
             let sessions_handle = app.state::<state::AppState>().sessions.clone();
 
-            // ── Orphan worktree cleanup on startup ───────────────────────────
             git::cleanup::prune_orphan_worktrees(&app.state::<state::AppState>().db);
 
-            // ── Init memory FIRST, then start server ──────────────────────────
             tauri::async_runtime::spawn(async move {
                 match memory::init().await {
                     Ok(_) => {
                         eprintln!("[memory] init complete");
                         app_handle.emit("memory-ready", ()).ok();
-                        // Week 3: warm embedding model after memory init
-                        // Downloads nomic-embed-text-v1.5 (~200MB) on first run
                         tauri::async_runtime::spawn(async {
                             agent::embedder::init_embedder().await;
-                            // Week 4: prune expired + stale memories after model ready
                             agent::scorer::decay_prune().await;
                         });
                     }
@@ -74,6 +67,7 @@ pub fn run() {
             commands::pty::pty_kill,
             commands::watcher::watch_runbox,
             commands::watcher::unwatch_runbox,
+            // ── Memory V1/V2 (kept) ───────────────────────────────────────────
             commands::memory::memory_add,
             commands::memory::memory_add_full,
             commands::memory::memory_list,
@@ -95,8 +89,17 @@ pub fn run() {
             commands::memory::memory_get_context,
             commands::memory::memory_confirm_env,
             commands::memory::memory_decay_prune,
+            // ── Memory V3 (new) ───────────────────────────────────────────────
+            commands::memory::memory_add_locked,
+            commands::memory::memory_list_by_level,
+            commands::memory::memory_list_locked,
+            commands::memory::memory_list_temporary_for_agent,
+            commands::memory::memory_expire_temporary,
+            commands::memory::memory_remember,
+            // ── DB ────────────────────────────────────────────────────────────
             commands::db::db_sessions_for_runbox,
             commands::db::db_events_for_runbox,
+            // ── Git ───────────────────────────────────────────────────────────
             git::commands::git_ensure,
             git::commands::git_log_for_runbox,
             git::commands::git_diff_for_commit,
@@ -115,6 +118,7 @@ pub fn run() {
             git::commands::git_branches,
             git::commands::git_checkout,
             git::commands::git_diff_between_worktrees,
+            // ── FS ────────────────────────────────────────────────────────────
             commands::fs::open_directory_dialog,
             commands::fs::open_in_editor,
             commands::fs::read_text_file,
@@ -124,6 +128,7 @@ pub fn run() {
             commands::fs::fs_create_dir,
             commands::fs::fs_create_file,
             commands::fs::copy_to_clipboard,
+            // ── Browser ───────────────────────────────────────────────────────
             browser::webview::browser_create,
             browser::webview::browser_destroy,
             browser::webview::browser_navigate,

@@ -1,5 +1,7 @@
 // src-tauri/src/commands/memory.rs
-// Supercontext V2 — Tauri commands including new V2 typed operations.
+// Supercontext V3 — Tauri commands.
+// V2 commands kept for panel backward compat.
+// V3 adds: memory_add_locked, memory_list_by_level, memory_expire_temporary.
 
 use crate::memory;
 
@@ -8,7 +10,7 @@ async fn ensure_init() -> Result<(), String> {
     Err("memory db not initialised — call init() first".to_string())
 }
 
-// ── V1 compat commands (unchanged signatures) ─────────────────────────────────
+// ── V1 compat commands ─────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn memory_add(runbox_id: String, session_id: String, content: String) -> Result<memory::Memory, String> {
@@ -105,7 +107,7 @@ pub async fn memory_search_global(query: String, limit: Option<usize>) -> Result
     memory::memories_search_global(&query, limit.unwrap_or(50)).await
 }
 
-// ── V2 new commands ───────────────────────────────────────────────────────────
+// ── V2 commands ────────────────────────────────────────────────────────────────
 
 /// Write a typed V2 memory from the frontend panel.
 #[tauri::command]
@@ -139,7 +141,7 @@ pub async fn memory_add_typed_cmd(
     Ok(result)
 }
 
-/// Get memories filtered by type — for the new panel tabs.
+/// Get memories filtered by V2 type — for legacy panel tabs.
 #[tauri::command]
 pub async fn memory_list_by_type(runbox_id: String, memory_type: String) -> Result<Vec<memory::Memory>, String> {
     ensure_init().await?;
@@ -156,11 +158,11 @@ pub async fn memory_active_blockers(runbox_id: String) -> Result<Vec<memory::Mem
 /// Resolve a blocker — marks resolved + writes failure.
 #[tauri::command]
 pub async fn memory_resolve_blocker(
-    runbox_id:        String,
-    session_id:       String,
-    agent_name:       String,
+    runbox_id:           String,
+    session_id:          String,
+    agent_name:          String,
     blocker_description: String,
-    fix:              String,
+    fix:                 String,
 ) -> Result<(), String> {
     ensure_init().await?;
     let result = memory::resolve_blocker(&runbox_id, &session_id, &agent_name, &blocker_description, &fix).await?;
@@ -169,11 +171,16 @@ pub async fn memory_resolve_blocker(
     Ok(result)
 }
 
-/// Get the injector context block for display in the panel.
+/// Get the injector context block for display in the panel (V3 path).
 #[tauri::command]
 pub async fn memory_get_context(runbox_id: String, task: Option<String>) -> Result<String, String> {
     ensure_init().await?;
-    Ok(crate::agent::injector::build_context(&runbox_id, task.as_deref().unwrap_or("")).await)
+    // Panel has no agent_id — pass empty string (no TEMPORARY filter)
+    Ok(crate::agent::injector::build_context_v3(
+        &runbox_id,
+        task.as_deref().unwrap_or(""),
+        "",
+    ).await)
 }
 
 /// Confirm an env fact is still valid — resets unverified flag.
@@ -189,4 +196,74 @@ pub async fn memory_decay_prune() -> Result<String, String> {
     ensure_init().await?;
     crate::agent::scorer::decay_prune().await;
     Ok("decay prune complete".to_string())
+}
+
+// ── V3 commands ────────────────────────────────────────────────────────────────
+
+/// Add a LOCKED rule (user/panel only — agents cannot call this).
+#[tauri::command]
+pub async fn memory_add_locked(
+    runbox_id:  String,
+    session_id: String,
+    content:    String,
+) -> Result<memory::Memory, String> {
+    ensure_init().await?;
+    let result = memory::add_locked(&runbox_id, &session_id, &content).await?;
+    crate::agent::injector::invalidate_cache(&runbox_id).await;
+    crate::agent::globals::emit_memory_added(&runbox_id);
+    Ok(result)
+}
+
+/// Get memories filtered by V3 level — for V3 panel tabs (LOCKED/PREFERRED/TEMPORARY/SESSION).
+#[tauri::command]
+pub async fn memory_list_by_level(runbox_id: String, level: String) -> Result<Vec<memory::Memory>, String> {
+    ensure_init().await?;
+    memory::memories_by_level(&runbox_id, &level).await
+}
+
+/// Get LOCKED memories for a runbox.
+#[tauri::command]
+pub async fn memory_list_locked(runbox_id: String) -> Result<Vec<memory::Memory>, String> {
+    ensure_init().await?;
+    memory::locked_memories(&runbox_id).await
+}
+
+/// Get TEMPORARY memories for a specific agent in this session.
+#[tauri::command]
+pub async fn memory_list_temporary_for_agent(
+    runbox_id: String,
+    agent_id:  String,
+) -> Result<Vec<memory::Memory>, String> {
+    ensure_init().await?;
+    memory::memories_by_level_for_agent(&runbox_id, memory::LEVEL_TEMPORARY, &agent_id).await
+}
+
+/// Expire all TEMPORARY memories for an agent (called on session end or manually).
+#[tauri::command]
+pub async fn memory_expire_temporary(
+    runbox_id: String,
+    agent_id:  String,
+) -> Result<(), String> {
+    ensure_init().await?;
+    memory::expire_temporary_for_agent(&runbox_id, &agent_id).await?;
+    crate::agent::injector::invalidate_cache(&runbox_id).await;
+    crate::agent::globals::emit_memory_added(&runbox_id);
+    Ok(())
+}
+
+/// Write an atomic fact via remember() — for panel manual remember.
+#[tauri::command]
+pub async fn memory_remember(
+    runbox_id:  String,
+    session_id: String,
+    agent_id:   String,
+    agent_name: String,
+    content:    String,
+    level:      String,
+) -> Result<memory::Memory, String> {
+    ensure_init().await?;
+    let result = memory::remember(&runbox_id, &session_id, &agent_id, &agent_name, &content, &level).await?;
+    crate::agent::injector::invalidate_cache(&runbox_id).await;
+    crate::agent::globals::emit_memory_added(&runbox_id);
+    Ok(result)
 }

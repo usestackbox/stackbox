@@ -1,5 +1,15 @@
 // src-tauri/src/mcp/tools.rs
-// Supercontext V2 — 5 MCP tools + workspace_read + snapshot.
+// Supercontext V3 — 4 core tools + workspace_read + snapshot.
+//
+// Core tools:
+//   memory_context   — read first · every session
+//   remember         — PREFERRED or TEMPORARY only · atomic facts
+//   session_log      — after each step · 200 line cap per agent
+//   session_summary  — last · task complete · one paragraph
+//
+// Util tools:
+//   workspace_read   — recent workspace events
+//   snapshot         — git checkpoint before risky ops
 
 use serde_json::{json, Value};
 use crate::{db, memory, agent::injector};
@@ -9,61 +19,45 @@ pub fn tool_list() -> Value {
     json!({ "tools": [
         {
             "name": "memory_context",
-            "description": "CALL THIS FIRST on every task. Returns complete ranked workspace context (~800 tokens): goal → session summaries → active blockers (DO NOT retry dead ends) → relevant failures (DO NOT re-break) → environment facts → codebase map. Results are relevance-scored to your task. Cached — fast on repeated calls.",
+            "description": "CALL THIS FIRST on every task. Returns ranked context (~400 tokens):\n1. LOCKED — project constraints, never violate these\n2. RECENT SESSIONS — what other agents completed recently\n3. PREFERRED — persistent facts: env, tools, ports, lessons learned\n4. TEMPORARY — your own active working notes from this session\n\nCached — fast on repeated calls. Pass task= to get relevance-ranked results.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "task": { "type": "string", "description": "What you are about to do. Example: 'add JWT auth to login route'. Used to score which failures and codebase entries are most relevant." }
+                    "task": { "type": "string", "description": "What you are about to do. Used to rank PREFERRED facts by relevance." }
                 }
             }
         },
         {
-            "name": "memory_write",
-            "description": "Write a typed memory. memory_type is required — it sets importance, decay, and injection priority.\n\nTypes:\n• goal — what we are building + acceptance criteria. imp=100, never decays.\n• environment — machine facts, key=value ONLY. 'node=working', 'py=broken', 'port=3836'. No prose. imp=90, 6mo decay.\n• codebase — file/function map. 'src/auth/jwt.ts: JWT validation · src/routes/login.tsx: login form'. imp=85.\n• blocker — unsolved error. 'Error: X. Tried: Y, Z. Do not retry Y or Z.' imp=95, stays until resolved.\n• failure — resolved error. 'Error: X. Cause: Y. Fix: Z.' imp=100, never decays.\n• session — end-of-session summary. What attempted, what changed, what's still open. 5 lines max. imp=80.",
+            "name": "remember",
+            "description": "Write one atomic fact. One fact per call — not paragraphs.\n\nPREFERRED — persistent facts. Key=value for env: 'port=3456', 'node=v18'. Use for: env facts, working rules, lessons learned. 6-month decay. Key-versioned (writing 'port=3456' resolves old 'port=3000').\nTEMPORARY — working notes for this session. 'halfway through dark mode refactor in styles.css'. Auto-expires when session ends.\n\nNever LOCKED or SESSION — those have separate paths.",
             "inputSchema": {
                 "type": "object",
-                "required": ["content", "memory_type"],
+                "required": ["content", "level"],
                 "properties": {
-                    "content":     { "type": "string" },
-                    "memory_type": { "type": "string", "enum": ["goal","environment","codebase","blocker","failure","session"] },
-                    "scope":       { "type": "string", "enum": ["local","machine","global"], "description": "local=this runbox (default). machine=all runboxes on this OS. global=all projects." },
-                    "tags":        { "type": "string" }
+                    "content": { "type": "string", "description": "One atomic fact. Examples: 'port=3456', 'python not available — use node/npm', 'halfway through button contrast check'" },
+                    "level":   { "type": "string", "enum": ["PREFERRED", "TEMPORARY"] }
                 }
             }
         },
         {
-            "name": "memory_resolve",
-            "description": "Call when you fix a blocker. Marks blocker resolved (so future agents skip the dead end) and writes a permanent failure memory with the fix. Call BEFORE ending any session where you fixed something.",
+            "name": "session_log",
+            "description": "Log one meaningful step. One line — concise. Called during task, after each meaningful action.\n\nExamples:\n  '[step] read styles.css — found 12 color variables in :root'\n  '[step] changed --primary from #3b82f6 to #000000'\n  '[done] all variables converted — verified at localhost:3456'\n  '[error] port 3000 occupied — switched to 3456'\n\nPrefixes:\n  [step]    during work, after each meaningful action\n  [done]    when something completes successfully\n  [error]   when something fails\n  [blocked] when you are stuck and cannot proceed\n\nCapped at 200 lines per agent. Oldest dropped when cap reached. Auto-expires when session ends.\nKeep it short. One line. No essays. The GCC ablation showed fine-grained OTA traces are the single biggest performance factor.",
             "inputSchema": {
                 "type": "object",
-                "required": ["blocker_description", "fix"],
+                "required": ["entry"],
                 "properties": {
-                    "blocker_description": { "type": "string", "description": "The blocker content or enough to identify it." },
-                    "fix":                 { "type": "string", "description": "Root cause + exact fix applied." }
+                    "entry": { "type": "string", "description": "One-line step log. Prefix with [step], [done], [error], or [blocked]." }
                 }
             }
         },
         {
-            "name": "memory_goal",
-            "description": "Set or update the current project goal. Injected first in every memory_context call across all sessions. Call when the user defines what to build.",
+            "name": "session_summary",
+            "description": "Write a session summary when task is complete. One paragraph. Called LAST — after all work is done.\n\nCover: what was attempted, what changed, what still needs doing, key facts (port, node version, etc.).\nOther agents will see this in their RECENT SESSIONS on next session_context call.\n\nExample: 'Converted login-app/styles.css to black/white. Changed 12 CSS variables in :root. Node v18, port 3456. Did not touch login-app/app.js (locked). Next: test mobile viewport.'",
             "inputSchema": {
                 "type": "object",
-                "required": ["goal"],
+                "required": ["text"],
                 "properties": {
-                    "goal": { "type": "string", "description": "What we are building + acceptance criteria." }
-                }
-            }
-        },
-        {
-            "name": "memory_search",
-            "description": "Explicit memory query for when memory_context didn't surface what you need. 'what do we know about port 3836', 'have we seen this ENOENT error', 'which file handles JWT validation'. Week 1: keyword. Week 3: semantic ANN.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["query"],
-                "properties": {
-                    "query":       { "type": "string" },
-                    "memory_type": { "type": "string", "enum": ["goal","environment","codebase","blocker","failure","session"], "description": "Optional type filter." },
-                    "limit":       { "type": "number", "description": "Max results. Default 10." }
+                    "text": { "type": "string", "description": "One paragraph summary of what happened this session." }
                 }
             }
         },
@@ -106,12 +100,13 @@ pub async fn dispatch(
                 .and_then(|p| p.get("name")).and_then(|n| n.as_str()).unwrap_or("");
             let args = params.as_ref()
                 .and_then(|p| p.get("arguments")).cloned().unwrap_or(json!({}));
+            let agent_type = memory::agent_type_from_name(agent_name);
+            let agent_id   = memory::make_agent_id(&agent_type, session_id);
             match name {
-                "memory_context"  => tool_memory_context(id, runbox_id, &args).await,
-                "memory_write"    => tool_memory_write(id, runbox_id, session_id, agent_name, &args).await,
-                "memory_resolve"  => tool_memory_resolve(id, runbox_id, session_id, agent_name, &args).await,
-                "memory_goal"     => tool_memory_goal(id, runbox_id, session_id, agent_name, &args).await,
-                "memory_search"   => tool_memory_search(id, runbox_id, &args).await,
+                "memory_context"  => tool_memory_context(id, runbox_id, &agent_id, &args).await,
+                "remember"        => tool_remember(id, runbox_id, session_id, &agent_id, agent_name, &args).await,
+                "session_log"     => tool_session_log(id, runbox_id, session_id, &agent_id, agent_name, &args).await,
+                "session_summary" => tool_session_summary(id, runbox_id, session_id, &agent_id, agent_name, &args).await,
                 "workspace_read"  => tool_workspace_read(id, runbox_id, &args, state).await,
                 "snapshot"        => tool_snapshot(id, runbox_id, session_id, &args, state).await,
                 _ => JsonRpcResponse::err(id, -32601, format!("unknown tool: {name}")),
@@ -120,33 +115,40 @@ pub async fn dispatch(
         "initialize" => JsonRpcResponse::ok(id, json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "stackbox-supercontext", "version": "2.0.0" }
+            "serverInfo": { "name": "stackbox-supercontext", "version": "3.0.0" }
         })),
         _ => JsonRpcResponse::err(id, -32601, format!("method not found: {method}")),
     }
 }
 
-// ── memory_context ────────────────────────────────────────────────────────────
+// ── memory_context ─────────────────────────────────────────────────────────────
 
-async fn tool_memory_context(id: Option<Value>, runbox_id: &str, args: &Value) -> JsonRpcResponse {
-    let task = args.get("task").and_then(|v| v.as_str()).unwrap_or("");
-    let output = injector::build_context(runbox_id, task).await;
+async fn tool_memory_context(
+    id:       Option<Value>,
+    runbox_id: &str,
+    agent_id:  &str,
+    args:      &Value,
+) -> JsonRpcResponse {
+    let task   = args.get("task").and_then(|v| v.as_str()).unwrap_or("");
+    let output = injector::build_context_v3(runbox_id, task, agent_id).await;
 
     if output.trim().is_empty() {
         return JsonRpcResponse::ok(id, json!({
-            "content": [{ "type": "text", "text": "No context yet.\n\nCall memory_goal to set what you're building.\nCall memory_write with type='environment' to record env facts (key=value format).\nThese will be injected in future memory_context calls." }]
+            "content": [{ "type": "text", "text":
+                "No context yet.\n\nGet started:\n• Call remember(content='port=3456', level='PREFERRED') to save env facts\n• Call session_log(entry='[step] starting task') to log progress\n• Call session_summary(text='...') when done" }]
         }));
     }
 
     JsonRpcResponse::ok(id, json!({ "content": [{ "type": "text", "text": output }] }))
 }
 
-// ── memory_write ──────────────────────────────────────────────────────────────
+// ── remember ───────────────────────────────────────────────────────────────────
 
-async fn tool_memory_write(
+async fn tool_remember(
     id:         Option<Value>,
     runbox_id:  &str,
     session_id: &str,
+    agent_id:   &str,
     agent_name: &str,
     args:       &Value,
 ) -> JsonRpcResponse {
@@ -154,39 +156,21 @@ async fn tool_memory_write(
         Some(c) if !c.trim().is_empty() => c.trim().to_string(),
         _ => return JsonRpcResponse::err(id, -32602, "content is required"),
     };
-    let memory_type = args.get("memory_type").and_then(|v| v.as_str()).unwrap_or("general");
-    let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("local");
-    let extra_tags = args.get("tags").and_then(|v| v.as_str()).unwrap_or("");
-
-    // Build tags: type + scope (if non-local) + extras
-    let mut tag_parts = vec![memory_type.to_string()];
-    if scope != "local" { tag_parts.push(format!("scope:{scope}")); }
-    if !extra_tags.is_empty() { tag_parts.push(extra_tags.to_string()); }
-    let tags = tag_parts.join(",");
-
-    let importance = memory::importance_for_type(memory_type);
-    let decay_at   = memory::decay_for_type(memory_type);
-    let agent_type = memory::agent_type_from_name(agent_name);
-
-    // For machine-scope, write to __global__ runbox so all runboxes see it
-    let target_runbox = if scope == "machine" || scope == "global" {
-        "__global__"
-    } else {
-        runbox_id
+    let level = match args.get("level").and_then(|v| v.as_str()) {
+        Some(l) if l == "PREFERRED" || l == "TEMPORARY" => l.to_string(),
+        Some(l) => return JsonRpcResponse::err(id, -32602,
+            format!("level must be PREFERRED or TEMPORARY, got '{l}'")),
+        None => return JsonRpcResponse::err(id, -32602, "level is required"),
     };
 
-    match memory::memory_add_typed(
-        target_runbox, session_id, &content,
-        "main", "memory", &tags, "", agent_name,
-        memory_type, importance, false, decay_at, scope, &agent_type,
-    ).await {
+    match memory::remember(runbox_id, session_id, agent_id, agent_name, &content, &level).await {
         Ok(mem) => {
             injector::invalidate_cache(runbox_id).await;
             crate::agent::globals::emit_memory_added(runbox_id);
             JsonRpcResponse::ok(id, json!({
                 "content": [{ "type": "text", "text": format!(
-                    "Memory saved [{memory_type}] id={} scope={scope}",
-                    &mem.id[..8]
+                    "Saved [{level}] id={} key={}",
+                    &mem.id[..8], mem.key
                 )}]
             }))
         }
@@ -194,170 +178,105 @@ async fn tool_memory_write(
     }
 }
 
-// ── memory_resolve ────────────────────────────────────────────────────────────
+// ── session_log ────────────────────────────────────────────────────────────────
 
-async fn tool_memory_resolve(
+async fn tool_session_log(
     id:         Option<Value>,
     runbox_id:  &str,
     session_id: &str,
+    agent_id:   &str,
     agent_name: &str,
     args:       &Value,
 ) -> JsonRpcResponse {
-    let blocker_desc = match args.get("blocker_description").and_then(|v| v.as_str()) {
-        Some(s) if !s.trim().is_empty() => s.trim().to_string(),
-        _ => return JsonRpcResponse::err(id, -32602, "blocker_description is required"),
-    };
-    let fix = match args.get("fix").and_then(|v| v.as_str()) {
-        Some(s) if !s.trim().is_empty() => s.trim().to_string(),
-        _ => return JsonRpcResponse::err(id, -32602, "fix is required"),
+    let entry = match args.get("entry").and_then(|v| v.as_str()) {
+        Some(e) if !e.trim().is_empty() => e.trim().to_string(),
+        _ => return JsonRpcResponse::err(id, -32602, "entry is required"),
     };
 
-    match memory::resolve_blocker(runbox_id, session_id, agent_name, &blocker_desc, &fix).await {
-        Ok(()) => {
-            injector::invalidate_cache(runbox_id).await;
-            crate::agent::globals::emit_memory_added(runbox_id);
-            // Broadcast so other panes see the fix
-            crate::agent::globals::emit_event(
-                "supercontext:blocker-resolved",
-                serde_json::json!({ "runbox_id": runbox_id, "fix": &fix }),
-            );
-            JsonRpcResponse::ok(id, json!({
-                "content": [{ "type": "text", "text": format!(
-                    "Blocker resolved. Failure memory written with fix: {}", &fix[..fix.len().min(120)]
-                )}]
-            }))
-        }
+    match memory::session_log(runbox_id, session_id, agent_id, agent_name, &entry).await {
+        Ok(_) => JsonRpcResponse::ok(id, json!({
+            "content": [{ "type": "text", "text": "Logged." }]
+        })),
         Err(e) => JsonRpcResponse::err(id, -32000, e),
     }
 }
 
-// ── memory_goal ───────────────────────────────────────────────────────────────
+// ── session_summary ────────────────────────────────────────────────────────────
 
-async fn tool_memory_goal(
+async fn tool_session_summary(
     id:         Option<Value>,
     runbox_id:  &str,
     session_id: &str,
+    agent_id:   &str,
     agent_name: &str,
     args:       &Value,
 ) -> JsonRpcResponse {
-    let goal = match args.get("goal").and_then(|v| v.as_str()) {
-        Some(s) if !s.trim().is_empty() => s.trim().to_string(),
-        _ => return JsonRpcResponse::err(id, -32602, "goal is required"),
+    let text = match args.get("text").and_then(|v| v.as_str()) {
+        Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+        _ => return JsonRpcResponse::err(id, -32602, "text is required"),
     };
 
-    let agent_type = memory::agent_type_from_name(agent_name);
-
-    match memory::memory_add_typed(
-        runbox_id, session_id, &goal,
-        "main", "milestone", "goal", "", agent_name,
-        memory::MT_GOAL, 100, false,
-        memory::DECAY_NEVER, "local", &agent_type,
-    ).await {
-        Ok(mem) => {
+    match memory::session_summary(runbox_id, session_id, agent_id, agent_name, &text).await {
+        Ok(_) => {
             injector::invalidate_cache(runbox_id).await;
             crate::agent::globals::emit_memory_added(runbox_id);
             JsonRpcResponse::ok(id, json!({
-                "content": [{ "type": "text", "text": format!(
-                    "Goal set (id={}). Will be injected first in all future memory_context calls.",
-                    &mem.id[..8]
-                )}]
+                "content": [{ "type": "text", "text": "Session summary saved. Other agents will see this in their next memory_context call." }]
             }))
         }
         Err(e) => JsonRpcResponse::err(id, -32000, e),
     }
 }
 
-// ── memory_search ─────────────────────────────────────────────────────────────
+// ── workspace_read ─────────────────────────────────────────────────────────────
 
-async fn tool_memory_search(
+async fn tool_workspace_read(
     id:        Option<Value>,
     runbox_id: &str,
     args:      &Value,
+    state:     &McpState,
 ) -> JsonRpcResponse {
-    let query = match args.get("query").and_then(|v| v.as_str()) {
-        Some(s) if !s.trim().is_empty() => s.trim().to_string(),
-        _ => return JsonRpcResponse::err(id, -32602, "query is required"),
-    };
-    let type_filter = args.get("memory_type").and_then(|v| v.as_str());
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+    let limit      = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+    let event_type = args.get("event_type").and_then(|v| v.as_str()).unwrap_or("");
 
-    // Week 3: ANN semantic search with keyword fallback
-    let scored = match memory::memories_ann_search(runbox_id, &query, type_filter, limit).await {
-        Ok(r) => r,
-        Err(e) => return JsonRpcResponse::err(id, -32000, e),
+    let events = if event_type.is_empty() {
+        crate::db::events::events_recent(&state.db, runbox_id, limit).unwrap_or_default()
+    } else {
+        crate::db::events::events_by_type(&state.db, runbox_id, event_type, limit).unwrap_or_default()
     };
 
-    if scored.is_empty() {
+    if events.is_empty() {
         return JsonRpcResponse::ok(id, json!({
-            "content": [{ "type": "text", "text": format!("No memories found matching '{query}'.") }]
+            "content": [{ "type": "text", "text": "No workspace events yet." }]
         }));
     }
 
-    let using_ann = crate::agent::embedder::is_ready();
-    let lines: Vec<String> = scored.iter().map(|(score, m)| {
-        let mt  = m.effective_type();
-        let ago = format_ago(m.timestamp);
-        let resolved_tag = if m.resolved { " [resolved]" } else { "" };
-        let score_str = if using_ann { format!(" [{:.2}]", score) } else { String::new() };
-        format!("[{mt}{resolved_tag}]{score_str} [{ago}] {}",
-            m.content.lines().next().unwrap_or("").trim())
+    let lines: Vec<String> = events.iter().map(|e| {
+        format!("[{}] {} {}", &e.timestamp.to_string()[..10], e.event_type, e.payload_json)
     }).collect();
 
-    let method = if using_ann { "semantic ANN" } else { "keyword" };
     JsonRpcResponse::ok(id, json!({
-        "content": [{ "type": "text", "text": format!(
-            "Found {} results ({method}):\n\n{}", scored.len(), lines.join("\n")
-        )}]
+        "content": [{ "type": "text", "text": lines.join("\n") }]
     }))
 }
 
-// ── workspace_read ────────────────────────────────────────────────────────────
-
-async fn tool_workspace_read(
-    id: Option<Value>, runbox_id: &str, args: &Value, state: &McpState,
-) -> JsonRpcResponse {
-    let limit      = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
-    let event_type = args.get("event_type").and_then(|v| v.as_str());
-
-    let events = if let Some(et) = event_type {
-        db::events::events_by_type(&state.db, runbox_id, et, limit)
-    } else {
-        db::events::events_recent(&state.db, runbox_id, limit)
-    }.unwrap_or_default();
-
-    if events.is_empty() {
-        return JsonRpcResponse::ok(id, json!({ "content": [{ "type": "text", "text": "No workspace events yet." }] }));
-    }
-
-    let lines: Vec<String> = events.iter().rev().map(|e| {
-        format!("[{}] {} — {}", format_ago(e.timestamp), e.event_type,
-            e.payload_json.chars().take(120).collect::<String>())
-    }).collect();
-
-    JsonRpcResponse::ok(id, json!({ "content": [{ "type": "text", "text": lines.join("\n") }] }))
-}
-
-// ── snapshot ──────────────────────────────────────────────────────────────────
+// ── snapshot ───────────────────────────────────────────────────────────────────
 
 async fn tool_snapshot(
-    id: Option<Value>, runbox_id: &str, session_id: &str,
-    args: &Value, state: &McpState,
+    id:         Option<Value>,
+    runbox_id:  &str,
+    session_id: &str,
+    args:       &Value,
+    state:      &McpState,
 ) -> JsonRpcResponse {
     let message = match args.get("message").and_then(|v| v.as_str()) {
-        Some(m) if !m.trim().is_empty() => m.to_string(),
+        Some(m) if !m.trim().is_empty() => m.trim().to_string(),
         _ => return JsonRpcResponse::err(id, -32602, "message is required"),
     };
-    crate::workspace::events::record_workspace_snapshot(&state.db, runbox_id, session_id, "", &message);
-    JsonRpcResponse::ok(id, json!({ "content": [{ "type": "text", "text": format!("Snapshot: {message}") }] }))
-}
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-fn format_ago(ms: i64) -> String {
-    let now  = memory::now_ms();
-    let diff = (now - ms).max(0) / 1000;
-    if diff < 60    { return "just now".to_string(); }
-    if diff < 3600  { return format!("{}m ago", diff / 60); }
-    if diff < 86400 { return format!("{}h ago", diff / 3600); }
-    format!("{}d ago", diff / 86400)
+    match crate::workspace::snapshot::snapshot_from_git(&state.db, runbox_id, session_id, "") {
+        _ => JsonRpcResponse::ok(id, json!({
+            "content": [{ "type": "text", "text": format!("Snapshot: {message}") }]
+        }))
+    }
 }

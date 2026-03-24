@@ -51,7 +51,9 @@ export default function BrowsePane({
 
   const navigate = useCallback(async (raw: string) => {
     const url = raw.trim().startsWith("http") ? raw.trim() : `http://${raw.trim()}`;
-    if (!isLocalhost(url)) return;
+    // Removed isLocalhost guard — user-typed URLs should always navigate.
+    // The Rust webview handles any URL; isLocalhost is still enforced for
+    // auto-open URLs emitted from PTY output (handled in WorkspaceView).
     setConnError(false);
     urlRef.current = url;
     setUrlInput(url);

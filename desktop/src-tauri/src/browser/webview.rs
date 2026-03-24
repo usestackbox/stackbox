@@ -130,8 +130,11 @@ pub fn browser_destroy(app: AppHandle, id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
-    app.get_webview(&label(&id)).ok_or("webview not found")?
-        .navigate(url.parse::<tauri::Url>().map_err(|e| e.to_string())?)
+    let wv = app.get_webview(&label(&id)).ok_or("webview not found")?;
+    // .navigate() silently fails on Windows child webviews created via add_child.
+    // Using window.location.assign() via eval is reliable cross-platform.
+    let escaped = url.replace('\\', "\\\\").replace('\'', "\\'");
+    wv.eval(&format!("window.location.assign('{}')", escaped))
         .map_err(|e| e.to_string())
 }
 

@@ -1,4 +1,7 @@
 // src-tauri/src/pty/mod.rs
+// Supercontext V3 — OutputClassifier + ResponseCapture removed.
+// Agents write memory intentionally via remember()/session_log()/session_summary().
+// Session end: expire TEMPORARY for agent, run auto_session_summary fallback.
 
 pub mod detection;
 pub mod watcher;
@@ -10,7 +13,7 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tauri::{AppHandle, Emitter};
 
 use crate::{
-    agent::{context::inject, injector, kind::AgentKind},  // injector kept from Copy 1
+    agent::{context::inject, injector, kind::AgentKind},
     git::repo::{ensure_git_repo, ensure_worktree, remove_worktree},
     memory,
     mcp::config::write_mcp_config,
@@ -22,7 +25,7 @@ use crate::{
     db::sessions::{session_start, session_end},
 };
 
-use detection::{strip_ansi, ResponseCapture, OutputClassifier, MemoryKind, on_command_result};
+use detection::{strip_ansi, on_command_result};
 
 pub fn expand_cwd(raw: &str) -> String {
     let s = raw.trim();
@@ -60,8 +63,8 @@ pub async fn spawn(
     runbox_id:  String,
     cwd:        String,
     agent_cmd:  Option<String>,
-    cols:       Option<u16>,   // from Copy 2
-    rows:       Option<u16>,   // from Copy 2
+    cols:       Option<u16>,
+    rows:       Option<u16>,
     state:      &AppState,
 ) -> Result<(), String> {
     let pty_system = native_pty_system();
@@ -87,9 +90,6 @@ pub async fn spawn(
     ensure_git_repo(&resolved_cwd, &runbox_id)
         .unwrap_or_else(|e| { eprintln!("[pty] ensure_git_repo: {e}"); String::new() });
 
-    // Use session_id for worktree naming — each agent spawn gets its own
-    // isolated worktree/branch even when multiple agents run in the same runbox.
-    // (from Copy 1 — Copy 2 mistakenly used &runbox_id which shared worktrees)
     let worktree_path = if agent_kind != AgentKind::Shell {
         ensure_worktree(&resolved_cwd, &session_id)
     } else {
@@ -100,6 +100,20 @@ pub async fn spawn(
     clear_git_lock(&effective_cwd);
 
     record_agent_spawned(&state.db, &runbox_id, &session_id, agent_kind.display_name(), &effective_cwd);
+
+    // GCC+Letta: register cwd for FS sync + injector reads
+    crate::agent::globals::register_runbox_cwd(&runbox_id, &effective_cwd);
+
+    // GCC+Letta: boot_init — scan codebase, write metadata.yaml + main.md
+    // Runs async in background, no-op if metadata.yaml is < 7 days old
+    if agent_kind != AgentKind::Shell {
+        let rb4  = runbox_id.clone();
+        let cwd4 = effective_cwd.clone();
+        let db4  = state.db.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::memory::sleep::boot_init(&rb4, &cwd4, &db4).await;
+        });
+    }
 
     {
         let db    = state.db.clone();
@@ -120,7 +134,7 @@ pub async fn spawn(
         let ps       = format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", sys_root);
         let mut c    = CommandBuilder::new(&ps);
         c.args(&["-NoLogo", "-NoExit", "-NonInteractive", "-Command",
-            r#"function prompt { "~\\" + (Split-Path -Leaf (Get-Location)) + "> " }"#]);
+            r#"function prompt { "~\" + (Split-Path -Leaf (Get-Location)) + "> " }"#]);
         for var in &["USERPROFILE","APPDATA","LOCALAPPDATA","TEMP","TMP","PATH","SystemRoot"] {
             c.env(var, std::env::var(var).unwrap_or_default());
         }
@@ -193,7 +207,6 @@ pub async fn spawn(
         AgentKind::CursorAgent   => { cmd.env("CURSOR_CONTEXT_FILE", &ctx_file); }
         AgentKind::GeminiCli     => { cmd.env("GEMINI_SYSTEM_MD", &ctx_file); }
         AgentKind::GitHubCopilot => { cmd.env("COPILOT_CONTEXT_FILE", &ctx_file); }
-        AgentKind::OpenCode      => { cmd.env("OPENCODE_CONTEXT_FILE", &ctx_file); }
         AgentKind::Shell         => {}
     }
 
@@ -235,7 +248,7 @@ pub async fn spawn(
         });
     }
 
-    // ── PTY reader thread ────────────────────────────────────────────────────
+    // ── PTY reader thread ─────────────────────────────────────────────────────
     let sid               = session_id.clone();
     let rb_id             = runbox_id.clone();
     let app_pty           = app.clone();
@@ -247,65 +260,37 @@ pub async fn spawn(
     std::thread::spawn(move || {
         let mut buf           = [0u8; 4096];
         let mut detected_kind = agent_kind.clone();
-        let mut capture       = ResponseCapture::new();
-        let mut classifier    = OutputClassifier::new();
 
         while let Ok(n) = reader.read(&mut buf) {
             if n == 0 { break; }
             let text = String::from_utf8_lossy(&buf[..n]).to_string();
 
+            // Agent kind detection from shell output
             if detected_kind == AgentKind::Shell {
                 let stripped = strip_ansi(&text);
                 if let Some(upgraded) = AgentKind::infer_from_output(&stripped) {
                     detected_kind = upgraded.clone();
-                    // Notify frontend so it can update the tab label (from Copy 1)
                     let _ = app_pty.emit(&format!("pty://agent/{}", sid),
                         upgraded.display_name().to_string());
                 }
             }
 
-            for word in text.split_whitespace() {
+            // URL detection — emit browser-open-url for localhost URLs
+            let text_clean = strip_ansi(&text);
+            for word in text_clean.split_whitespace() {
                 let clean = word.trim_matches(|c: char| {
                     !c.is_alphanumeric() && c != '/' && c != ':' && c != '.'
                         && c != '-' && c != '_' && c != '?' && c != '='
                         && c != '&' && c != '#' && c != '%'
                 });
-                if clean.starts_with("https://") || clean.starts_with("http://") {
+                let is_valid_url = (clean.starts_with("https://") || clean.starts_with("http://"))
+                    && clean.len() > 10
+                    && !clean.contains(r"\x1b")
+                    && !clean.contains(r"\u{")
+                    && clean.chars().all(|c| c.is_ascii() && c >= ' ');
+                if is_valid_url {
                     let _ = app_pty.emit("browser-open-url", clean.to_string());
                 }
-            }
-
-            // Only saves clean summary after "─ Worked for X ─"
-            if let Some(summary) = capture.feed(&text) {
-                let rb2  = rb_id.clone();
-                let sid2 = sid.clone();
-                tauri::async_runtime::spawn(async move {
-                    if memory::memory_add(&rb2, &sid2, &summary).await.is_ok() {
-                        crate::agent::globals::emit_memory_added(&rb2);
-                    }
-                });
-            }
-
-            let classified = classifier.feed(&text);
-            if !classified.is_empty() {
-                let rb2   = rb_id.clone();
-                let sid2  = sid.clone();
-                let aname = detected_kind.display_name().to_string();
-                tauri::async_runtime::spawn(async move {
-                    for (kind, content) in classified {
-                        let kind_str = match kind {
-                            MemoryKind::Failure     => "failure",
-                            MemoryKind::Blocker     => "blocker",
-                            MemoryKind::Environment => "environment",
-                            MemoryKind::Codebase    => "codebase",
-                            MemoryKind::Goal        => "goal",
-                            MemoryKind::Session     => "session",
-                        };
-                        crate::agent::supercontext::save_classified(
-                            &rb2, &sid2, &aname, kind_str, &content,
-                        ).await;
-                    }
-                });
             }
 
             let _ = app_pty.emit(&format!("pty://output/{}", sid), &text);
@@ -324,38 +309,37 @@ pub async fn spawn(
             remove_worktree(wt);
         }
 
-        // Fallback memory: write if agent didn't emit its own summary (from Copy 2).
-        // Also run auto_session_summary + invalidate cache regardless (from Copy 1).
+        // ── V3 session cleanup + GCC+Letta sleep-time jobs ────────────────────
         if agent_kind != AgentKind::Shell {
-            if !capture.already_emitted() {
-                let dur = if duration_ms < 60_000 {
-                    format!("{}s", duration_ms / 1000)
-                } else {
-                    format!("{}m {}s", duration_ms / 60_000, (duration_ms % 60_000) / 1000)
-                };
-                let summary = format!(
-                    "{} session ended ({}). Check workspace_read for changes.",
-                    agent_kind.display_name(), dur
-                );
-                let rb2  = rb_id.clone();
-                let sid2 = sid.clone();
-                let app2 = app_pty.clone();
-                tauri::async_runtime::spawn(async move {
-                    if memory::memory_add(&rb2, &sid2, &summary).await.is_ok() {
-                        crate::agent::globals::emit_memory_added(&rb2);
-                        let _ = app2.emit("memory-added", serde_json::json!({ "runbox_id": rb2 }));
-                    }
-                });
-            }
-
-            // V2: AI-generated session summary + cache invalidation (from Copy 1)
-            let rb2 = rb_id.clone();
+            let rb2  = rb_id.clone();
             let sid2 = sid.clone();
+            let cwd2 = cwd_thr.clone();
             let db2  = db_arc.clone();
-            let an2  = agent_kind.display_name().to_string();
+            let an2  = detected_kind.display_name().to_string();
+
             tauri::async_runtime::spawn(async move {
+                let agent_type = memory::agent_type_from_name(&an2);
+                let agent_id   = memory::make_agent_id(&agent_type, &sid2);
+
+                // 1. Expire all TEMPORARY for this agent
+                if let Err(e) = memory::expire_temporary_for_agent(&rb2, &agent_id).await {
+                    eprintln!("[pty] expire_temporary: {e}");
+                }
+
+                // 2. Auto session summary fallback (no-op if agent wrote one)
                 crate::agent::supercontext::auto_session_summary(&rb2, &sid2, &an2, &db2).await;
+
+                // 3. Invalidate injector cache
                 injector::invalidate_cache(&rb2).await;
+
+                // 4. GCC+Letta: reflection — extract env facts from session logs
+                crate::memory::sleep::reflection(&rb2, &cwd2, &sid2).await;
+
+                // 5. GCC+Letta: weekly defrag check
+                if crate::memory::sleep::is_defrag_due(&cwd2) {
+                    crate::memory::sleep::defrag(&rb2, &cwd2).await;
+                    crate::memory::sleep::mark_defrag_done(&cwd2);
+                }
             });
         }
 

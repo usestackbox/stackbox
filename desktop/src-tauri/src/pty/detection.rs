@@ -123,60 +123,105 @@ impl OutputClassifier {
             if fence.starts_with("```") || fence.starts_with("~~~") { in_code = !in_code; continue; }
             if in_code { continue; }
             let t = line.trim();
-            if t.len() < 4 { continue; }
+            if t.len() < 15 { continue; } // raised from 4 — kills short UI fragments
             let lower = t.to_lowercase();
 
-            // ── Goal patterns ─────────────────────────────────────────────────
+            // ── Hard-exclude noisy non-agent output ───────────────────────────
+            // These patterns match Codex UI chrome, git warnings, file reads,
+            // MCP config lines, and shell prompts — never useful memories.
+            let is_noise =
+                // Codex UI chrome
+                lower.contains("model:") && lower.contains("/model to change")
+                || lower.contains("directory:") && (lower.contains("nodebook") || lower.contains(":\\"))
+                || lower.contains("% left ·")
+                || lower.contains("tip: use /permissions")
+                || lower.contains("esc to interrupt")
+                || lower.starts_with("│") || lower.starts_with("╭") || lower.starts_with("╰")
+                || lower.starts_with("┌") || lower.starts_with("└") || lower.starts_with("─")
+                // Git noise
+                || lower.contains("lf will be replaced by crlf")
+                || lower.contains("warning: in the working copy")
+                || lower.starts_with("[git]")
+                // File content fragments (html/js/css being read)
+                || lower.starts_with("<html") || lower.starts_with("<!doctype")
+                || lower.starts_with("const ") || lower.starts_with("let ") || lower.starts_with("var ")
+                || lower.starts_with("function ") || lower.starts_with("import ")
+                || lower.starts_with("export ") || lower.starts_with("@import")
+                || (lower.starts_with("<") && lower.ends_with(">"))
+                // MCP / config lines
+                || lower.contains("mcp.json") || lower.contains(".claude/") || lower.contains(".codex/")
+                || lower.contains(".cursor/")
+                // Shell prompts / terminal chrome
+                || (lower.contains("nodebook>") || lower.contains("nodebook >"))
+                || lower.starts_with(r"\u{") || lower.contains(r"\x1b");
+
+            if is_noise { continue; }
+
+            // ── Goal: must be a complete descriptive sentence ─────────────────
             let is_goal = (lower.contains("the goal is") || lower.contains("we are building")
                 || lower.contains("task is to") || lower.contains("objective:"))
-                && lower.len() > 20 && lower.len() < 400;
+                && lower.len() > 30 && lower.len() < 400
+                // Must be prose, not a path or config line
+                && !t.contains('/') && !t.contains('=');
 
-            // ── Environment patterns ──────────────────────────────────────────
-            // Must look like key=value declarations
+            // ── Environment: strict — must be explicit tool/runtime statements ─
+            // NOT triggered by generic "=" in code or config
             let is_env = {
-                let eq_count = t.matches('=').count();
                 let has_env_word = lower.contains("using port") || lower.contains("port =")
-                    || lower.contains("running on") || lower.contains("node is")
-                    || lower.contains("python is") || lower.contains("not found")
-                    || lower.contains("command not") || lower.contains("use node")
-                    || lower.contains("instead of python") || lower.contains("instead of py");
-                (eq_count >= 1 && t.len() < 200 && !lower.contains("error")) || has_env_word
+                    || lower.contains("running on port") || lower.contains("listening on")
+                    || (lower.contains("not found") && (lower.contains("python") || lower.contains("node") || lower.contains("npm")))
+                    || lower.contains("instead of python") || lower.contains("instead of py")
+                    || lower.contains("use node instead") || lower.contains("use npm instead");
+                // Must have >= 20 chars of real prose, not a one-liner config
+                has_env_word && t.len() > 20 && t.len() < 300
             };
 
-            // ── Codebase patterns ─────────────────────────────────────────────
+            // ── Codebase: must be agent narration about a file, not a file read ─
+            // Agent narration looks like "src/foo.ts: updated the handler"
+            // File reads look like raw code lines with paths
             let is_codebase = {
-                let has_path = t.contains('/') || t.contains('\\') || t.contains(".ts")
-                    || t.contains(".rs") || t.contains(".py") || t.contains(".js");
-                let has_colon = t.contains(':');
-                has_path && has_colon && t.len() > 15 && t.len() < 300
-                    && !lower.contains("error") && !lower.contains("failed")
+                let has_path = t.contains(".ts:") || t.contains(".rs:") || t.contains(".py:")
+                    || t.contains(".js:") || t.contains(".tsx:") || t.contains(".jsx:");
+                let looks_like_narration = t.contains(':'  )
+                    && t.split(':').nth(1).map(|s| s.trim().len() > 5).unwrap_or(false)
+                    && !lower.starts_with("warning") && !lower.starts_with("error");
+                has_path && looks_like_narration && t.len() > 20 && t.len() < 300
             };
 
-            // ── Blocker patterns ──────────────────────────────────────────────
-            let is_blocker = (lower.contains("cannot") || lower.contains("unable to")
-                || lower.contains("stuck on") || lower.contains("blocked by")
-                || lower.contains("tried:") || lower.contains("already tried")
+            // ── Blocker: must be agent expressing it is stuck ─────────────────
+            let is_blocker = (lower.contains("unable to") || lower.contains("stuck on")
+                || lower.contains("blocked by") || lower.contains("already tried")
                 || lower.contains("does not work") || lower.contains("won't work"))
-                && lower.len() > 20;
+                && lower.len() > 30
+                // Not a PowerShell error dump line
+                && !lower.contains("fullyqualifiederrorid")
+                && !lower.contains("cmdlet");
 
-            // ── Failure patterns ──────────────────────────────────────────────
-            let is_failure = lower.contains("error:") || lower.contains("failed to")
-                || lower.contains("cannot find") || lower.contains("permission denied")
-                || lower.contains("port already in use") || lower.contains("enoent")
-                || lower.contains("panicked at") || lower.contains("build failed")
-                || lower.contains("fullyqualifiederrorid")
-                || lower.contains("commandnotfoundexception")
-                || lower.contains("is not recognized as the name")
-                || lower.contains("access is denied") || lower.contains("typeerror:")
-                || lower.contains("referenceerror:");
+            // ── Failure: real errors only — not PowerShell command-not-found ──
+            // Exclude the noisy PS "not recognized" spam for py/python/memory_context
+            // which are expected missing tools, not actionable failures.
+            let is_ps_missing_tool = lower.contains("is not recognized as the name")
+                && (lower.contains("'py'") || lower.contains("'python'")
+                    || lower.contains("memory_context") || lower.contains("cmdlet"));
+            let is_failure = !is_ps_missing_tool && (
+                (lower.contains("error:") && !lower.contains("warning"))
+                || lower.contains("failed to build") || lower.contains("build failed")
+                || lower.contains("permission denied")
+                || lower.contains("port already in use")
+                || lower.contains("enoent")
+                || lower.contains("panicked at")
+                || lower.contains("typeerror:") || lower.contains("referenceerror:")
+                || lower.contains("cannot find module")
+                || lower.contains("access is denied")
+            );
 
             // Priority: goal > env > codebase > blocker > failure
-            let kind = if is_goal           { Some(MemoryKind::Goal) }
-                else if is_env && !is_failure { Some(MemoryKind::Environment) }
-                else if is_codebase          { Some(MemoryKind::Codebase) }
-                else if is_blocker           { Some(MemoryKind::Blocker) }
-                else if is_failure           { Some(MemoryKind::Failure) }
-                else                         { None };
+            let kind = if is_goal                  { Some(MemoryKind::Goal) }
+                else if is_env                     { Some(MemoryKind::Environment) }
+                else if is_codebase                { Some(MemoryKind::Codebase) }
+                else if is_blocker && !is_failure  { Some(MemoryKind::Blocker) }
+                else if is_failure                 { Some(MemoryKind::Failure) }
+                else                               { None };
 
             if let Some(k) = kind {
                 let key: String = t.chars().take(80).collect();
@@ -187,13 +232,17 @@ impl OutputClassifier {
                         let start = idx.saturating_sub(2);
                         let end   = (idx + 5).min(all_lines.len());
                         let block: Vec<&str> = all_lines[start..end].iter()
-                            .map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+                            .map(|l| l.trim()).filter(|l| !l.is_empty())
+                            // Strip noise lines from context block too
+                            .filter(|l| !l.to_lowercase().contains("lf will be replaced")
+                                && !l.starts_with("│") && !l.starts_with("warning: in the working"))
+                            .collect();
                         block.join("\n").chars().filter(|c| *c >= ' ' || *c == '\t' || *c == '\n').collect()
                     } else {
                         t.chars().filter(|c| *c >= ' ' || *c == '\t').collect()
                     };
 
-                    if content.len() >= 8 { results.push((k, content)); }
+                    if content.len() >= 20 { results.push((k, content)); }
                 }
             }
         }

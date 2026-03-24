@@ -70,16 +70,6 @@ pub async fn inject(
 
     eprintln!("[agent::context] injected context for {:?} in {cwd}", agent);
 
-    // ── Supercontext: Git cold ingest ─────────────────────────────────────────
-    // Runs async, non-blocking. Idempotent — skips if already ingested.
-    if *agent != AgentKind::Shell {
-        let rb2  = runbox_id.to_string();
-        let cwd2 = cwd.to_string();
-        tauri::async_runtime::spawn(async move {
-            crate::agent::supercontext::git_cold_ingest(&rb2, &cwd2).await;
-        });
-    }
-
     Ok(())
 }
 
@@ -97,9 +87,6 @@ fn agent_targets(agent: &AgentKind) -> Vec<(&'static str, bool)> {
             ("GEMINI.md",                        true),
             // Single skill path — avoids "skill conflict" warning
             (".agents/skills/stackbox/SKILL.md", false),
-        ],
-        AgentKind::OpenCode => vec![
-            ("OPENCODE.md", true),
         ],
         AgentKind::CursorAgent => vec![
             (".agents/skills/stackbox/SKILL.md",  false),
@@ -120,7 +107,6 @@ fn skill_name_for(agent: &AgentKind) -> &'static str {
         AgentKind::GeminiCli     => "stackbox-context-gemini",
         AgentKind::CursorAgent   => "stackbox-context-cursor",
         AgentKind::GitHubCopilot => "stackbox-context-copilot",
-        AgentKind::OpenCode      => "stackbox-context-opencode",
         AgentKind::Shell         => "stackbox-context",
     }
 }
