@@ -8,15 +8,17 @@ import { CreateRunboxModal } from "./CreateRunboxModal";
 import type { Runbox } from "../shared/types";
 
 interface SidebarProps {
-  runboxes:  Runbox[];
-  activeId:  string | null;
-  cwdMap:    Record<string, string>;
-  collapsed: boolean;
-  onToggle:  () => void;
-  onSelect:  (id: string) => void;
-  onCreate:  (name: string, cwd: string, docker: boolean) => void;
-  onRename:  (id: string, name: string) => void;
-  onDelete:  (id: string) => void;
+  runboxes:          Runbox[];
+  activeId:          string | null;
+  cwdMap:            Record<string, string>;
+  collapsed:         boolean;
+  onToggle:          () => void;
+  onSelect:          (id: string) => void;
+  onCreate:          (name: string, cwd: string, docker: boolean) => void;
+  onRename:          (id: string, name: string) => void;
+  onDelete:          (id: string) => void;
+  fileTreeOpen?:     boolean;
+  onFileTreeToggle?: () => void;
 }
 
 interface GitStats {
@@ -238,6 +240,7 @@ function ContextMenu({ x, y, rbId, rbName, onDelete, onChangeIcon, onClose }: {
 export function Sidebar({
   runboxes, activeId, cwdMap, collapsed,
   onToggle, onSelect, onCreate, onRename, onDelete,
+  fileTreeOpen, onFileTreeToggle,
 }: SidebarProps) {
   const [showModal,  setShowModal]  = useState(false);
   const [renaming,   setRenaming]   = useState<string | null>(null);
@@ -299,25 +302,87 @@ export function Sidebar({
       <div style={{ width: W, flexShrink: 0, background: C.bg1, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", transition: "width .18s cubic-bezier(.4,0,.2,1)", overflow: "hidden" }}>
 
         {/* Header */}
-        <div style={{
-          height: 48, flexShrink: 0,
-          display: "flex", alignItems: "center",
-          padding: collapsed ? "0 8px" : "0 10px 0 14px",
-          justifyContent: collapsed ? "center" : "space-between",
-          borderBottom: `1px solid ${C.border}`, gap: 4,
-        }}>
-          {!collapsed && (
+        {collapsed ? (
+          /* Collapsed: toggle on top row, folder icon below */
+          <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>
+            {/* Toggle row */}
+            <div style={{ height: 48, display: "flex", alignItems: "center", justifyContent: "center", width: "100%" }}>
+              <button onClick={onToggle}
+                style={{ ...tbtn, color: C.t2, padding: 6, borderRadius: 8 }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t0; el.style.background = C.bg3; }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t2; el.style.background = "transparent"; }}>
+                <IcoSidebar on={false} />
+              </button>
+            </div>
+            {/* Folder button */}
+            <button
+              onClick={onFileTreeToggle}
+              title="File Tree"
+              style={{
+                ...tbtn, width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                background: fileTreeOpen ? "#ffffff" : "transparent",
+                border: `1px solid ${fileTreeOpen ? "rgba(255,255,255,.9)" : "rgba(255,255,255,.12)"}`,
+                color: fileTreeOpen ? "#1a1a1e" : "rgba(255,255,255,.7)",
+                transition: "all .15s cubic-bezier(.4,0,.2,1)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+              onMouseEnter={e => {
+                const el = e.currentTarget as HTMLElement;
+                if (!fileTreeOpen) { el.style.background = "rgba(255,255,255,.12)"; el.style.color = "#ffffff"; el.style.borderColor = "rgba(255,255,255,.2)"; }
+              }}
+              onMouseLeave={e => {
+                const el = e.currentTarget as HTMLElement;
+                if (!fileTreeOpen) { el.style.background = "transparent"; el.style.color = "rgba(255,255,255,.7)"; el.style.borderColor = "rgba(255,255,255,.12)"; }
+              }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+              </svg>
+            </button>
+          </div>
+        ) : (
+          /* Expanded: STACKBOX text + folder + toggle all in one row */
+          <div style={{
+            height: 48, flexShrink: 0,
+            display: "flex", alignItems: "center",
+            padding: "0 10px 0 14px",
+            justifyContent: "space-between",
+            borderBottom: `1px solid ${C.border}`, gap: 4,
+          }}>
             <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".14em", color: C.t0, fontFamily: MONO, userSelect: "none", flex: 1 }}>
               STACKBOX
             </span>
-          )}
-          <button onClick={onToggle}
-            style={{ ...tbtn, color: C.t2, padding: 6, borderRadius: 8 }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t0; el.style.background = C.bg3; }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t2; el.style.background = "transparent"; }}>
-            <IcoSidebar on={!collapsed} />
-          </button>
-        </div>
+            <button
+              onClick={onFileTreeToggle}
+              title="File Tree"
+              style={{
+                ...tbtn, padding: 5, borderRadius: 7, flexShrink: 0,
+                background: fileTreeOpen ? "#ffffff" : "transparent",
+                border: `1px solid ${fileTreeOpen ? "rgba(255,255,255,.9)" : "transparent"}`,
+                color: fileTreeOpen ? "#1a1a1e" : "rgba(255,255,255,.55)",
+                transition: "all .15s cubic-bezier(.4,0,.2,1)",
+              }}
+              onMouseEnter={e => {
+                const el = e.currentTarget as HTMLElement;
+                if (!fileTreeOpen) { el.style.background = "rgba(255,255,255,.1)"; el.style.color = "#ffffff"; el.style.borderColor = "rgba(255,255,255,.15)"; }
+              }}
+              onMouseLeave={e => {
+                const el = e.currentTarget as HTMLElement;
+                if (!fileTreeOpen) { el.style.background = "transparent"; el.style.color = "rgba(255,255,255,.55)"; el.style.borderColor = "transparent"; }
+              }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+              </svg>
+            </button>
+            <button onClick={onToggle}
+              style={{ ...tbtn, color: C.t2, padding: 6, borderRadius: 8 }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t0; el.style.background = C.bg3; }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t2; el.style.background = "transparent"; }}>
+              <IcoSidebar on={!collapsed} />
+            </button>
+          </div>
+        )}
 
         {/* New runbox button */}
         <div style={{ padding: collapsed ? "10px 8px" : "10px 10px", flexShrink: 0 }}>

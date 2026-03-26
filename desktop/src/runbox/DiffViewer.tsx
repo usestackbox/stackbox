@@ -1,6 +1,90 @@
 import { useMemo } from "react";
+import hljs from "highlight.js/lib/core";
 import { C, MONO, SANS } from "../shared/constants";
 import type { DiffTab } from "../shared/types";
+
+// Languages are registered on the hljs singleton by FileViewerPane at module load.
+
+// ── VS Code Dark+ theme ───────────────────────────────────────────────────────
+const HLJS_THEME = `
+.hljs                    { color: #d4d4d4; }
+.hljs-keyword            { color: #569cd6; }
+.hljs-built_in           { color: #4ec9b0; }
+.hljs-type               { color: #4ec9b0; }
+.hljs-string             { color: #ce9178; }
+.hljs-number             { color: #b5cea8; }
+.hljs-literal            { color: #569cd6; }
+.hljs-comment            { color: #6a9955; font-style: italic; }
+.hljs-title.function_    { color: #dcdcaa; }
+.hljs-title              { color: #dcdcaa; }
+.hljs-title.class_       { color: #4ec9b0; }
+.hljs-meta               { color: #9cdcfe; }
+.hljs-property           { color: #9cdcfe; }
+.hljs-attr               { color: #9cdcfe; }
+.hljs-attribute          { color: #ce9178; }
+.hljs-variable           { color: #9cdcfe; }
+.hljs-variable.language_ { color: #569cd6; }
+.hljs-regexp             { color: #d16969; }
+.hljs-operator           { color: #d4d4d4; }
+.hljs-punctuation        { color: #d4d4d4; }
+.hljs-section            { color: #569cd6; font-weight: bold; }
+.hljs-bullet             { color: #6796e6; }
+.hljs-params             { color: #d4d4d4; }
+.hljs-tag                { color: #569cd6; }
+.hljs-selector-tag       { color: #d7ba7d; }
+.hljs-symbol             { color: #569cd6; }
+.hljs-link               { color: #ce9178; text-decoration: underline; }
+.hljs-code               { color: #ce9178; }
+.hljs-doctag             { color: #608b4e; }
+.hljs-formula            { color: #9cdcfe; }
+.hljs-quote              { color: #6a9955; font-style: italic; }
+.hljs-subst              { color: #d4d4d4; }
+.hljs-template-tag       { color: #569cd6; }
+.hljs-template-variable  { color: #9cdcfe; }
+`;
+
+function getLanguage(path: string): string {
+  const ext  = path.split(".").pop()?.toLowerCase() ?? "";
+  const name = path.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+  if (name === "dockerfile") return "dockerfile";
+  if (name === "makefile")   return "makefile";
+  const map: Record<string, string> = {
+    ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+    mjs: "javascript", cjs: "javascript",
+    css: "css", scss: "css", less: "css",
+    html: "html", htm: "html", xml: "xml", svg: "xml",
+    json: "json", jsonc: "json",
+    yaml: "yaml", yml: "yaml",
+    toml: "toml", ini: "toml", env: "bash",
+    rs: "rust", go: "go",
+    c: "c", h: "c", cc: "cpp", cpp: "cpp", cxx: "cpp", hpp: "cpp",
+    cs: "csharp",
+    java: "java", kt: "kotlin", scala: "scala",
+    py: "python", pyw: "python",
+    rb: "ruby", php: "php", lua: "lua", pl: "perl",
+    r: "r", swift: "swift", dart: "dart",
+    sh: "bash", bash: "bash", zsh: "bash", ps1: "powershell",
+    md: "markdown", mdx: "markdown",
+    sql: "sql", proto: "protobuf", graphql: "graphql", gql: "graphql",
+    hs: "haskell", ex: "elixir", exs: "elixir",
+    diff: "diff", patch: "diff",
+  };
+  return map[ext] ?? "text";
+}
+
+function highlightLine(content: string, lang: string): string {
+  const escaped = content
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  if (!content.trim() || lang === "text") return escaped;
+  try {
+    if (hljs.getLanguage(lang)) {
+      return hljs.highlight(content, { language: lang, ignoreIllegals: true }).value;
+    }
+  } catch { /* fall through */ }
+  return escaped;
+}
 
 type Kind = "add" | "remove" | "hunk" | "meta" | "context";
 interface Line { raw: string; kind: Kind; content: string; oldNum: number | null; newNum: number | null; }
@@ -93,7 +177,7 @@ function StatBar({ ins, del }: { ins: number; del: number }) {
 }
 
 // ── Unified diff view ────────────────────────────────────────────────────────
-function Unified({ lines }: { lines: Line[] }) {
+function Unified({ lines, lang }: { lines: Line[]; lang: string }) {
   const inlineDiffs = useMemo(() => {
     const map = new Map<number, { old: React.ReactNode; new: React.ReactNode }>();
     for (let i = 0; i < lines.length; i++) {
@@ -144,8 +228,18 @@ function Unified({ lines }: { lines: Line[] }) {
               : "#707070";
 
             const inlinePair = inlineDiffs.get(i);
-            let content: React.ReactNode = row.content;
-            if (inlinePair) content = isRem ? inlinePair.old : inlinePair.new;
+            // charDiff pairs get character-level highlighting (React nodes).
+            // Everything else gets hljs syntax highlighting.
+            let content: React.ReactNode;
+            if (inlinePair) {
+              content = isRem ? inlinePair.old : inlinePair.new;
+            } else if (row.kind === "add" || row.kind === "remove" || row.kind === "context") {
+              content = (
+                <span dangerouslySetInnerHTML={{ __html: highlightLine(row.content, lang) }} />
+              );
+            } else {
+              content = row.content;
+            }
 
             return (
               <tr key={i} style={{ background: rowBg }}>
@@ -180,6 +274,7 @@ export function DiffViewer({
   onSelectTab?: (id: string) => void;
 }) {
   const lines    = parse(tab.diff);
+  const lang     = getLanguage(tab.path);
   const tabs     = allTabs ?? [tab];
   const tabIdx   = tabs.findIndex(t => t.id === tab.id);
   const hasPrev  = tabIdx > 0;
@@ -194,6 +289,7 @@ export function DiffViewer({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg0 }}>
+      <style>{HLJS_THEME}</style>
 
       {/* ── Top bar ── */}
       <div style={{
@@ -315,7 +411,7 @@ export function DiffViewer({
       {/* ── Unified diff ── */}
       {tab.diff.trim() && (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          <Unified lines={lines} />
+          <Unified lines={lines} lang={lang} />
         </div>
       )}
     </div>

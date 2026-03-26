@@ -42,6 +42,7 @@ export default function App() {
   const [activeSessionId,  setActiveSessionId]  = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [branchMap,        setBranchMap]        = useState<Record<string, string>>({});
+  const [fileTreeOpen,     setFileTreeOpen]     = useState<boolean>(false);
   const diffOpenerRefs     = useRef<Record<string, { open: (fc: any) => void }>>({});
 
   useEffect(() => { saveRunboxes(runboxes); }, [runboxes]);
@@ -90,6 +91,8 @@ export default function App() {
         collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(v => !v)}
         onSelect={id => setActiveId(id)} onCreate={onCreate}
         onRename={onRename} onDelete={onDelete}
+        fileTreeOpen={fileTreeOpen}
+        onFileTreeToggle={() => setFileTreeOpen(v => !v)}
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative" }}>
@@ -103,6 +106,8 @@ export default function App() {
               onCwdChange={cwd => setCwdMap(p => ({ ...p, [rb.id]: cwd }))}
               onSessionChange={sid => setActiveSessionId(sid)}
               onOpenDiff={ref => { diffOpenerRefs.current[rb.id] = ref; }}
+              fileTreeOpen={fileTreeOpen}
+              onFileTreeClose={() => setFileTreeOpen(false)}
             />
           </div>
         ))}

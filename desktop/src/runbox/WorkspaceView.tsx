@@ -8,8 +8,8 @@ import { DiffViewer } from "./DiffViewer";
 import { FileChangeList } from "../panels/FileChangeList";
 import { GitWorktreePanel } from "../panels/Gitworktreepanel";
 import MemoryPanel from "../panels/MemoryPanel";
-import FileTreePanel from "../panels/FileTreePanel";
 import { C, MONO, SANS, tbtn } from "../shared/constants";
+import FileTreePanel from "../panels/FileTreePanel";
 import type { Runbox, DiffTab } from "../shared/types";
 import { IcoBrain, IcoFiles, IcoGit } from "../shared/icons";
 
@@ -45,6 +45,8 @@ interface WorkspaceViewProps {
   onCwdChange:      (cwd: string) => void;
   onSessionChange?: (sid: string) => void;
   onOpenDiff:       (ref: { open: (fc: any) => void }) => void;
+  fileTreeOpen?:    boolean;
+  onFileTreeClose?: () => void;
 }
 
 function tileWindows(count: number, aw: number, ah: number) {
@@ -63,9 +65,10 @@ function tileWindows(count: number, aw: number, ah: number) {
 function winLabel(win: WinState) {
   if (win.kind === "browser") return win.label ?? "browser";
   if (win.kind === "file" && win.filePath) {
-    return win.filePath.split("/").pop() ?? win.filePath;
+    return win.filePath.split(/[/\\]/).pop() ?? win.filePath;
   }
-  return win.cwd.split("/").filter(Boolean).pop() ?? "~";
+  // Terminal: show only the last folder name, not the full path
+  return win.cwd.split(/[/\\]/).filter(Boolean).pop() ?? "~";
 }
 
 let _topZ = 10;
@@ -193,12 +196,71 @@ function TabContextMenu({ x, y, win, isFirst, isLast, onClose, onCloseTab, onRes
   );
 }
 
-type SidePanel = "files" | "git" | "memory" | "filetree" | null;
+type SidePanel = "files" | "git" | "memory" | null;
 type FilesView = "list" | "diff";
+
+// ── File-pick modal (shown when splitting a file pane) ────────────────────────
+function FileSplitModal({ sourceWinId, onConfirm, onCancel }: {
+  sourceWinId: string;
+  onConfirm: (filePath: string) => void;
+  onCancel:  () => void;
+}) {
+  const [path, setPath] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  const submit = () => { const t = path.trim(); if (t) { onConfirm(t); } };
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 99999,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      background: "rgba(0,0,0,.6)", backdropFilter: "blur(4px)",
+    }} onClick={onCancel}>
+      <div style={{
+        background: "#161618", border: "1px solid rgba(255,255,255,.12)",
+        borderRadius: 12, padding: "20px 24px", width: 480,
+        boxShadow: "0 24px 64px rgba(0,0,0,.8)",
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.85)", fontFamily: SANS, marginBottom: 6 }}>
+          Open file in split pane
+        </div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,.35)", fontFamily: SANS, marginBottom: 16 }}>
+          Enter the file path relative to the project root, or an absolute path.
+        </div>
+        <input
+          ref={inputRef}
+          value={path}
+          onChange={e => setPath(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel(); }}
+          placeholder="src/components/App.tsx"
+          style={{
+            width: "100%", boxSizing: "border-box",
+            background: "#0c0c0e", border: "1px solid rgba(255,255,255,.14)",
+            borderRadius: 8, padding: "9px 12px",
+            fontSize: 13, fontFamily: MONO, color: "#e0e0e0",
+            outline: "none",
+          }}
+          onFocus={e => (e.currentTarget.style.borderColor = "rgba(0,229,255,.5)")}
+          onBlur={e  => (e.currentTarget.style.borderColor = "rgba(255,255,255,.14)")}
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+          <button onClick={onCancel}
+            style={{ padding: "7px 16px", background: "transparent", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, color: "rgba(255,255,255,.5)", fontSize: 12, fontFamily: SANS, cursor: "pointer" }}>
+            Cancel
+          </button>
+          <button onClick={submit} disabled={!path.trim()}
+            style={{ padding: "7px 16px", background: path.trim() ? "rgba(0,229,255,.15)" : "rgba(255,255,255,.04)", border: `1px solid ${path.trim() ? "rgba(0,229,255,.4)" : "rgba(255,255,255,.08)"}`, borderRadius: 8, color: path.trim() ? "#00e5ff" : "rgba(255,255,255,.25)", fontSize: 12, fontFamily: SANS, cursor: path.trim() ? "pointer" : "default", fontWeight: 600 }}>
+            Open
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function WorkspaceView({
   runbox, branch, toolbarSlot, runboxes,
   onCwdChange, onSessionChange, onOpenDiff,
+  fileTreeOpen, onFileTreeClose,
 }: WorkspaceViewProps) {
   const areaRef      = useRef<HTMLDivElement>(null);
   const labelCount   = useRef(0);
@@ -212,6 +274,7 @@ export function WorkspaceView({
   const [dragTabId,  setDragTabId]  = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [pendingBrowserUrl, setPendingBrowserUrl] = useState<Record<string, string | null>>({});
+  const [filePickModal, setFilePickModal] = useState<{ sourceWinId: string } | null>(null);
   const dragTabIdRef  = useRef<string | null>(null);
   const dragOverIdRef = useRef<string | null>(null);
   const initialized  = useRef(false);
@@ -250,14 +313,8 @@ export function WorkspaceView({
       const aw = area.offsetWidth, ah = area.offsetHeight;
       setWins(prev => {
         const visible = prev.filter(w => !w.minimized && !w.maximized);
-        // Always update file-kind windows so they stay full-canvas
-        const hasFileWin = prev.some(w => w.kind === "file");
-        if (visible.length !== 1 && !hasFileWin) return prev;
-        return prev.map(w => {
-          if (w.kind === "file") return { ...w, w: aw, h: ah };
-          if (w.minimized || w.maximized) return w;
-          return { ...w, x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2 };
-        });
+        if (visible.length !== 1) return prev;
+        return prev.map(w => w.minimized || w.maximized ? w : { ...w, x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2 });
       });
       setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
     });
@@ -330,16 +387,21 @@ export function WorkspaceView({
       const existing = prev.find(w => w.kind === "file" && w.filePath === filePath);
       if (existing) { setActiveId(existing.id); return prev.map(w => w.id === existing.id ? { ...w, zIndex: nextZ() } : w); }
       const id = crypto.randomUUID();
-      const fileName = filePath.split("/").pop() ?? filePath;
+      const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
+      const aw = area.offsetWidth  || 800;
+      const ah = area.offsetHeight || 600;
       setActiveId(id);
-      return [...prev, {
-        id, label: fileName, kind: "file", filePath,
-        x: GAP + 40, y: GAP + 40,
-        w: Math.min(700, area.offsetWidth  - GAP * 4),
-        h: Math.min(500, area.offsetHeight - GAP * 4),
+      const all: WinState[] = [...prev, {
+        id, label: fileName, kind: "file" as const, filePath,
+        x: GAP, y: GAP,
+        w: aw - GAP * 2, h: ah - GAP * 2,
         minimized: false, maximized: false,
         cwd: runbox.cwd, zIndex: nextZ(),
       }];
+      const visible = all.filter(w => !w.minimized && !w.maximized);
+      const tiles   = tileWindows(visible.length, aw, ah);
+      let ti = 0;
+      return all.map(w => w.minimized || w.maximized ? w : { ...w, ...tiles[ti++] });
     });
   }, [runbox.cwd]);
 
@@ -364,8 +426,33 @@ export function WorkspaceView({
   }, [runbox.cwd]);
 
   const closeWin = useCallback((id: string) => {
-    setWins(prev => { const next = prev.filter(w => w.id !== id); if (next.length === 0) labelCount.current = 0; return next; });
-    setActiveId(prev => prev === id ? null : prev);
+    const area = areaRef.current;
+    setWins(prev => {
+      const next = prev.filter(w => w.id !== id);
+      if (next.length === 0) { labelCount.current = 0; return next; }
+      // Retile all non-minimized/non-maximized windows to fill the space
+      if (area) {
+        const aw = area.offsetWidth, ah = area.offsetHeight;
+        const visible = next.filter(w => !w.minimized && !w.maximized);
+        const tiles   = tileWindows(visible.length, aw, ah);
+        let ti = 0;
+        return next.map(w => w.minimized || w.maximized ? w : { ...w, ...tiles[ti++] });
+      }
+      return next;
+    });
+    setActiveId(prev => {
+      if (prev !== id) return prev;
+      // Focus the window that was visually adjacent
+      setWins(cur => {
+        const remaining = cur.filter(w => !w.minimized);
+        if (remaining.length > 0) {
+          const next = remaining[remaining.length - 1];
+          setTimeout(() => setActiveId(next.id), 0);
+        }
+        return cur;
+      });
+      return null;
+    });
   }, []);
 
   const minimizeWin = useCallback((id: string) => {
@@ -403,6 +490,34 @@ export function WorkspaceView({
       if (newIdx < 0 || newIdx >= arr.length) return prev;
       [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
       return arr;
+    });
+  }, []);
+
+  // Split a window: terminals get a new terminal below; file panes ask which file to open
+  const splitWin = useCallback((id: string) => {
+    setWins(prev => {
+      const win = prev.find(w => w.id === id); if (!win) return prev;
+      // File pane → show pick-file modal instead of cloning
+      if (win.kind === "file") {
+        setTimeout(() => setFilePickModal({ sourceWinId: id }), 0);
+        return prev;
+      }
+      // Terminal pane → split vertically
+      const halfH  = Math.max(MIN_H, Math.floor((win.h - GAP) / 2));
+      const newId  = crypto.randomUUID();
+      labelCount.current += 1;
+      const newWin: WinState = {
+        ...win,
+        id:        newId,
+        label:     `w${labelCount.current}`,
+        y:         win.y + halfH + GAP,
+        h:         win.h - halfH - GAP,
+        zIndex:    nextZ(),
+        minimized: false,
+        maximized: false,
+      };
+      setActiveId(newId);
+      return [...prev.map(w => w.id === id ? { ...w, h: halfH } : w), newWin];
     });
   }, []);
 
@@ -452,8 +567,53 @@ export function WorkspaceView({
     if (panel !== "files") { setActiveDiff(null); setFilesView("list"); }
   }, [sidePanel]);
 
+  // Retile all visible windows whenever the side panel opens or closes so
+  // they fill the new canvas area without overlapping the panel.
+  useEffect(() => {
+    const area = areaRef.current; if (!area) return;
+    // Wait for the panel slide-in animation (140ms) + layout reflow
+    const t = setTimeout(() => {
+      const aw = area.offsetWidth, ah = area.offsetHeight;
+      if (!aw || !ah) return;
+      setWins(prev => {
+        const visible = prev.filter(w => !w.minimized && !w.maximized);
+        if (visible.length === 0) return prev;
+        const tiles = tileWindows(visible.length, aw, ah);
+        let ti = 0;
+        return prev.map(w => w.minimized || w.maximized ? w : { ...w, ...tiles[ti++] });
+      });
+      window.dispatchEvent(new Event("resize"));
+    }, 180);
+    return () => clearTimeout(t);
+  }, [sidePanel]);
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, position: "relative" }}>
+
+      {/* ── Full-workspace file tree overlay ── */}
+      <div style={{
+        position: "absolute", inset: 0, zIndex: 500,
+        display: "flex", flexDirection: "column",
+        background: "rgba(10,10,12,0.0)",
+        pointerEvents: fileTreeOpen ? "auto" : "none",
+        opacity: fileTreeOpen ? 1 : 0,
+        transform: fileTreeOpen ? "translateY(0)" : "translateY(-12px)",
+        transition: "opacity .2s cubic-bezier(.4,0,.2,1), transform .2s cubic-bezier(.4,0,.2,1)",
+      }}>
+        <div style={{
+          flex: 1, background: "#0e0f11",
+          border: `1px solid rgba(255,255,255,.08)`,
+          borderRadius: 10, margin: 8, overflow: "hidden",
+          boxShadow: "0 8px 40px rgba(0,0,0,.7)",
+          display: "flex", flexDirection: "column",
+        }}>
+          <FileTreePanel
+            cwd={runbox.cwd}
+            onClose={() => onFileTreeClose?.()}
+            onOpenFile={openFile}
+          />
+        </div>
+      </div>
 
       {/* ── Tab bar ── */}
       <div style={{
@@ -588,6 +748,7 @@ export function WorkspaceView({
       {/* ── Main area ── */}
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
 
+
         {/* Floating canvas */}
         <div ref={areaRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", background: C.bg0, overflow: "hidden" }}>
           {wins.map(win => (
@@ -612,23 +773,22 @@ export function WorkspaceView({
             ) : win.kind === "file" && win.filePath ? (
               <div key={win.id} style={{
                 position: "absolute",
-                left: 0, top: 0, right: 0, bottom: 0,
+                left: win.x, top: win.y, width: win.w, height: win.h,
                 zIndex: win.zIndex,
                 display: win.minimized ? "none" : "flex",
                 flexDirection: "column",
-                overflow: "hidden",
+                transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
               }}>
                 <FileViewerPane
                   id={win.id} path={win.filePath}
-                  x={0} y={0}
-                  w={areaRef.current?.offsetWidth  ?? win.w}
-                  h={areaRef.current?.offsetHeight ?? win.h}
+                  x={0} y={0} w={win.w} h={win.h}
                   zIndex={win.zIndex}
                   isActive={activeId === win.id}
                   onActivate={() => focusWin(win.id)}
                   onClose={() => closeWin(win.id)}
-                  onDragStart={e => handleDragStart(e, win.id)}
-                  onResizeStart={(e, dir) => handleResizeStart(e, win.id, dir)}
+                  onSplitDown={() => splitWin(win.id)}
+                  onDragStart={(e: React.MouseEvent) => handleDragStart(e, win.id)}
+                  onResizeStart={(e: React.MouseEvent, dir: string) => handleResizeStart(e, win.id, dir)}
                 />
               </div>
             ) : (
@@ -653,8 +813,8 @@ export function WorkspaceView({
                   onClose={() => closeWin(win.id)}
                   onMinimize={() => minimizeWin(win.id)}
                   onMaximize={() => maximizeWin(win.id)}
-                  onDragStart={e => handleDragStart(e, win.id)}
-                  onResizeStart={(e, dir) => handleResizeStart(e, win.id, dir)}
+                  onDragStart={(e: React.MouseEvent) => handleDragStart(e, win.id)}
+                  onResizeStart={(e: React.MouseEvent, dir: string) => handleResizeStart(e, win.id, dir)}
                 />
               </div>
             )
@@ -689,7 +849,6 @@ export function WorkspaceView({
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: C.bg1, border: `1px solid ${C.borderMd}`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
               {sidePanel === "git"      && <GitWorktreePanel runboxCwd={runbox.cwd} runboxId={runbox.id} branch={branch} onClose={() => setSidePanel(null)} />}
               {sidePanel === "memory"   && <MemoryPanel runboxId={runbox.id} runboxName={runbox.name} onClose={() => setSidePanel(null)} />}
-              {sidePanel === "filetree" && <FileTreePanel cwd={runbox.cwd} onClose={() => setSidePanel(null)} onOpenFile={openFile} />}
             </div>
           </div>
         )}
@@ -699,16 +858,42 @@ export function WorkspaceView({
           <StripIcon title="Memory"        active={sidePanel === "memory"}   onClick={() => toggleSide("memory")}  ><IcoBrain on={sidePanel === "memory"} /></StripIcon>
           <StripIcon title="Changed Files" active={sidePanel === "files"}    onClick={() => toggleSide("files")}   ><IcoFiles on={sidePanel === "files"}  /></StripIcon>
           <StripIcon title="Git"           active={sidePanel === "git"}      onClick={() => toggleSide("git")}     ><IcoGit   on={sidePanel === "git"}    /></StripIcon>
-          <StripIcon title="File Tree"     active={sidePanel === "filetree"} onClick={() => toggleSide("filetree")}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-              stroke={sidePanel === "filetree" ? "#00e5ff" : "#ffffff"}
-              strokeWidth="2" strokeLinecap="round">
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            </svg>
-          </StripIcon>
           <div style={{ flex: 1 }} />
         </div>
       </div>
+
+      {/* File-pick modal for splitting file panes */}
+      {filePickModal && (
+        <FileSplitModal
+          sourceWinId={filePickModal.sourceWinId}
+          onCancel={() => setFilePickModal(null)}
+          onConfirm={filePath => {
+            setFilePickModal(null);
+            const area = areaRef.current; if (!area) return;
+            setWins(prev => {
+              const src = prev.find(w => w.id === filePickModal.sourceWinId);
+              if (!src) return prev;
+              const halfH  = Math.max(MIN_H, Math.floor((src.h - GAP) / 2));
+              const newId  = crypto.randomUUID();
+              const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
+              const newWin: WinState = {
+                ...src,
+                id:        newId,
+                label:     fileName,
+                kind:      "file",
+                filePath,
+                y:         src.y + halfH + GAP,
+                h:         src.h - halfH - GAP,
+                zIndex:    nextZ(),
+                minimized: false,
+                maximized: false,
+              };
+              setActiveId(newId);
+              return [...prev.map(w => w.id === filePickModal.sourceWinId ? { ...w, h: halfH } : w), newWin];
+            });
+          }}
+        />
+      )}
 
       {/* Tab context menu */}
       {tabCtx && (
@@ -725,7 +910,8 @@ export function WorkspaceView({
       )}
 
       <style>{`
-        @keyframes slideIn { from { opacity:0; transform:translateX(10px); } to { opacity:1; transform:translateX(0); } }
+        @keyframes slideIn     { from { opacity:0; transform:translateX(10px);  } to { opacity:1; transform:translateX(0); } }
+        @keyframes slideInLeft { from { opacity:0; transform:translateX(-10px); } to { opacity:1; transform:translateX(0); } }
         @keyframes sp { to { transform: rotate(360deg); } }
       `}</style>
     </div>

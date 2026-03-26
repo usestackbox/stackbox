@@ -21,6 +21,87 @@ function folderColor(depth: number): string {
   return "#ff9e40";
 }
 
+// ── Per-extension file color palette ─────────────────────────────────────────
+const EXT_COLORS: Record<string, string> = {
+  // TypeScript / JavaScript
+  ts:   "#4fc1e9", tsx:  "#4fc1e9",
+  js:   "#f7df1e", jsx:  "#f7df1e",
+  mjs:  "#f7df1e", cjs:  "#f7df1e",
+  // Markup / Style
+  html: "#e44d26", htm:  "#e44d26",
+  css:  "#2965f1", scss: "#cd6799", less: "#1d365d", sass: "#cd6799",
+  svg:  "#ff9f43", xml:  "#f0a500",
+  // Data / Config
+  json:  "#cbcb41", jsonc: "#cbcb41",
+  yaml:  "#cc3e44", yml:  "#cc3e44",
+  toml:  "#9c4221", ini:  "#9c4221", env: "#4eaa25",
+  // Systems
+  rs:   "#f74c00",
+  go:   "#00acd7",
+  c:    "#555599", h:   "#555599",
+  cpp:  "#00599c", cc:  "#00599c", cxx: "#00599c", hpp: "#00599c",
+  cs:   "#953dac",
+  // JVM
+  java:   "#b07219", kt: "#7f52ff", kts: "#7f52ff",
+  scala:  "#dc322f", groovy: "#4298b8",
+  // Scripting
+  py:   "#3572a5", pyw: "#3572a5", pyi: "#3572a5",
+  rb:   "#cc342d", rake: "#cc342d",
+  php:  "#4f5d95", phtml: "#4f5d95",
+  lua:  "#000080", pl: "#0298c3", pm: "#0298c3",
+  r:    "#198ce7",
+  // Mobile
+  swift: "#f05138", dart: "#00b4ab",
+  // Shell
+  sh:   "#4eaa25", bash: "#4eaa25", zsh: "#4eaa25", fish: "#4eaa25",
+  ps1:  "#012456",
+  // Docs
+  md:   "#519aba", mdx: "#519aba", rst: "#866792",
+  txt:  "#888888", log: "#888888",
+  // DB
+  sql:  "#e38c00",
+  // Infra
+  dockerfile: "#384d54",
+  // Functional
+  hs:   "#5e5086", ex:  "#6e4a7e", exs: "#6e4a7e",
+  // Proto / GraphQL
+  proto: "#3178c6", graphql: "#e10098", gql: "#e10098",
+  // Images
+  png:  "#9b59b6", jpg: "#9b59b6", jpeg: "#9b59b6",
+  gif:  "#9b59b6", webp: "#9b59b6", ico:  "#9b59b6",
+  // Fonts / Assets
+  woff: "#aaaa44", woff2: "#aaaa44", ttf: "#aaaa44",
+  // Lock / Build
+  lock: "#aaaaaa", makefile: "#427819",
+};
+
+function fileColor(name: string): string {
+  // Special filenames
+  const lower = name.toLowerCase();
+  if (lower === "dockerfile")           return EXT_COLORS.dockerfile;
+  if (lower === "makefile")             return EXT_COLORS.makefile;
+  if (lower === ".gitignore" || lower === ".gitattributes") return "#f54d27";
+  if (lower === "package.json" || lower === "package-lock.json") return "#cb3837";
+  if (lower === "tsconfig.json")        return "#4fc1e9";
+  if (lower === ".env" || lower.startsWith(".env.")) return "#4eaa25";
+  // Extension lookup
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return EXT_COLORS[ext] ?? "#a0a0a0";
+}
+
+// Small colored language dot shown before file names
+function ExtDot({ name }: { name: string }) {
+  const color = fileColor(name);
+  return (
+    <span style={{
+      width: 7, height: 7, borderRadius: "50%",
+      background: color, flexShrink: 0, display: "inline-block",
+      boxShadow: `0 0 4px ${color}55`,
+      marginRight: 1,
+    }} />
+  );
+}
+
 const iconBtn: React.CSSProperties = {
   background: "none", border: "none", cursor: "pointer",
   padding: "1px 3px", borderRadius: 3,
@@ -273,7 +354,7 @@ function FileItem({ node, depth, rootCwd, onOpenFile, onRefreshParent }: {
     setCtxMenu({ x: e.clientX, y: e.clientY, node });
   };
 
-  const color = node.is_dir ? folderColor(depth) : "#e8e8e8";
+  const color = node.is_dir ? folderColor(depth) : fileColor(node.name);
 
   return (
     <div>
@@ -296,7 +377,7 @@ function FileItem({ node, depth, rootCwd, onOpenFile, onRefreshParent }: {
           <span style={{ fontSize: 8, opacity: 0.6, width: 10, flexShrink: 0, transition: "transform .12s",
             display: "inline-block", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
         ) : (
-          <span style={{ width: 10, flexShrink: 0, opacity: 0.25, fontSize: 10 }}>·</span>
+          <ExtDot name={node.name} />
         )}
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
           {node.name}
