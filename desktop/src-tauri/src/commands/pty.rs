@@ -16,11 +16,12 @@ pub async fn pty_spawn(
     runbox_id:  String,
     cwd:        String,
     agent_cmd:  Option<String>,
-    cols:       Option<u16>,   // ← added
-    rows:       Option<u16>,   // ← added
+    cols:       Option<u16>,
+    rows:       Option<u16>,
+    docker:     Option<bool>,   // ← NEW: passed from frontend workspace card
     state:      tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    pty::spawn(app, session_id, runbox_id, cwd, agent_cmd, cols, rows, &state).await
+    pty::spawn(app, session_id, runbox_id, cwd, agent_cmd, cols, rows, docker.unwrap_or(false), &state).await
 }
 
 #[tauri::command]
@@ -29,23 +30,29 @@ pub fn pty_write(
     data:       String,
     state:      tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut inject: Option<(String, String, AgentKind)> = None;
+    let mut inject:    Option<(String, String, AgentKind)> = None;
+    let mut open_url:  Option<String> = None;
+    let mut send_data: Option<String> = None;
+
     {
         let mut sessions = state.sessions.lock().unwrap();
         if let Some(s) = sessions.get_mut(&session_id) {
-            let _ = s.writer.write_all(data.as_bytes());
-            let _ = s.writer.flush();
             for ch in data.chars() {
                 match ch {
                     '\r' | '\n' => {
                         let line = s.input_buf.trim().to_string();
                         s.input_buf.clear();
                         if !line.is_empty() {
-                            let token    = line.split_whitespace().next().unwrap_or("");
-                            let base_cmd = token.rsplit(['/', '\\']).next().unwrap_or(token);
-                            let kind     = AgentKind::detect(base_cmd);
-                            if kind != AgentKind::Shell {
-                                inject = Some((s.runbox_id.clone(), s.cwd.clone(), kind));
+                            if let Some(url) = intercept_start_cmd(&line, &s.cwd) {
+                                open_url  = Some(url);
+                                send_data = Some("\x03\r\n".to_string());
+                            } else {
+                                let token    = line.split_whitespace().next().unwrap_or("");
+                                let base_cmd = token.rsplit(['/', '\\']).next().unwrap_or(token);
+                                let kind     = AgentKind::detect(base_cmd);
+                                if kind != AgentKind::Shell {
+                                    inject = Some((s.runbox_id.clone(), s.cwd.clone(), kind));
+                                }
                             }
                         }
                     }
@@ -54,8 +61,17 @@ pub fn pty_write(
                     _ => {}
                 }
             }
+
+            let to_write = send_data.as_deref().unwrap_or(&data);
+            let _ = s.writer.write_all(to_write.as_bytes());
+            let _ = s.writer.flush();
         }
     }
+
+    if let Some(url) = open_url {
+        crate::agent::globals::emit_event("browser-open-url", serde_json::json!(url));
+    }
+
     if let Some((rb, cwd, kind)) = inject {
         let sid = session_id.clone();
         let db  = state.db.clone();
@@ -66,6 +82,41 @@ pub fn pty_write(
         });
     }
     Ok(())
+}
+
+fn intercept_start_cmd(line: &str, cwd: &str) -> Option<String> {
+    let mut parts = line.splitn(2, char::is_whitespace);
+    let cmd = parts.next().unwrap_or("").to_lowercase();
+    if cmd != "start" { return None; }
+
+    let arg = parts.next()?.trim().trim_matches('"').trim_matches('\'');
+    if arg.is_empty() { return None; }
+
+    let lower = arg.to_lowercase();
+    if !lower.ends_with(".html") && !lower.ends_with(".htm")
+        && !lower.ends_with(".svg")  && !lower.ends_with(".pdf") {
+        return None;
+    }
+
+    if arg.starts_with("file://") { return Some(arg.to_string()); }
+
+    if arg.len() >= 2 && arg.chars().nth(1) == Some(':') {
+        let normalised = arg.replace('\\', "/");
+        return Some(format!("file:///{normalised}"));
+    }
+
+    let abs = std::path::Path::new(cwd).join(arg);
+
+    if let Ok(canonical) = abs.canonicalize() {
+        if let Ok(url) = url::Url::from_file_path(&canonical) {
+            return Some(url.to_string());
+        }
+        let s = canonical.to_string_lossy().replace('\\', "/");
+        return Some(format!("file:///{}", s.trim_start_matches('/')));
+    }
+
+    let s = abs.to_string_lossy().replace('\\', "/");
+    Some(format!("file:///{}", s.trim_start_matches('/')))
 }
 
 #[tauri::command]

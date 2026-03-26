@@ -19,6 +19,7 @@ use super::schema::{
     memory_schema, null_vector, Memory, EMBEDDING_DIM,
     MT_BLOCKER, MT_FAILURE, MT_GOAL, SCOPE_LOCAL, SCOPE_MACHINE,
     LEVEL_LOCKED, LEVEL_PREFERRED, LEVEL_TEMPORARY, LEVEL_SESSION,
+    DECAY_NEVER, DECAY_SESSION,
     decay_for_type, importance_for_type, agent_type_from_name,
     infer_type_from_tags, dedup_threshold, now_ms,
     decay_for_level, importance_for_level, level_from_memory_type,
@@ -740,114 +741,6 @@ pub async fn session_log(
     // The session_summary commit at the end covers the full log history.
 
     Ok(mem)
-}
-
-// ── V3 — session_log() ────────────────────────────────────────────────────────
-//
-// One line per step. Capped at 50 per agent_id. Oldest dropped when cap hit.
-// TEMPORARY + agent_id scoped.
-
-const SESSION_LOG_CAP: usize = 50;
-
-// ── V3 — session_summary() ────────────────────────────────────────────────────
-//
-// One paragraph when task complete. Overwrites previous summary for this agent.
-// SESSION level, tagged with agent_id. Last 3 per agent kept.
-
-const SESSION_SUMMARY_CAP: usize = 3;
-
-pub async fn session_summary(
-    runbox_id:  &str,
-    session_id: &str,
-    agent_id:   &str,
-    agent_name: &str,
-    text:       &str,
-) -> Result<(), String> {
-    let text = text.trim();
-    if text.is_empty() { return Ok(()); }
-
-    let all = memories_for_runbox(runbox_id).await.unwrap_or_default();
-
-    // Mark previous session summaries for this agent as resolved
-    let prev_summaries: Vec<String> = all.iter()
-        .filter(|m| {
-            m.agent_id == agent_id
-                && m.effective_level() == LEVEL_SESSION
-                && !m.resolved
-        })
-        .map(|m| m.id.clone())
-        .collect();
-    for old_id in &prev_summaries {
-        let _ = mark_resolved(old_id).await;
-    }
-
-    // Prune: keep last (CAP-1) resolved summaries for this agent
-    let mut all_session: Vec<&Memory> = all.iter()
-        .filter(|m| m.agent_id == agent_id && m.effective_level() == LEVEL_SESSION)
-        .collect();
-    all_session.sort_by_key(|m| m.timestamp);
-    if all_session.len() >= SESSION_SUMMARY_CAP {
-        let to_delete = all_session.len() - SESSION_SUMMARY_CAP + 1;
-        for old in all_session.iter().take(to_delete) {
-            let _ = memory_delete(&old.id).await;
-        }
-    }
-
-    let id         = uuid::Uuid::new_v4().to_string();
-    let ts         = now_ms();
-    let agent_type = agent_type_from_name(agent_name);
-    let tags       = format!("SESSION,agent:{agent_id}");
-
-    let batch = insert_batch(
-        &id, runbox_id, session_id, text,
-        false, ts, "main", "memory",
-        &tags, "", agent_name,
-        LEVEL_SESSION, importance_for_level(LEVEL_SESSION), false,
-        super::schema::DECAY_NEVER,
-        SCOPE_LOCAL, &agent_type,
-        LEVEL_SESSION, agent_id, "",
-    )?;
-    add_batch(batch).await
-}
-
-// ── V3 — add_locked() ─────────────────────────────────────────────────────────
-//
-// Panel-only write path. Sets level=LOCKED, importance=100, never expires.
-// Agents cannot call this.
-
-pub async fn add_locked(
-    runbox_id:  &str,
-    session_id: &str,
-    content:    &str,
-) -> Result<Memory, String> {
-    let content = content.trim();
-    if content.is_empty() { return Err("content cannot be empty".to_string()); }
-
-    let id  = uuid::Uuid::new_v4().to_string();
-    let ts  = now_ms();
-
-    let batch = insert_batch(
-        &id, runbox_id, session_id, content,
-        false, ts, "main", "memory",
-        LEVEL_LOCKED, "", "human",
-        LEVEL_LOCKED, 100, false, super::schema::DECAY_NEVER,
-        SCOPE_LOCAL, "human",
-        LEVEL_LOCKED, "human", &extract_key(content),
-    )?;
-    add_batch(batch).await?;
-
-    Ok(Memory {
-        id, runbox_id: runbox_id.into(), session_id: session_id.into(),
-        content: content.into(), pinned: true, timestamp: ts,
-        branch: "main".into(), commit_type: "memory".into(),
-        tags: LEVEL_LOCKED.into(), parent_id: "".into(),
-        agent_name: "human".into(),
-        memory_type: LEVEL_LOCKED.into(), importance: 100, resolved: false,
-        decay_at: super::schema::DECAY_NEVER,
-        scope: SCOPE_LOCAL.into(), agent_type: "human".into(),
-        level: LEVEL_LOCKED.into(), agent_id: "human".into(),
-        key: extract_key(content),
-    })
 }
 
 // ── V3 — expire_temporary_for_agent() ────────────────────────────────────────

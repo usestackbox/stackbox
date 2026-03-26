@@ -1,4 +1,4 @@
-// src-tauri/src/state.rs
+// src/state.rs
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -16,6 +16,7 @@ pub struct PtySession {
     pub cwd:           String,
     pub agent_kind:    AgentKind,
     pub worktree_path: Option<String>,
+    pub docker:        bool,
 }
 
 // ── Type aliases ───────────────────────────────────────────────────────────────

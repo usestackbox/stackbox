@@ -10,7 +10,6 @@ import { GitWorktreePanel } from "../panels/Gitworktreepanel";
 import MemoryPanel from "../panels/MemoryPanel";
 import FileTreePanel from "../panels/FileTreePanel";
 import { C, MONO, SANS, tbtn } from "../shared/constants";
-import { usePtyNotifier } from "../shared/Notificationsystem";
 import type { Runbox, DiffTab } from "../shared/types";
 import { IcoBrain, IcoFiles, IcoGit } from "../shared/icons";
 
@@ -128,7 +127,6 @@ function PanelResizeHandle({ onResize }: { onResize: (w: number) => void }) {
       onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"} />
   );
 }
-
 
 // ── Tab context menu ──────────────────────────────────────────────────────────
 function TabContextMenu({ x, y, win, isFirst, isLast, onClose, onCloseTab, onRestore, onMoveLeft, onMoveRight }: {
@@ -252,8 +250,14 @@ export function WorkspaceView({
       const aw = area.offsetWidth, ah = area.offsetHeight;
       setWins(prev => {
         const visible = prev.filter(w => !w.minimized && !w.maximized);
-        if (visible.length !== 1) return prev;
-        return prev.map(w => w.minimized || w.maximized ? w : { ...w, x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2 });
+        // Always update file-kind windows so they stay full-canvas
+        const hasFileWin = prev.some(w => w.kind === "file");
+        if (visible.length !== 1 && !hasFileWin) return prev;
+        return prev.map(w => {
+          if (w.kind === "file") return { ...w, w: aw, h: ah };
+          if (w.minimized || w.maximized) return w;
+          return { ...w, x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2 };
+        });
       });
       setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
     });
@@ -279,47 +283,35 @@ export function WorkspaceView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDiff?.path]);
 
-
-  // ── Browser URL detection: listen for URLs emitted from PTY output ───────────
+  // ── Browser URL detection ─────────────────────────────────────────────────
   useEffect(() => {
     const unsub = listen<string>("browser-open-url", ({ payload }) => {
       const url = payload.trim();
-      if (!url.startsWith("http")) return;
+      if (!url.startsWith("http") && !url.startsWith("file://")) return;
 
-      const isLocal = url.includes("localhost") || url.includes("127.0.0.1") || url.includes("0.0.0.0");
+      const isLocal = url.startsWith("file://")
+        || url.includes("localhost") || url.includes("127.0.0.1") || url.includes("0.0.0.0");
 
-      if (!isLocal) {
-        // Non-localhost URLs: open in system browser via shell
-        window.open(url, "_blank");
-        return;
-      }
+      if (!isLocal) { window.open(url, "_blank"); return; }
 
-      // Localhost URL → open or navigate a browser pane
       setWins(prev => {
         const existing = prev.find(w => w.kind === "browser");
         if (existing) {
-          // Navigate the existing browser pane
           setPendingBrowserUrl(p => ({ ...p, [existing.id]: url }));
           setActiveId(existing.id);
           return prev.map(w => w.id === existing.id ? { ...w, zIndex: nextZ() } : w);
         }
-        // No browser pane yet — create one
         const area = areaRef.current;
         const id   = crypto.randomUUID();
         setPendingBrowserUrl(p => ({ ...p, [id]: url }));
         setActiveId(id);
         return [...prev, {
-          id,
-          label:     "browser",
-          kind:      "browser" as const,
-          x:         GAP,
-          y:         GAP,
-          w:         area ? area.offsetWidth  - GAP * 2 : 800,
-          h:         area ? area.offsetHeight - GAP * 2 : 600,
-          minimized: false,
-          maximized: false,
-          cwd:       runbox.cwd,
-          zIndex:    nextZ(),
+          id, label: "browser", kind: "browser" as const,
+          x: GAP, y: GAP,
+          w: area ? area.offsetWidth  - GAP * 2 : 800,
+          h: area ? area.offsetHeight - GAP * 2 : 600,
+          minimized: false, maximized: false,
+          cwd: runbox.cwd, zIndex: nextZ(),
         }];
       });
     });
@@ -402,7 +394,6 @@ export function WorkspaceView({
     setTimeout(() => window.dispatchEvent(new Event("resize")), 200);
   }, []);
 
-  // ── Tab reorder ───────────────────────────────────────────────────────────
   const moveTab = useCallback((id: string, dir: "left" | "right") => {
     setWins(prev => {
       const arr = [...prev];
@@ -460,18 +451,6 @@ export function WorkspaceView({
     setSidePanel(panel);
     if (panel !== "files") { setActiveDiff(null); setFilesView("list"); }
   }, [sidePanel]);
-
-  const memoryRunboxes = runboxes ?? [{ id: runbox.id, name: runbox.name }];
-
-  // ── Notify when any agent session finishes ────────────────────────────────
-  const ptySessionInfos = wins
-    .filter(w => w.kind === "terminal")
-    .map(w => ({
-      sessionId:   `${runbox.id}-${w.id}`,
-      runboxId:    runbox.id,
-      runboxName:  runbox.name,
-    }));
-  usePtyNotifier(ptySessionInfos);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
@@ -556,28 +535,20 @@ export function WorkspaceView({
                 onMouseLeave={e => { if (!isActive && !isDragOver) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
               >
                 {w.minimized && (
-                  <span style={{
-                    width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
-                    background: "#fbbf24", boxShadow: "0 0 5px rgba(251,191,36,.6)",
-                  }} />
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: "#fbbf24", boxShadow: "0 0 5px rgba(251,191,36,.6)" }} />
                 )}
                 {!w.minimized && (w.kind === "browser" ? (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-                    stroke={isActive ? "#00e5ff" : C.t3} strokeWidth="2" style={{ flexShrink: 0 }}>
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="2" y1="12" x2="22" y2="12"/>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={isActive ? "#00e5ff" : C.t3} strokeWidth="2" style={{ flexShrink: 0 }}>
+                    <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
                     <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
                   </svg>
                 ) : w.kind === "file" ? (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-                    stroke={isActive ? "#00e5ff" : C.t3} strokeWidth="2" style={{ flexShrink: 0 }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={isActive ? "#00e5ff" : C.t3} strokeWidth="2" style={{ flexShrink: 0 }}>
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                     <polyline points="14 2 14 8 20 8"/>
                   </svg>
                 ) : (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-                    stroke={isActive ? "#00e5ff" : C.t3}
-                    strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={isActive ? "#00e5ff" : C.t3} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                     <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
                   </svg>
                 ))}
@@ -603,20 +574,12 @@ export function WorkspaceView({
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           {toolbarSlot}
           {branch && (
-            <div style={{
-              display: "flex", alignItems: "center", gap: 5,
-              padding: "4px 10px", borderRadius: 8,
-              background: C.bg2, border: `1px solid ${C.borderMd}`,
-            }}>
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none"
-                stroke="rgba(255,255,255,.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: C.bg2, border: `1px solid ${C.borderMd}` }}>
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
                 <path d="M18 9a9 9 0 0 1-9 9"/>
               </svg>
-              <span style={{
-                fontSize: 11, fontFamily: MONO, color: "#ffffff", fontWeight: 500,
-                maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>{branch}</span>
+              <span style={{ fontSize: 11, fontFamily: MONO, color: "#ffffff", fontWeight: 500, maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branch}</span>
             </div>
           )}
         </div>
@@ -630,10 +593,10 @@ export function WorkspaceView({
           {wins.map(win => (
             win.kind === "browser" ? (
               <div key={win.id} style={{
-                position:  "absolute",
+                position: "absolute",
                 left: win.x, top: win.y, width: win.w, height: win.h,
-                zIndex:    win.zIndex,
-                display:   win.minimized ? "none" : "block",
+                zIndex: win.zIndex,
+                display: win.minimized ? "none" : "block",
                 transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
               }}>
                 <BrowsePane
@@ -647,11 +610,19 @@ export function WorkspaceView({
                 />
               </div>
             ) : win.kind === "file" && win.filePath ? (
-              <div key={win.id} style={{ display: win.minimized ? "none" : "contents" }}>
+              <div key={win.id} style={{
+                position: "absolute",
+                left: 0, top: 0, right: 0, bottom: 0,
+                zIndex: win.zIndex,
+                display: win.minimized ? "none" : "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              }}>
                 <FileViewerPane
-                  id={win.id}
-                  path={win.filePath}
-                  x={win.x} y={win.y} w={win.w} h={win.h}
+                  id={win.id} path={win.filePath}
+                  x={0} y={0}
+                  w={areaRef.current?.offsetWidth  ?? win.w}
+                  h={areaRef.current?.offsetHeight ?? win.h}
                   zIndex={win.zIndex}
                   isActive={activeId === win.id}
                   onActivate={() => focusWin(win.id)}

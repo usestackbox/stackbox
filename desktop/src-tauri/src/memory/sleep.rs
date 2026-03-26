@@ -552,7 +552,8 @@ pub fn is_defrag_due(cwd: &str) -> bool {
     if !sentinel.exists() { return true; }
     std::fs::metadata(&sentinel)
         .and_then(|m| m.modified())
-        .and_then(|t| std::time::SystemTime::now().duration_since(t))
+        .ok()
+        .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
         .map(|d| d.as_secs() > 7 * 86_400)
         .unwrap_or(true)
 }

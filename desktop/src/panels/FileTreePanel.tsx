@@ -381,7 +381,7 @@ export default function FileTreePanel({ cwd, onClose, onOpenFile }: {
   const refresh = useCallback(() => setRefreshKey(k => k + 1), []);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", minHeight: 0 }}>
       {/* Header */}
       <div style={{
         height: 48, padding: "0 8px 0 14px", flexShrink: 0,
@@ -437,7 +437,7 @@ export default function FileTreePanel({ cwd, onClose, onOpenFile }: {
       </div>
 
       {/* Tree */}
-      <div style={{ flex: 1, overflow: "auto", paddingTop: 6 }}>
+      <div style={{ flex: 1, overflow: "auto", paddingTop: 6, minHeight: 0 }}>
         {creating && (
           <CreateInput parentPath={cwd} type={creating}
             onDone={() => { setCreating(null); refresh(); }} />

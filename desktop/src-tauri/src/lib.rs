@@ -1,9 +1,10 @@
-// src-tauri/src/lib.rs
+// src/lib.rs
 
 #![allow(dead_code, unused_imports, unused_variables, unused_assignments)]
 mod agent;
 mod browser;
 mod db;
+mod docker;
 mod git;
 mod mcp;
 mod memory;
@@ -67,7 +68,7 @@ pub fn run() {
             commands::pty::pty_kill,
             commands::watcher::watch_runbox,
             commands::watcher::unwatch_runbox,
-            // ── Memory V1/V2 (kept) ───────────────────────────────────────────
+            // ── Memory V1/V2 ─────────────────────────────────────────────────
             commands::memory::memory_add,
             commands::memory::memory_add_full,
             commands::memory::memory_list,
@@ -89,17 +90,17 @@ pub fn run() {
             commands::memory::memory_get_context,
             commands::memory::memory_confirm_env,
             commands::memory::memory_decay_prune,
-            // ── Memory V3 (new) ───────────────────────────────────────────────
+            // ── Memory V3 ────────────────────────────────────────────────────
             commands::memory::memory_add_locked,
             commands::memory::memory_list_by_level,
             commands::memory::memory_list_locked,
             commands::memory::memory_list_temporary_for_agent,
             commands::memory::memory_expire_temporary,
             commands::memory::memory_remember,
-            // ── DB ────────────────────────────────────────────────────────────
+            // ── DB ───────────────────────────────────────────────────────────
             commands::db::db_sessions_for_runbox,
             commands::db::db_events_for_runbox,
-            // ── Git ───────────────────────────────────────────────────────────
+            // ── Git ──────────────────────────────────────────────────────────
             git::commands::git_ensure,
             git::commands::git_log_for_runbox,
             git::commands::git_diff_for_commit,
@@ -118,7 +119,7 @@ pub fn run() {
             git::commands::git_branches,
             git::commands::git_checkout,
             git::commands::git_diff_between_worktrees,
-            // ── FS ────────────────────────────────────────────────────────────
+            // ── FS ───────────────────────────────────────────────────────────
             commands::fs::open_directory_dialog,
             commands::fs::open_in_editor,
             commands::fs::read_text_file,
@@ -128,7 +129,7 @@ pub fn run() {
             commands::fs::fs_create_dir,
             commands::fs::fs_create_file,
             commands::fs::copy_to_clipboard,
-            // ── Browser ───────────────────────────────────────────────────────
+            // ── Browser ──────────────────────────────────────────────────────
             browser::webview::browser_create,
             browser::webview::browser_destroy,
             browser::webview::browser_navigate,
@@ -138,6 +139,12 @@ pub fn run() {
             browser::webview::browser_reload,
             browser::webview::browser_show,
             browser::webview::browser_hide,
+            // ── Docker ───────────────────────────────────────────────────────
+            docker::docker_available,
+            docker::docker_status,
+            docker::docker_ensure,
+            docker::docker_stop,
+            docker::docker_remove,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

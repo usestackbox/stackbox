@@ -21,8 +21,11 @@ interface BrowsePanelProps {
   onExternalUrlConsumed?: () => void;
 }
 
-function isLocalhost(url: string): boolean {
-  return url.includes("localhost") || url.includes("127.0.0.1") || url.includes("0.0.0.0");
+function isAllowedUrl(url: string): boolean {
+  return url.startsWith("file://")
+    || url.includes("localhost")
+    || url.includes("127.0.0.1")
+    || url.includes("0.0.0.0");
 }
 
 export default function BrowsePane({
@@ -50,10 +53,11 @@ export default function BrowsePane({
   }, []);
 
   const navigate = useCallback(async (raw: string) => {
-    const url = raw.trim().startsWith("http") ? raw.trim() : `http://${raw.trim()}`;
-    // Removed isLocalhost guard — user-typed URLs should always navigate.
-    // The Rust webview handles any URL; isLocalhost is still enforced for
-    // auto-open URLs emitted from PTY output (handled in WorkspaceView).
+    const trimmed = raw.trim();
+    // Don't prepend http:// if already has a scheme (http, https, file, etc.)
+    const url = /^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//.test(trimmed)
+      ? trimmed
+      : `http://${trimmed}`;
     setConnError(false);
     urlRef.current = url;
     setUrlInput(url);
@@ -66,7 +70,7 @@ export default function BrowsePane({
     if (!externalUrl) return;
     // Signal the parent right away so it doesn't hold a stale pendingUrl
     onExternalUrlConsumed?.();
-    if (!isLocalhost(externalUrl)) return;
+    if (!isAllowedUrl(externalUrl)) return;
     if (createdRef.current) {
       navigate(externalUrl);
     } else {

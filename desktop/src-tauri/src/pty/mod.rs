@@ -65,6 +65,7 @@ pub async fn spawn(
     agent_cmd:  Option<String>,
     cols:       Option<u16>,
     rows:       Option<u16>,
+    docker:     bool,
     state:      &AppState,
 ) -> Result<(), String> {
     let pty_system = native_pty_system();
@@ -101,11 +102,8 @@ pub async fn spawn(
 
     record_agent_spawned(&state.db, &runbox_id, &session_id, agent_kind.display_name(), &effective_cwd);
 
-    // GCC+Letta: register cwd for FS sync + injector reads
     crate::agent::globals::register_runbox_cwd(&runbox_id, &effective_cwd);
 
-    // GCC+Letta: boot_init — scan codebase, write metadata.yaml + main.md
-    // Runs async in background, no-op if metadata.yaml is < 7 days old
     if agent_kind != AgentKind::Shell {
         let rb4  = runbox_id.clone();
         let cwd4 = effective_cwd.clone();
@@ -174,6 +172,15 @@ pub async fn spawn(
 
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") { cmd.env("ANTHROPIC_API_KEY", key); }
 
+    // ── Docker exec prefix ────────────────────────────────────────────────────
+    // If docker is enabled for this workspace, wrap the spawn inside the container.
+    if docker {
+        if let Ok(prefix) = crate::docker::exec_prefix(&runbox_id) {
+            cmd.env("STACKBOX_DOCKER_EXEC", &prefix);
+            cmd.env("STACKBOX_IN_DOCKER",   "1");
+        }
+    }
+
     // ── Per-pane stable port allocation ──────────────────────────────────────
     let pane_port = {
         let mut hash: u32 = 0x811c9dc5;
@@ -235,6 +242,7 @@ pub async fn spawn(
         cwd:           effective_cwd.clone(),
         agent_kind:    agent_kind.clone(),
         worktree_path: worktree_path.clone(),
+        docker,
     });
 
     {
@@ -275,7 +283,7 @@ pub async fn spawn(
                 }
             }
 
-            // URL detection — emit browser-open-url for localhost URLs
+            // URL detection — file:// and localhost URLs open in built-in browser
             let text_clean = strip_ansi(&text);
             for word in text_clean.split_whitespace() {
                 let clean = word.trim_matches(|c: char| {
@@ -283,13 +291,41 @@ pub async fn spawn(
                         && c != '-' && c != '_' && c != '?' && c != '='
                         && c != '&' && c != '#' && c != '%'
                 });
-                let is_valid_url = (clean.starts_with("https://") || clean.starts_with("http://"))
-                    && clean.len() > 10
+                let is_valid_url = (clean.starts_with("https://")
+                    || clean.starts_with("http://")
+                    || clean.starts_with("file://"))
+                    && clean.len() > 7
                     && !clean.contains(r"\x1b")
                     && !clean.contains(r"\u{")
                     && clean.chars().all(|c| c.is_ascii() && c >= ' ');
                 if is_valid_url {
                     let _ = app_pty.emit("browser-open-url", clean.to_string());
+                }
+            }
+
+            // start .\index.html intercept — relative file paths from PTY output
+            for line in text_clean.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("start ") || trimmed.starts_with("Start-Process ") {
+                    let rest = trimmed
+                        .trim_start_matches("start ")
+                        .trim_start_matches("Start-Process ")
+                        .trim_matches('"')
+                        .trim_matches('\'');
+                    if rest.ends_with(".html") || rest.ends_with(".htm") {
+                        let resolved = if rest.starts_with('.') || rest.starts_with('\\') {
+                            std::path::Path::new(&cwd_thr)
+                                .join(rest.trim_start_matches('.').trim_start_matches('\\')
+                                          .trim_start_matches('/'))
+                                .to_string_lossy()
+                                .to_string()
+                        } else {
+                            rest.to_string()
+                        };
+                        let file_url = format!("file:///{}", resolved.replace('\\', "/")
+                            .trim_start_matches('/'));
+                        let _ = app_pty.emit("browser-open-url", file_url);
+                    }
                 }
             }
 
@@ -321,21 +357,14 @@ pub async fn spawn(
                 let agent_type = memory::agent_type_from_name(&an2);
                 let agent_id   = memory::make_agent_id(&agent_type, &sid2);
 
-                // 1. Expire all TEMPORARY for this agent
                 if let Err(e) = memory::expire_temporary_for_agent(&rb2, &agent_id).await {
                     eprintln!("[pty] expire_temporary: {e}");
                 }
 
-                // 2. Auto session summary fallback (no-op if agent wrote one)
                 crate::agent::supercontext::auto_session_summary(&rb2, &sid2, &an2, &db2).await;
-
-                // 3. Invalidate injector cache
                 injector::invalidate_cache(&rb2).await;
-
-                // 4. GCC+Letta: reflection — extract env facts from session logs
                 crate::memory::sleep::reflection(&rb2, &cwd2, &sid2).await;
 
-                // 5. GCC+Letta: weekly defrag check
                 if crate::memory::sleep::is_defrag_due(&cwd2) {
                     crate::memory::sleep::defrag(&rb2, &cwd2).await;
                     crate::memory::sleep::mark_defrag_done(&cwd2);

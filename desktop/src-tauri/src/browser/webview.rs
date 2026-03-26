@@ -131,8 +131,16 @@ pub fn browser_destroy(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
     let wv = app.get_webview(&label(&id)).ok_or("webview not found")?;
-    // .navigate() silently fails on Windows child webviews created via add_child.
-    // Using window.location.assign() via eval is reliable cross-platform.
+
+    // file:// URLs cannot be loaded via window.location.assign() from an http
+    // context — the browser blocks the cross-origin jump. Use the native Tauri
+    // navigate() for file:// only; for http/https keep using eval (more reliable
+    // on Windows child webviews created via add_child).
+    if url.starts_with("file://") {
+        let parsed = url.parse::<url::Url>().map_err(|e: url::ParseError| e.to_string())?;
+        return wv.navigate(parsed).map_err(|e| e.to_string());
+    }
+
     let escaped = url.replace('\\', "\\\\").replace('\'', "\\'");
     wv.eval(&format!("window.location.assign('{}')", escaped))
         .map_err(|e| e.to_string())

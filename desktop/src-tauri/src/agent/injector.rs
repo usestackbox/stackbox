@@ -235,7 +235,7 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
                 let block = format!("PROJECT:\n{relevant}\n");
                 let room  = 60usize.min(BUDGET_TOTAL_V3.saturating_sub(used));
                 if est_tokens(&block) <= room {
-                    sections.push(block);
+                    sections.push(block.clone());
                     used += est_tokens(&block);
                 }
             }
