@@ -1,6 +1,7 @@
 // src/runbox/WorkspaceView.tsx
 import { useState, useRef, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import RunPane from "../core/RunPane";
 import BrowsePane from "../core/BrowsePane";
 import FileViewerPane from "../core/FileViewerPane";
@@ -9,7 +10,6 @@ import { FileChangeList } from "../panels/FileChangeList";
 import { GitWorktreePanel } from "../panels/Gitworktreepanel";
 import MemoryPanel from "../panels/MemoryPanel";
 import { C, MONO, SANS, tbtn } from "../shared/constants";
-import FileTreePanel from "../panels/FileTreePanel";
 import type { Runbox, DiffTab } from "../shared/types";
 import { IcoBrain, IcoFiles, IcoGit } from "../shared/icons";
 
@@ -36,17 +36,27 @@ interface WinState {
   zIndex:    number;
 }
 
+type SidePanel = "files" | "git" | "memory" | null;
+type FilesView = "list" | "diff";
+
 interface WorkspaceViewProps {
-  runbox:           Runbox;
-  branch:           string;
-  toolbarSlot?:     React.ReactNode;
-  activeSessionId?: string | null;
-  runboxes?:        Array<{ id: string; name: string }>;
-  onCwdChange:      (cwd: string) => void;
-  onSessionChange?: (sid: string) => void;
-  onOpenDiff:       (ref: { open: (fc: any) => void }) => void;
-  fileTreeOpen?:    boolean;
-  onFileTreeClose?: () => void;
+  runbox:             Runbox;
+  branch:             string;
+  toolbarSlot?:       React.ReactNode;
+  activeSessionId?:   string | null;
+  runboxes?:          Array<{ id: string; name: string }>;
+  sidePanel?:         SidePanel;
+  sidebarCollapsed?:  boolean;
+  fileTreeOpen?:      boolean;
+  // NEW: margin applied only to the content area below the tab bar
+  contentMarginLeft?: number;
+  onSidePanelToggle?: (panel: "files" | "git" | "memory") => void;
+  onSidebarToggle?:   () => void;
+  onFileTreeToggle?:  () => void;
+  onCwdChange:        (cwd: string) => void;
+  onSessionChange?:   (sid: string) => void;
+  onOpenDiff:         (ref: { open: (fc: any) => void }) => void;
+  onOpenFile?:        (ref: { open: (path: string) => void }) => void;
 }
 
 function tileWindows(count: number, aw: number, ah: number) {
@@ -67,7 +77,6 @@ function winLabel(win: WinState) {
   if (win.kind === "file" && win.filePath) {
     return win.filePath.split(/[/\\]/).pop() ?? win.filePath;
   }
-  // Terminal: show only the last folder name, not the full path
   return win.cwd.split(/[/\\]/).filter(Boolean).pop() ?? "~";
 }
 
@@ -75,20 +84,37 @@ let _topZ = 10;
 const nextZ = () => ++_topZ;
 
 // ── Strip icon button ─────────────────────────────────────────────────────────
-function StripIcon({ children, title, active, onClick }: {
+export function StripIcon({ children, title, active, onClick }: {
   children: React.ReactNode; title: string; active?: boolean; onClick: () => void;
 }) {
   const [hov, setHov] = useState(false);
   return (
-    <button title={title} onClick={onClick}
+    <button title={title}
+      onMouseDown={e => e.stopPropagation()}
+      onClick={onClick}
       onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       style={{
-        width: 40, height: 40, flexShrink: 0, margin: "2px 4px",
+        width: 30, height: 30, flexShrink: 0,
         display: "flex", alignItems: "center", justifyContent: "center",
-        background: active ? C.bg3 : hov ? C.bg2 : "transparent",
-        border: `1px solid ${active ? C.borderMd : "transparent"}`,
-        borderRadius: 10, cursor: "pointer", transition: "all .12s",
+        background: active ? "rgba(63,182,139,.15)" : hov ? C.bg3 : "transparent",
+        border: `1px solid ${active ? "rgba(63,182,139,.35)" : "transparent"}`,
+        borderRadius: 8, cursor: "pointer", transition: "all .12s",
+        color: active ? "#3fb68b" : hov ? "#c8d3e0" : "#8b9ab5",
       }}>{children}</button>
+  );
+}
+
+// ── Window control button ─────────────────────────────────────────────────────
+function WinBtn({ children, title, hoverBg, hoverColor, onClick }: {
+  children: React.ReactNode; title: string; hoverBg: string; hoverColor: string; onClick: () => void;
+}) {
+  return (
+    <button title={title} onClick={onClick}
+      style={{ width: 28, height: 28, borderRadius: 7, border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,.45)", transition: "all .12s", flexShrink: 0 }}
+      onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = hoverBg; el.style.color = hoverColor; }}
+      onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = "rgba(255,255,255,.45)"; }}>
+      {children}
+    </button>
   );
 }
 
@@ -97,15 +123,17 @@ function PanelHeader({ title, icon, onClose }: { title: string; icon?: React.Rea
   return (
     <div style={{
       height: 48, padding: "0 12px 0 14px", flexShrink: 0,
-      borderBottom: `1px solid ${C.border}`,
-      display: "flex", alignItems: "center", gap: 8, background: C.bg1,
+      borderBottom: `1px solid rgba(255,255,255,.08)`,
+      display: "flex", alignItems: "center", gap: 8, background: "#1c2026",
     }}>
-      {icon && <span style={{ flexShrink: 0, opacity: .6 }}>{icon}</span>}
-      <span style={{ fontSize: 13, fontWeight: 600, color: C.t0, flex: 1, fontFamily: SANS }}>{title}</span>
-      <button onClick={onClose}
-        style={{ ...tbtn, width: 28, height: 28, borderRadius: 8, fontSize: 14 }}
-        onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.bg3; el.style.color = C.t0; }}
-        onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = C.t2; }}>✕</button>
+      {icon && <span style={{ flexShrink: 0, opacity: .75 }}>{icon}</span>}
+      <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.85)", flex: 1, fontFamily: SANS }}>{title}</span>
+      <button
+        onMouseDown={e => e.stopPropagation()}
+        onClick={onClose}
+        style={{ ...tbtn, width: 28, height: 28, borderRadius: 8, fontSize: 14, color: "rgba(255,255,255,.4)" }}
+        onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(239,68,68,.2)"; el.style.color = "#f87171"; }}
+        onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = "rgba(255,255,255,.4)"; }}>✕</button>
     </div>
   );
 }
@@ -135,18 +163,13 @@ function PanelResizeHandle({ onResize }: { onResize: (w: number) => void }) {
 function TabContextMenu({ x, y, win, isFirst, isLast, onClose, onCloseTab, onRestore, onMoveLeft, onMoveRight }: {
   x: number; y: number; win: WinState;
   isFirst: boolean; isLast: boolean;
-  onClose:     () => void;
-  onCloseTab:  () => void;
-  onRestore?:  () => void;
-  onMoveLeft:  () => void;
-  onMoveRight: () => void;
+  onClose: () => void; onCloseTab: () => void; onRestore?: () => void;
+  onMoveLeft: () => void; onMoveRight: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const t = setTimeout(() => {
-      const handler = (e: MouseEvent) => {
-        if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-      };
+      const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
       document.addEventListener("mousedown", handler);
       return () => document.removeEventListener("mousedown", handler);
     }, 50);
@@ -166,27 +189,16 @@ function TabContextMenu({ x, y, win, isFirst, isLast, onClose, onCloseTab, onRes
   return (
     <div ref={ref} style={{
       position: "fixed", zIndex: 9999, left, top,
-      background: "rgba(18,18,22,0.97)",
-      backdropFilter: "blur(16px)",
-      border: "1px solid rgba(255,255,255,.1)",
-      borderRadius: 8,
-      boxShadow: "0 12px 40px rgba(0,0,0,.7)",
-      padding: "4px 0", minWidth: 170,
-      fontFamily: MONO,
+      background: "rgba(18,18,22,0.97)", backdropFilter: "blur(16px)",
+      border: "1px solid rgba(255,255,255,.1)", borderRadius: 8,
+      boxShadow: "0 12px 40px rgba(0,0,0,.7)", padding: "4px 0", minWidth: 170, fontFamily: MONO,
     }}>
-      <div style={{ padding: "5px 12px 7px", fontSize: 10, color: "rgba(255,255,255,.3)",
-        borderBottom: "1px solid rgba(255,255,255,.06)", marginBottom: 3,
-        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div style={{ padding: "5px 12px 7px", fontSize: 10, color: "rgba(255,255,255,.3)", borderBottom: "1px solid rgba(255,255,255,.06)", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {winLabel(win)}
       </div>
       {items.map((item, i) => (
-        <div key={i}
-          onClick={item.disabled ? undefined : item.action}
-          style={{
-            padding: "7px 12px", cursor: item.disabled ? "default" : "pointer", fontSize: 12,
-            color: item.disabled ? "rgba(255,255,255,.2)" : item.danger ? "#f87171" : "rgba(255,255,255,.75)",
-            transition: "background .08s",
-          }}
+        <div key={i} onClick={item.disabled ? undefined : item.action}
+          style={{ padding: "7px 12px", cursor: item.disabled ? "default" : "pointer", fontSize: 12, color: item.disabled ? "rgba(255,255,255,.2)" : item.danger ? "#f87171" : "rgba(255,255,255,.75)", transition: "background .08s" }}
           onMouseEnter={e => { if (!item.disabled) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,.06)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
           {item.label}
@@ -196,61 +208,28 @@ function TabContextMenu({ x, y, win, isFirst, isLast, onClose, onCloseTab, onRes
   );
 }
 
-type SidePanel = "files" | "git" | "memory" | null;
-type FilesView = "list" | "diff";
-
-// ── File-pick modal (shown when splitting a file pane) ────────────────────────
+// ── File-pick modal ───────────────────────────────────────────────────────────
 function FileSplitModal({ sourceWinId, onConfirm, onCancel }: {
-  sourceWinId: string;
-  onConfirm: (filePath: string) => void;
-  onCancel:  () => void;
+  sourceWinId: string; onConfirm: (filePath: string) => void; onCancel: () => void;
 }) {
   const [path, setPath] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
   const submit = () => { const t = path.trim(); if (t) { onConfirm(t); } };
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 99999,
-      display: "flex", alignItems: "center", justifyContent: "center",
-      background: "rgba(0,0,0,.6)", backdropFilter: "blur(4px)",
-    }} onClick={onCancel}>
-      <div style={{
-        background: "#161618", border: "1px solid rgba(255,255,255,.12)",
-        borderRadius: 12, padding: "20px 24px", width: 480,
-        boxShadow: "0 24px 64px rgba(0,0,0,.8)",
-      }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.85)", fontFamily: SANS, marginBottom: 6 }}>
-          Open file in split pane
-        </div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,.35)", fontFamily: SANS, marginBottom: 16 }}>
-          Enter the file path relative to the project root, or an absolute path.
-        </div>
-        <input
-          ref={inputRef}
-          value={path}
-          onChange={e => setPath(e.target.value)}
+    <div style={{ position: "fixed", inset: 0, zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.6)", backdropFilter: "blur(4px)" }} onClick={onCancel}>
+      <div style={{ background: "#161618", border: "1px solid rgba(255,255,255,.12)", borderRadius: 12, padding: "20px 24px", width: 480, boxShadow: "0 24px 64px rgba(0,0,0,.8)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.85)", fontFamily: SANS, marginBottom: 6 }}>Open file in split pane</div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,.35)", fontFamily: SANS, marginBottom: 16 }}>Enter the file path relative to the project root, or an absolute path.</div>
+        <input ref={inputRef} value={path} onChange={e => setPath(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel(); }}
           placeholder="src/components/App.tsx"
-          style={{
-            width: "100%", boxSizing: "border-box",
-            background: "#0c0c0e", border: "1px solid rgba(255,255,255,.14)",
-            borderRadius: 8, padding: "9px 12px",
-            fontSize: 13, fontFamily: MONO, color: "#e0e0e0",
-            outline: "none",
-          }}
+          style={{ width: "100%", boxSizing: "border-box", background: "#0c0c0e", border: "1px solid rgba(255,255,255,.14)", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontFamily: MONO, color: "#e0e0e0", outline: "none" }}
           onFocus={e => (e.currentTarget.style.borderColor = "rgba(0,229,255,.5)")}
-          onBlur={e  => (e.currentTarget.style.borderColor = "rgba(255,255,255,.14)")}
-        />
+          onBlur={e  => (e.currentTarget.style.borderColor = "rgba(255,255,255,.14)")} />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
-          <button onClick={onCancel}
-            style={{ padding: "7px 16px", background: "transparent", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, color: "rgba(255,255,255,.5)", fontSize: 12, fontFamily: SANS, cursor: "pointer" }}>
-            Cancel
-          </button>
-          <button onClick={submit} disabled={!path.trim()}
-            style={{ padding: "7px 16px", background: path.trim() ? "rgba(0,229,255,.15)" : "rgba(255,255,255,.04)", border: `1px solid ${path.trim() ? "rgba(0,229,255,.4)" : "rgba(255,255,255,.08)"}`, borderRadius: 8, color: path.trim() ? "#00e5ff" : "rgba(255,255,255,.25)", fontSize: 12, fontFamily: SANS, cursor: path.trim() ? "pointer" : "default", fontWeight: 600 }}>
-            Open
-          </button>
+          <button onClick={onCancel} style={{ padding: "7px 16px", background: "transparent", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, color: "rgba(255,255,255,.5)", fontSize: 12, fontFamily: SANS, cursor: "pointer" }}>Cancel</button>
+          <button onClick={submit} disabled={!path.trim()} style={{ padding: "7px 16px", background: path.trim() ? "rgba(0,229,255,.15)" : "rgba(255,255,255,.04)", border: `1px solid ${path.trim() ? "rgba(0,229,255,.4)" : "rgba(255,255,255,.08)"}`, borderRadius: 8, color: path.trim() ? "#00e5ff" : "rgba(255,255,255,.25)", fontSize: 12, fontFamily: SANS, cursor: path.trim() ? "pointer" : "default", fontWeight: 600 }}>Open</button>
         </div>
       </div>
     </div>
@@ -259,14 +238,19 @@ function FileSplitModal({ sourceWinId, onConfirm, onCancel }: {
 
 export function WorkspaceView({
   runbox, branch, toolbarSlot, runboxes,
-  onCwdChange, onSessionChange, onOpenDiff,
-  fileTreeOpen, onFileTreeClose,
+  sidePanel: sidePanelProp,
+  sidebarCollapsed, fileTreeOpen,
+  contentMarginLeft = 0,
+  onSidePanelToggle, onSidebarToggle, onFileTreeToggle,
+  onCwdChange, onSessionChange, onOpenDiff, onOpenFile,
 }: WorkspaceViewProps) {
-  const areaRef      = useRef<HTMLDivElement>(null);
-  const labelCount   = useRef(0);
+  const areaRef    = useRef<HTMLDivElement>(null);
+  const labelCount = useRef(0);
   const [wins,       setWins]       = useState<WinState[]>([]);
   const [activeId,   setActiveId]   = useState<string | null>(null);
-  const [sidePanel,  setSidePanel]  = useState<SidePanel>(null);
+  const [_sidePanel, _setSidePanel] = useState<SidePanel>(null);
+  const sidePanel    = sidePanelProp !== undefined ? sidePanelProp : _sidePanel;
+  const setSidePanel = (v: SidePanel) => { _setSidePanel(v); };
   const [filesView,  setFilesView]  = useState<FilesView>("list");
   const [activeDiff, setActiveDiff] = useState<DiffTab | null>(null);
   const [panelWidth, setPanelWidth] = useState(450);
@@ -277,32 +261,25 @@ export function WorkspaceView({
   const [filePickModal, setFilePickModal] = useState<{ sourceWinId: string } | null>(null);
   const dragTabIdRef  = useRef<string | null>(null);
   const dragOverIdRef = useRef<string | null>(null);
-  const initialized  = useRef(false);
-  const resizeTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialized   = useRef(false);
+  const resizeTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dispatchResize = useCallback(() => {
     if (resizeTimer.current) clearTimeout(resizeTimer.current);
     resizeTimer.current = setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
   }, []);
 
-  useEffect(() => {
-    if (wins.length === 0 && initialized.current) labelCount.current = 0;
-  }, [wins.length]);
+sidePanel 
+  useEffect(() => { if (wins.length === 0 && initialized.current) labelCount.current = 0; }, [wins.length]);
 
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
     const area = areaRef.current; if (!area) return;
-    const aw = area.offsetWidth  || 800;
-    const ah = area.offsetHeight || 600;
+    const aw = area.offsetWidth || 800, ah = area.offsetHeight || 600;
     labelCount.current = 1;
     const id = crypto.randomUUID();
-    setWins([{
-      id, label: "w1", kind: "terminal",
-      x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2,
-      minimized: false, maximized: false,
-      cwd: runbox.cwd, zIndex: nextZ(),
-    }]);
+    setWins([{ id, label: "w1", kind: "terminal", x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }]);
     setActiveId(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -329,6 +306,24 @@ export function WorkspaceView({
     }});
   }, [onOpenDiff]);
 
+  const openFileWin = useCallback((filePath: string) => {
+    const area = areaRef.current;
+    const id = crypto.randomUUID();
+    const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
+    const aw = area ? area.offsetWidth : 800;
+    const ah = area ? area.offsetHeight : 600;
+    setWins(prev => [...prev, {
+      id, label: fileName, kind: "file" as const, filePath,
+      x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2,
+      minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ(),
+    }]);
+    setActiveId(id);
+  }, [runbox.cwd]);
+
+  useEffect(() => {
+    onOpenFile?.({ open: openFileWin });
+  }, [onOpenFile, openFileWin]);
+
   useEffect(() => {
     if (!activeDiff) return;
     const unsub = listen<any[]>("git:live-diff", ({ payload }) => {
@@ -340,17 +335,12 @@ export function WorkspaceView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDiff?.path]);
 
-  // ── Browser URL detection ─────────────────────────────────────────────────
   useEffect(() => {
     const unsub = listen<string>("browser-open-url", ({ payload }) => {
       const url = payload.trim();
       if (!url.startsWith("http") && !url.startsWith("file://")) return;
-
-      const isLocal = url.startsWith("file://")
-        || url.includes("localhost") || url.includes("127.0.0.1") || url.includes("0.0.0.0");
-
+      const isLocal = url.startsWith("file://") || url.includes("localhost") || url.includes("127.0.0.1") || url.includes("0.0.0.0");
       if (!isLocal) { window.open(url, "_blank"); return; }
-
       setWins(prev => {
         const existing = prev.find(w => w.kind === "browser");
         if (existing) {
@@ -359,17 +349,10 @@ export function WorkspaceView({
           return prev.map(w => w.id === existing.id ? { ...w, zIndex: nextZ() } : w);
         }
         const area = areaRef.current;
-        const id   = crypto.randomUUID();
+        const id = crypto.randomUUID();
         setPendingBrowserUrl(p => ({ ...p, [id]: url }));
         setActiveId(id);
-        return [...prev, {
-          id, label: "browser", kind: "browser" as const,
-          x: GAP, y: GAP,
-          w: area ? area.offsetWidth  - GAP * 2 : 800,
-          h: area ? area.offsetHeight - GAP * 2 : 600,
-          minimized: false, maximized: false,
-          cwd: runbox.cwd, zIndex: nextZ(),
-        }];
+        return [...prev, { id, label: "browser", kind: "browser" as const, x: GAP, y: GAP, w: area ? area.offsetWidth - GAP * 2 : 800, h: area ? area.offsetHeight - GAP * 2 : 600, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }];
       });
     });
     return () => { unsub.then(f => f()); };
@@ -381,44 +364,15 @@ export function WorkspaceView({
     setWins(prev => prev.map(w => w.id === id ? { ...w, zIndex: nextZ() } : w));
   }, []);
 
-  const openFile = useCallback((filePath: string) => {
-    const area = areaRef.current; if (!area) return;
-    setWins(prev => {
-      const existing = prev.find(w => w.kind === "file" && w.filePath === filePath);
-      if (existing) { setActiveId(existing.id); return prev.map(w => w.id === existing.id ? { ...w, zIndex: nextZ() } : w); }
-      const id = crypto.randomUUID();
-      const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
-      const aw = area.offsetWidth  || 800;
-      const ah = area.offsetHeight || 600;
-      setActiveId(id);
-      const all: WinState[] = [...prev, {
-        id, label: fileName, kind: "file" as const, filePath,
-        x: GAP, y: GAP,
-        w: aw - GAP * 2, h: ah - GAP * 2,
-        minimized: false, maximized: false,
-        cwd: runbox.cwd, zIndex: nextZ(),
-      }];
-      const visible = all.filter(w => !w.minimized && !w.maximized);
-      const tiles   = tileWindows(visible.length, aw, ah);
-      let ti = 0;
-      return all.map(w => w.minimized || w.maximized ? w : { ...w, ...tiles[ti++] });
-    });
-  }, [runbox.cwd]);
-
   const addWindow = useCallback(() => {
     const area = areaRef.current; if (!area) return;
     const aw = area.offsetWidth, ah = area.offsetHeight;
     labelCount.current += 1;
     const id = crypto.randomUUID();
     setWins(prev => {
-      const all: WinState[] = [...prev, {
-        id, label: `w${labelCount.current}`, kind: "terminal",
-        x: 0, y: 0, w: 400, h: 300,
-        minimized: false, maximized: false,
-        cwd: runbox.cwd, zIndex: nextZ(),
-      }];
+      const all: WinState[] = [...prev, { id, label: `w${labelCount.current}`, kind: "terminal", x: 0, y: 0, w: 400, h: 300, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }];
       const visible = all.filter(w => !w.minimized && !w.maximized);
-      const tiles   = tileWindows(visible.length, aw, ah);
+      const tiles = tileWindows(visible.length, aw, ah);
       let ti = 0;
       return all.map(w => w.minimized || w.maximized ? w : { ...w, ...tiles[ti++] });
     });
@@ -430,11 +384,10 @@ export function WorkspaceView({
     setWins(prev => {
       const next = prev.filter(w => w.id !== id);
       if (next.length === 0) { labelCount.current = 0; return next; }
-      // Retile all non-minimized/non-maximized windows to fill the space
       if (area) {
         const aw = area.offsetWidth, ah = area.offsetHeight;
         const visible = next.filter(w => !w.minimized && !w.maximized);
-        const tiles   = tileWindows(visible.length, aw, ah);
+        const tiles = tileWindows(visible.length, aw, ah);
         let ti = 0;
         return next.map(w => w.minimized || w.maximized ? w : { ...w, ...tiles[ti++] });
       }
@@ -442,13 +395,9 @@ export function WorkspaceView({
     });
     setActiveId(prev => {
       if (prev !== id) return prev;
-      // Focus the window that was visually adjacent
       setWins(cur => {
         const remaining = cur.filter(w => !w.minimized);
-        if (remaining.length > 0) {
-          const next = remaining[remaining.length - 1];
-          setTimeout(() => setActiveId(next.id), 0);
-        }
+        if (remaining.length > 0) { const next = remaining[remaining.length - 1]; setTimeout(() => setActiveId(next.id), 0); }
         return cur;
       });
       return null;
@@ -484,8 +433,7 @@ export function WorkspaceView({
   const moveTab = useCallback((id: string, dir: "left" | "right") => {
     setWins(prev => {
       const arr = [...prev];
-      const idx = arr.findIndex(w => w.id === id);
-      if (idx < 0) return prev;
+      const idx = arr.findIndex(w => w.id === id); if (idx < 0) return prev;
       const newIdx = dir === "left" ? idx - 1 : idx + 1;
       if (newIdx < 0 || newIdx >= arr.length) return prev;
       [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
@@ -493,29 +441,14 @@ export function WorkspaceView({
     });
   }, []);
 
-  // Split a window: terminals get a new terminal below; file panes ask which file to open
   const splitWin = useCallback((id: string) => {
     setWins(prev => {
       const win = prev.find(w => w.id === id); if (!win) return prev;
-      // File pane → show pick-file modal instead of cloning
-      if (win.kind === "file") {
-        setTimeout(() => setFilePickModal({ sourceWinId: id }), 0);
-        return prev;
-      }
-      // Terminal pane → split vertically
-      const halfH  = Math.max(MIN_H, Math.floor((win.h - GAP) / 2));
-      const newId  = crypto.randomUUID();
+      if (win.kind === "file") { setTimeout(() => setFilePickModal({ sourceWinId: id }), 0); return prev; }
+      const halfH = Math.max(MIN_H, Math.floor((win.h - GAP) / 2));
+      const newId = crypto.randomUUID();
       labelCount.current += 1;
-      const newWin: WinState = {
-        ...win,
-        id:        newId,
-        label:     `w${labelCount.current}`,
-        y:         win.y + halfH + GAP,
-        h:         win.h - halfH - GAP,
-        zIndex:    nextZ(),
-        minimized: false,
-        maximized: false,
-      };
+      const newWin: WinState = { ...win, id: newId, label: `w${labelCount.current}`, y: win.y + halfH + GAP, h: win.h - halfH - GAP, zIndex: nextZ(), minimized: false, maximized: false };
       setActiveId(newId);
       return [...prev.map(w => w.id === id ? { ...w, h: halfH } : w), newWin];
     });
@@ -531,11 +464,7 @@ export function WorkspaceView({
       setWins(prev => {
         const cur = prev.find(w => w.id === id); if (!cur) return prev;
         const aw = area?.offsetWidth ?? 9999, ah = area?.offsetHeight ?? 9999;
-        return prev.map(w => w.id === id ? {
-          ...w,
-          x: Math.max(0, Math.min(aw - cur.w, ev.clientX - startX)),
-          y: Math.max(0, Math.min(ah - cur.h, ev.clientY - startY)),
-        } : w);
+        return prev.map(w => w.id === id ? { ...w, x: Math.max(0, Math.min(aw - cur.w, ev.clientX - startX)), y: Math.max(0, Math.min(ah - cur.h, ev.clientY - startY)) } : w);
       });
     };
     const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
@@ -561,17 +490,15 @@ export function WorkspaceView({
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
   }, [wins, focusWin, dispatchResize]);
 
-  const toggleSide = useCallback((panel: SidePanel) => {
+  const toggleSide = useCallback((panel: NonNullable<SidePanel>) => {
+    if (onSidePanelToggle) { onSidePanelToggle(panel); return; }
     if (panel === sidePanel) { setSidePanel(null); setActiveDiff(null); setFilesView("list"); return; }
     setSidePanel(panel);
     if (panel !== "files") { setActiveDiff(null); setFilesView("list"); }
-  }, [sidePanel]);
+  }, [sidePanel, onSidePanelToggle]);
 
-  // Retile all visible windows whenever the side panel opens or closes so
-  // they fill the new canvas area without overlapping the panel.
   useEffect(() => {
     const area = areaRef.current; if (!area) return;
-    // Wait for the panel slide-in animation (140ms) + layout reflow
     const t = setTimeout(() => {
       const aw = area.offsetWidth, ah = area.offsetHeight;
       if (!aw || !ah) return;
@@ -587,41 +514,47 @@ export function WorkspaceView({
     return () => clearTimeout(t);
   }, [sidePanel]);
 
+  const handleToolbarSidebarToggle = useCallback(() => {
+    if (fileTreeOpen) onFileTreeToggle?.();
+    onSidebarToggle?.();
+  }, [fileTreeOpen, onFileTreeToggle, onSidebarToggle]);
+
+  const handleToolbarFileTreeToggle = useCallback(() => {
+    onFileTreeToggle?.();
+  }, [onFileTreeToggle]);
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, position: "relative" }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
 
-      {/* ── Full-workspace file tree overlay ── */}
-      <div style={{
-        position: "absolute", inset: 0, zIndex: 500,
-        display: "flex", flexDirection: "column",
-        background: "rgba(10,10,12,0.0)",
-        pointerEvents: fileTreeOpen ? "auto" : "none",
-        opacity: fileTreeOpen ? 1 : 0,
-        transform: fileTreeOpen ? "translateY(0)" : "translateY(-12px)",
-        transition: "opacity .2s cubic-bezier(.4,0,.2,1), transform .2s cubic-bezier(.4,0,.2,1)",
-      }}>
-        <div style={{
-          flex: 1, background: "#0e0f11",
-          border: `1px solid rgba(255,255,255,.08)`,
-          borderRadius: 10, margin: 8, overflow: "hidden",
-          boxShadow: "0 8px 40px rgba(0,0,0,.7)",
-          display: "flex", flexDirection: "column",
-        }}>
-          <FileTreePanel
-            cwd={runbox.cwd}
-            onClose={() => onFileTreeClose?.()}
-            onOpenFile={openFile}
-          />
-        </div>
-      </div>
-
-      {/* ── Tab bar ── */}
+      {/* ── Tab bar — FULL WIDTH, never shifts, always on top ── */}
       <div style={{
         display: "flex", alignItems: "center", height: 42, flexShrink: 0,
         background: C.bg1, borderBottom: `1px solid ${C.border}`,
         padding: "0 6px", gap: 3,
+        position: "relative",
+        zIndex: 300,
+        userSelect: "none",
       }}>
-        <div style={{ display: "flex", alignItems: "center", flex: 1, gap: 3, overflowX: "auto", minWidth: 0, scrollbarWidth: "none" }}>
+
+        {/* Left: brand + toggles */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0, paddingRight: 8, borderRight: `1px solid rgba(255,255,255,.08)`, marginRight: 2 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,.75)", fontFamily: SANS, letterSpacing: "0.05em", userSelect: "none", paddingLeft: 2 }}>
+            stackbox
+          </span>
+          <StripIcon title="Toggle Runboxes" active={!sidebarCollapsed && !fileTreeOpen} onClick={handleToolbarSidebarToggle}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>
+            </svg>
+          </StripIcon>
+          <StripIcon title="Toggle File Tree" active={!sidebarCollapsed && fileTreeOpen} onClick={handleToolbarFileTreeToggle}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+          </StripIcon>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", alignItems: "center", gap: 3, overflowX: "auto", minWidth: 0, maxWidth: "55%", scrollbarWidth: "none" }}>
           {wins.map((w, idx) => {
             const isActive   = activeId === w.id;
             const isDragOver = dragOverId === w.id && dragTabId !== w.id;
@@ -633,50 +566,28 @@ export function WorkspaceView({
                   const startX = e.clientX;
                   let dragging = false;
                   const onMove = (mv: MouseEvent) => {
-                    if (!dragging && Math.abs(mv.clientX - startX) > 6) {
-                      dragging = true;
-                      dragTabIdRef.current = w.id;
-                      setDragTabId(w.id);
-                    }
+                    if (!dragging && Math.abs(mv.clientX - startX) > 6) { dragging = true; dragTabIdRef.current = w.id; setDragTabId(w.id); }
                     if (dragging) {
                       const els = document.querySelectorAll("[data-tab-id]");
                       let found: string | null = null;
-                      els.forEach(el => {
-                        const rect = el.getBoundingClientRect();
-                        if (mv.clientX >= rect.left && mv.clientX <= rect.right) {
-                          found = (el as HTMLElement).dataset.tabId ?? null;
-                        }
-                      });
-                      dragOverIdRef.current = found;
-                      setDragOverId(found);
+                      els.forEach(el => { const rect = el.getBoundingClientRect(); if (mv.clientX >= rect.left && mv.clientX <= rect.right) found = (el as HTMLElement).dataset.tabId ?? null; });
+                      dragOverIdRef.current = found; setDragOverId(found);
                     }
                   };
                   const onUp = () => {
                     if (dragging && dragTabIdRef.current && dragOverIdRef.current) {
-                      const fromId = dragTabIdRef.current;
-                      const toId   = dragOverIdRef.current;
+                      const fromId = dragTabIdRef.current, toId = dragOverIdRef.current;
                       setWins(prev => {
                         const arr = [...prev];
-                        const fromIdx = arr.findIndex(x => x.id === fromId);
-                        const toIdx   = arr.findIndex(x => x.id === toId);
-                        if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
-                          const [moved] = arr.splice(fromIdx, 1);
-                          arr.splice(toIdx, 0, moved);
-                        }
+                        const fromIdx = arr.findIndex(x => x.id === fromId), toIdx = arr.findIndex(x => x.id === toId);
+                        if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) { const [moved] = arr.splice(fromIdx, 1); arr.splice(toIdx, 0, moved); }
                         return arr;
                       });
-                    } else if (!dragging) {
-                      w.minimized ? restoreWin(w.id) : focusWin(w.id);
-                    }
-                    dragTabIdRef.current  = null;
-                    dragOverIdRef.current = null;
-                    setDragTabId(null);
-                    setDragOverId(null);
-                    window.removeEventListener("mousemove", onMove);
-                    window.removeEventListener("mouseup", onUp);
+                    } else if (!dragging) { w.minimized ? restoreWin(w.id) : focusWin(w.id); }
+                    dragTabIdRef.current = null; dragOverIdRef.current = null; setDragTabId(null); setDragOverId(null);
+                    window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp);
                   };
-                  window.addEventListener("mousemove", onMove);
-                  window.addEventListener("mouseup", onUp);
+                  window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
                 }}
                 data-tab-id={w.id}
                 onContextMenu={e => { e.preventDefault(); setTabCtx({ x: e.clientX, y: e.clientY, win: w, idx }); }}
@@ -684,19 +595,16 @@ export function WorkspaceView({
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   padding: "5px 10px 5px 12px", height: 30, borderRadius: 8,
-                  cursor: dragTabId ? "grabbing" : "grab", flexShrink: 0,
+                  cursor: dragTabId ? "grabbing" : "default", flexShrink: 0,
                   background: isActive ? C.bg3 : isDragOver ? "rgba(0,229,255,.1)" : "transparent",
                   border: `1px solid ${isActive ? C.borderMd : isDragOver ? "rgba(0,229,255,.4)" : "transparent"}`,
                   opacity: w.minimized ? 0.55 : dragTabId === w.id ? 0.4 : 1,
-                  transition: "all .1s",
-                  userSelect: "none",
+                  transition: "all .1s", userSelect: "none",
                 }}
                 onMouseEnter={e => { if (!isActive && !dragTabId) (e.currentTarget as HTMLElement).style.background = C.bg2; }}
                 onMouseLeave={e => { if (!isActive && !isDragOver) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
               >
-                {w.minimized && (
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: "#fbbf24", boxShadow: "0 0 5px rgba(251,191,36,.6)" }} />
-                )}
+                {w.minimized && <span style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: "#fbbf24", boxShadow: "0 0 5px rgba(251,191,36,.6)" }} />}
                 {!w.minimized && (w.kind === "browser" ? (
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={isActive ? "#00e5ff" : C.t3} strokeWidth="2" style={{ flexShrink: 0 }}>
                     <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
@@ -712,12 +620,7 @@ export function WorkspaceView({
                     <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
                   </svg>
                 ))}
-                <span style={{
-                  fontSize: 12, fontFamily: MONO,
-                  color: isActive ? "#ffffff" : w.minimized ? "#fbbf24" : C.t2,
-                  fontWeight: isActive ? 600 : 400,
-                  maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
+                <span style={{ fontSize: 12, fontFamily: MONO, color: isActive ? "#ffffff" : w.minimized ? "#fbbf24" : C.t2, fontWeight: isActive ? 600 : 400, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {winLabel(w)}
                 </span>
               </div>
@@ -731,91 +634,53 @@ export function WorkspaceView({
           </button>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        {/* Drag zone */}
+        <div style={{ flex: 1, height: "100%", minWidth: 20, cursor: "default" }}
+          onMouseDown={e => { if (e.button === 0) getCurrentWindow().startDragging().catch(() => {}); }} />
+
+        {/* Right: toolbar + branch + window controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
           {toolbarSlot}
-          {branch && (
-            <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, background: C.bg2, border: `1px solid ${C.borderMd}` }}>
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
-                <path d="M18 9a9 9 0 0 1-9 9"/>
-              </svg>
-              <span style={{ fontSize: 11, fontFamily: MONO, color: "#ffffff", fontWeight: 500, maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branch}</span>
-            </div>
-          )}
+          
+          <div style={{ display: "flex", alignItems: "center", gap: 1, marginLeft: 4, paddingLeft: 6, borderLeft: `1px solid rgba(255,255,255,.08)` }}>
+            <WinBtn title="Minimize"         hoverBg="rgba(255,255,255,.1)"  hoverColor="#fff"    onClick={() => getCurrentWindow().minimize().catch(() => {})}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="4" y1="12" x2="20" y2="12"/></svg>
+            </WinBtn>
+            <WinBtn title="Maximize/Restore" hoverBg="rgba(255,255,255,.1)"  hoverColor="#fff"    onClick={() => getCurrentWindow().toggleMaximize().catch(() => {})}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+            </WinBtn>
+            <WinBtn title="Close"            hoverBg="rgba(239,68,68,.25)" hoverColor="#f87171" onClick={() => getCurrentWindow().close().catch(() => {})}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg>
+            </WinBtn>
+          </div>
         </div>
       </div>
-
-      {/* ── Main area ── */}
-      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-
+          
+      {/* ── Content area — ONLY this shifts when sidebar opens ── */}
+      <div style={{
+        flex: 1, minHeight: 0, display: "flex",
+        marginLeft: contentMarginLeft,
+        transition: "margin-left .18s cubic-bezier(.4,0,.2,1)",
+      }}>
 
         {/* Floating canvas */}
         <div ref={areaRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", background: C.bg0, overflow: "hidden" }}>
           {wins.map(win => (
             win.kind === "browser" ? (
-              <div key={win.id} style={{
-                position: "absolute",
-                left: win.x, top: win.y, width: win.w, height: win.h,
-                zIndex: win.zIndex,
-                display: win.minimized ? "none" : "block",
-                transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
-              }}>
-                <BrowsePane
-                  paneId={win.id}
-                  runboxId={runbox.id}
-                  isActive={activeId === win.id}
-                  onActivate={() => focusWin(win.id)}
-                  onClose={() => closeWin(win.id)}
-                  externalUrl={pendingBrowserUrl[win.id] ?? null}
-                  onExternalUrlConsumed={() => setPendingBrowserUrl(p => ({ ...p, [win.id]: null }))}
-                />
+              <div key={win.id} style={{ position: "absolute", left: win.x, top: win.y, width: win.w, height: win.h, zIndex: win.zIndex, display: win.minimized ? "none" : "block", transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none" }}>
+                <BrowsePane paneId={win.id} runboxId={runbox.id} isActive={activeId === win.id} onActivate={() => focusWin(win.id)} onClose={() => closeWin(win.id)} externalUrl={pendingBrowserUrl[win.id] ?? null} onExternalUrlConsumed={() => setPendingBrowserUrl(p => ({ ...p, [win.id]: null }))} />
               </div>
             ) : win.kind === "file" && win.filePath ? (
-              <div key={win.id} style={{
-                position: "absolute",
-                left: win.x, top: win.y, width: win.w, height: win.h,
-                zIndex: win.zIndex,
-                display: win.minimized ? "none" : "flex",
-                flexDirection: "column",
-                transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
-              }}>
-                <FileViewerPane
-                  id={win.id} path={win.filePath}
-                  x={0} y={0} w={win.w} h={win.h}
-                  zIndex={win.zIndex}
-                  isActive={activeId === win.id}
-                  onActivate={() => focusWin(win.id)}
-                  onClose={() => closeWin(win.id)}
-                  onSplitDown={() => splitWin(win.id)}
-                  onDragStart={(e: React.MouseEvent) => handleDragStart(e, win.id)}
-                  onResizeStart={(e: React.MouseEvent, dir: string) => handleResizeStart(e, win.id, dir)}
-                />
+              <div key={win.id} style={{ position: "absolute", left: win.x, top: win.y, width: win.w, height: win.h, zIndex: win.zIndex, display: win.minimized ? "none" : "flex", flexDirection: "column", transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none" }}>
+                <FileViewerPane id={win.id} path={win.filePath} x={0} y={0} w={win.w} h={win.h} zIndex={win.zIndex} isActive={activeId === win.id} onActivate={() => focusWin(win.id)} onClose={() => closeWin(win.id)} onSplitDown={() => splitWin(win.id)} onDragStart={(e: React.MouseEvent) => handleDragStart(e, win.id)} onResizeStart={(e: React.MouseEvent, dir: string) => handleResizeStart(e, win.id, dir)} />
               </div>
             ) : (
-              <div key={win.id} style={{
-                position: "absolute",
-                left: win.x, top: win.y, width: win.w, height: win.h,
-                zIndex: win.zIndex,
-                display: win.minimized ? "none" : "block",
-                transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
-              }}>
-                <RunPane
-                  runboxCwd={runbox.cwd} runboxId={runbox.id} runboxName={runbox.name}
-                  sessionId={`${runbox.id}-${win.id}`}
-                  label={win.label}
-                  onCwdChange={cwd => {
-                    setWins(prev => prev.map(w => w.id === win.id ? { ...w, cwd } : w));
-                    if (activeId === win.id) onCwdChange(cwd);
-                  }}
-                  isActive={activeId === win.id}
-                  onActivate={() => focusWin(win.id)}
-                  onSessionChange={sid => onSessionChange?.(sid)}
-                  onClose={() => closeWin(win.id)}
-                  onMinimize={() => minimizeWin(win.id)}
-                  onMaximize={() => maximizeWin(win.id)}
-                  onDragStart={(e: React.MouseEvent) => handleDragStart(e, win.id)}
-                  onResizeStart={(e: React.MouseEvent, dir: string) => handleResizeStart(e, win.id, dir)}
-                />
+              <div key={win.id} style={{ position: "absolute", left: win.x, top: win.y, width: win.w, height: win.h, zIndex: win.zIndex, display: win.minimized ? "none" : "block", transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none" }}>
+                <RunPane runboxCwd={runbox.cwd} runboxId={runbox.id} runboxName={runbox.name} sessionId={`${runbox.id}-${win.id}`} label={win.label}
+                  onCwdChange={cwd => { setWins(prev => prev.map(w => w.id === win.id ? { ...w, cwd } : w)); if (activeId === win.id) onCwdChange(cwd); }}
+                  isActive={activeId === win.id} onActivate={() => focusWin(win.id)} onSessionChange={sid => onSessionChange?.(sid)}
+                  onClose={() => closeWin(win.id)} onMinimize={() => minimizeWin(win.id)} onMaximize={() => maximizeWin(win.id)}
+                  onDragStart={(e: React.MouseEvent) => handleDragStart(e, win.id)} onResizeStart={(e: React.MouseEvent, dir: string) => handleResizeStart(e, win.id, dir)} />
               </div>
             )
           ))}
@@ -825,15 +690,12 @@ export function WorkspaceView({
         {sidePanel === "files" && (
           <div style={{ width: panelWidth, flexShrink: 0, display: "flex", alignItems: "stretch", borderLeft: `1px solid ${C.border}`, animation: "slideIn .14s ease-out" }}>
             <PanelResizeHandle onResize={setPanelWidth} />
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: filesView === "diff" ? C.bg0 : C.bg1, border: `1px solid ${C.borderMd}`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: filesView === "diff" ? C.bg0 : "#181b20", border: `1px solid rgba(255,255,255,.09)`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 24px rgba(0,0,0,.45)" }}>
               {filesView === "list" && (
                 <>
-                  <PanelHeader title="Changed Files" icon={<IcoFiles on />} onClose={() => { setSidePanel(null); setActiveDiff(null); setFilesView("list"); }} />
+                  <PanelHeader title="Changed Files" icon={<IcoFiles on />} onClose={() => { onSidePanelToggle?.("files"); setActiveDiff(null); setFilesView("list"); }} />
                   <div style={{ flex: 1, overflow: "auto" }}>
-                    <FileChangeList runboxId={runbox.id} runboxCwd={runbox.cwd} onFileClick={fc => {
-                      setActiveDiff({ id: `diff-${fc.path}`, path: fc.path, diff: fc.diff, changeType: fc.change_type, insertions: fc.insertions, deletions: fc.deletions, openedAt: Date.now() });
-                      setFilesView("diff");
-                    }} />
+                    <FileChangeList runboxId={runbox.id} runboxCwd={runbox.cwd} onFileClick={fc => { setActiveDiff({ id: `diff-${fc.path}`, path: fc.path, diff: fc.diff, changeType: fc.change_type, insertions: fc.insertions, deletions: fc.deletions, openedAt: Date.now() }); setFilesView("diff"); }} />
                   </div>
                 </>
               )}
@@ -842,52 +704,29 @@ export function WorkspaceView({
           </div>
         )}
 
-        {/* Side panel: Others */}
+        {/* Side panel: Git / Memory */}
         {sidePanel && sidePanel !== "files" && (
           <div style={{ width: panelWidth, flexShrink: 0, display: "flex", alignItems: "stretch", borderLeft: `1px solid ${C.border}`, animation: "slideIn .14s ease-out" }}>
             <PanelResizeHandle onResize={setPanelWidth} />
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: C.bg1, border: `1px solid ${C.borderMd}`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
-              {sidePanel === "git"      && <GitWorktreePanel runboxCwd={runbox.cwd} runboxId={runbox.id} branch={branch} onClose={() => setSidePanel(null)} />}
-              {sidePanel === "memory"   && <MemoryPanel runboxId={runbox.id} runboxName={runbox.name} onClose={() => setSidePanel(null)} />}
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "#181b20", border: `1px solid rgba(255,255,255,.09)`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 24px rgba(0,0,0,.45)" }}>
+              {sidePanel === "git"    && <GitWorktreePanel runboxCwd={runbox.cwd} runboxId={runbox.id} branch={branch} onClose={() => onSidePanelToggle?.("git")} />}
+              {sidePanel === "memory" && <MemoryPanel runboxId={runbox.id} runboxName={runbox.name} onClose={() => onSidePanelToggle?.("memory")} />}
             </div>
           </div>
         )}
-
-        {/* Right icon strip */}
-        <div style={{ width: 48, flexShrink: 0, background: C.bg1, borderLeft: `1px solid ${C.border}`, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 4 }}>
-          <StripIcon title="Memory"        active={sidePanel === "memory"}   onClick={() => toggleSide("memory")}  ><IcoBrain on={sidePanel === "memory"} /></StripIcon>
-          <StripIcon title="Changed Files" active={sidePanel === "files"}    onClick={() => toggleSide("files")}   ><IcoFiles on={sidePanel === "files"}  /></StripIcon>
-          <StripIcon title="Git"           active={sidePanel === "git"}      onClick={() => toggleSide("git")}     ><IcoGit   on={sidePanel === "git"}    /></StripIcon>
-          <div style={{ flex: 1 }} />
-        </div>
       </div>
 
-      {/* File-pick modal for splitting file panes */}
       {filePickModal && (
-        <FileSplitModal
-          sourceWinId={filePickModal.sourceWinId}
-          onCancel={() => setFilePickModal(null)}
+        <FileSplitModal sourceWinId={filePickModal.sourceWinId} onCancel={() => setFilePickModal(null)}
           onConfirm={filePath => {
             setFilePickModal(null);
             const area = areaRef.current; if (!area) return;
             setWins(prev => {
-              const src = prev.find(w => w.id === filePickModal.sourceWinId);
-              if (!src) return prev;
-              const halfH  = Math.max(MIN_H, Math.floor((src.h - GAP) / 2));
-              const newId  = crypto.randomUUID();
+              const src = prev.find(w => w.id === filePickModal.sourceWinId); if (!src) return prev;
+              const halfH = Math.max(MIN_H, Math.floor((src.h - GAP) / 2));
+              const newId = crypto.randomUUID();
               const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
-              const newWin: WinState = {
-                ...src,
-                id:        newId,
-                label:     fileName,
-                kind:      "file",
-                filePath,
-                y:         src.y + halfH + GAP,
-                h:         src.h - halfH - GAP,
-                zIndex:    nextZ(),
-                minimized: false,
-                maximized: false,
-              };
+              const newWin: WinState = { ...src, id: newId, label: fileName, kind: "file", filePath, y: src.y + halfH + GAP, h: src.h - halfH - GAP, zIndex: nextZ(), minimized: false, maximized: false };
               setActiveId(newId);
               return [...prev.map(w => w.id === filePickModal.sourceWinId ? { ...w, h: halfH } : w), newWin];
             });
@@ -895,18 +734,11 @@ export function WorkspaceView({
         />
       )}
 
-      {/* Tab context menu */}
       {tabCtx && (
-        <TabContextMenu
-          x={tabCtx.x} y={tabCtx.y} win={tabCtx.win}
-          isFirst={tabCtx.idx === 0}
-          isLast={tabCtx.idx === wins.length - 1}
-          onClose={() => setTabCtx(null)}
-          onCloseTab={() => closeWin(tabCtx.win.id)}
+        <TabContextMenu x={tabCtx.x} y={tabCtx.y} win={tabCtx.win} isFirst={tabCtx.idx === 0} isLast={tabCtx.idx === wins.length - 1}
+          onClose={() => setTabCtx(null)} onCloseTab={() => closeWin(tabCtx.win.id)}
           onRestore={tabCtx.win.minimized ? () => restoreWin(tabCtx.win.id) : undefined}
-          onMoveLeft={() => moveTab(tabCtx.win.id, "left")}
-          onMoveRight={() => moveTab(tabCtx.win.id, "right")}
-        />
+          onMoveLeft={() => moveTab(tabCtx.win.id, "left")} onMoveRight={() => moveTab(tabCtx.win.id, "right")} />
       )}
 
       <style>{`

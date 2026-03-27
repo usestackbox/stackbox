@@ -140,7 +140,7 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
 
       {/* Notice */}
       {notice && (
-        <div style={{ margin:"0 8px 4px", padding:"7px 12px", borderRadius:8, background: notice.ok?"rgba(255,255,255,.04)":"rgba(200,80,80,.08)", border:`1px solid ${notice.ok?C.border:"rgba(200,80,80,.2)"}`, fontSize:11, color:notice.ok?C.t1:"#cc6666", fontFamily:SANS }}>
+        <div style={{ margin:"0 8px 4px", padding:"7px 12px", borderRadius:8, background: notice.ok?"rgba(255,255,255,.04)":"rgba(255,255,255,.04)", border:`1px solid ${notice.ok?C.border:"rgba(200,80,80,.2)"}`, fontSize:11, color:notice.ok?C.t1:"rgba(255,255,255,.50)", fontFamily:SANS }}>
           {notice.text}
         </div>
       )}
@@ -192,8 +192,8 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
                 <div style={{ flex:1, padding:"6px 12px" }}>
                   <div style={{ fontSize:8, fontFamily:MONO, letterSpacing:".10em", color:C.t3, marginBottom:2 }}>LINES</div>
                   <div style={{ display:"flex", gap:4 }}>
-                    {totalIns > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"#4a9955" }}>+{totalIns}</span>}
-                    {totalDel > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"#cc5555" }}>-{totalDel}</span>}
+                    {totalIns > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"rgba(255,255,255,.55)" }}>+{totalIns}</span>}
+                    {totalDel > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"rgba(255,255,255,.45)" }}>-{totalDel}</span>}
                   </div>
                 </div>
               )}
@@ -232,7 +232,7 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
               const fileName = fc.path.split(/[/\\]/).pop() ?? fc.path;
               const dirPart  = fc.path.slice(0, fc.path.length - fileName.length);
               const letter      = { created:"A", modified:"M", deleted:"D" }[fc.change_type];
-              const letterColor = { created:"#4a9955", modified:"#888888", deleted:"#cc5555" }[fc.change_type];
+              const letterColor = { created:"rgba(255,255,255,.55)", modified:"#888888", deleted:"rgba(255,255,255,.45)" }[fc.change_type];
               return (
                 <div key={fc.path} onClick={() => onFileClick?.(fc)}
                   style={{ background:C.bg2, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", cursor:"pointer", transition:"all .1s", display:"flex", alignItems:"center", gap:8 }}
@@ -244,8 +244,8 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
                     {dirPart && <div style={{ fontSize:10, fontFamily:MONO, color:C.t2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginTop:1 }}>{dirPart}</div>}
                   </div>
                   <div style={{ display:"flex", gap:5, flexShrink:0 }}>
-                    {fc.insertions > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"#4a9955", fontWeight:600 }}>+{fc.insertions}</span>}
-                    {fc.deletions  > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"#cc5555", fontWeight:600 }}>-{fc.deletions}</span>}
+                    {fc.insertions > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"rgba(255,255,255,.55)", fontWeight:600 }}>+{fc.insertions}</span>}
+                    {fc.deletions  > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"rgba(255,255,255,.45)", fontWeight:600 }}>-{fc.deletions}</span>}
                   </div>
                 </div>
               );

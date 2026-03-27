@@ -1,46 +1,44 @@
 // src/shared/constants.ts
 import type React from "react";
 
-// ── Pure black/white design system ───────────────────────────────────────────
-// Philosophy: VS Code density + Linear cleanliness + developer precision
+// ── Dark teal design system (#0b0e10 → #1b2328, white text only) ──────────────
 export const C = {
-  // Backgrounds — deep blacks with subtle steps
-  bg0: "#0a0a0a",   // deepest — terminal, main canvas
-  bg1: "#111111",   // base panels
-  bg2: "#181818",   // cards, secondary panels
-  bg3: "#1f1f1f",   // hover states, inputs
-  bg4: "#272727",   // active states
-  bg5: "#303030",   // dropdowns, elevated
+  // Backgrounds — deep teal-blacks
+  bg0: "#0b0e10",   // deepest — terminal, main canvas
+  bg1: "#101518",   // base panels
+  bg2: "#161c20",   // cards, secondary panels
+  bg3: "#1b2328",   // hover states, inputs
+  bg4: "#1f2a30",   // active states
+  bg5: "#243035",   // elevated, dropdowns
 
   // Borders — barely-there to visible
   border:   "rgba(255,255,255,.06)",
   borderMd: "rgba(255,255,255,.10)",
   borderHi: "rgba(255,255,255,.18)",
 
-  // Text hierarchy
-  t0: "#f2f2f2",   // primary — headings, active labels
-  t1: "#999999",   // secondary — body text, descriptions
-  t2: "#555555",   // tertiary — placeholders, disabled
-  t3: "#333333",   // quaternary — very dim hints
+  // Text hierarchy — white only
+  t0: "rgba(255,255,255,.92)",
+  t1: "rgba(255,255,255,.62)",
+  t2: "rgba(255,255,255,.38)",
+  t3: "rgba(255,255,255,.22)",
 
-  // Status — muted, not loud
-  green:   "#6a9a6a",
-  greenBg: "rgba(100,160,100,.10)",
-  red:     "#c05050",
-  redBg:   "rgba(200,80,80,.10)",
-  amber:   "#a08030",
-  amberBg: "rgba(160,128,48,.10)",
-  blue:    "#5a7ea8",
-  blueDim: "rgba(90,126,168,.10)",
+  // Status — all white toned
+  green:   "rgba(255,255,255,.70)",
+  greenBg: "rgba(255,255,255,.06)",
+  red:     "rgba(255,255,255,.55)",
+  redBg:   "rgba(255,255,255,.06)",
+  amber:   "rgba(255,255,255,.55)",
+  amberBg: "rgba(255,255,255,.06)",
+  blue:    "rgba(255,255,255,.55)",
+  blueDim: "rgba(255,255,255,.06)",
 
   // Accents — white only
-  teal:       "#e0e0e0",
+  teal:       "rgba(255,255,255,.80)",
   tealBright: "#ffffff",
   tealDim:    "rgba(255,255,255,.06)",
   tealBorder: "rgba(255,255,255,.14)",
-  tealText:   "#e8e8e8",
+  tealText:   "rgba(255,255,255,.88)",
 
-  // Radius — round everything
   r1: "4px",
   r2: "8px",
   r3: "12px",
@@ -71,20 +69,20 @@ export function reltime(ms: number): string {
   const d = Date.now() - ms;
   if (d < 60_000)    return "just now";
   if (d < 3600_000)  return `${Math.floor(d / 60_000)}m ago`;
-  if (d < 86400_000) return `${Math.floor(d / 3600_000)}h  ago`;
+  if (d < 86400_000) return `${Math.floor(d / 3600_000)}h ago`;
   return `${Math.floor(d / 86400_000)}d ago`;
 }
 
 export const TOPIC_COLOR: Record<string, string> = {
-  "task.done":     "#888",
-  "task.started":  "#5a7ea8",
-  "task.failed":   "#c05050",
-  "error":         "#c05050",
-  "agent.started": "#777",
-  "agent.stopped": "#444",
-  "file.changed":  "#a08030",
-  "memory.added":  "#887898",
-  "status":        "#444",
+  "task.done":     "rgba(255,255,255,.35)",
+  "task.started":  "rgba(255,255,255,.55)",
+  "task.failed":   "rgba(255,255,255,.45)",
+  "error":         "rgba(255,255,255,.45)",
+  "agent.started": "rgba(255,255,255,.40)",
+  "agent.stopped": "rgba(255,255,255,.25)",
+  "file.changed":  "rgba(255,255,255,.50)",
+  "memory.added":  "rgba(255,255,255,.45)",
+  "status":        "rgba(255,255,255,.25)",
 };
 
 export function topicColor(topic: string): string {

@@ -2,7 +2,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root {
   height: 100%; overflow: hidden;
-  background: #0a0a0a; color: #e8e8e8;
+  background: #0b0e10; color: #e8e8e8;
   font-family: 'DM Sans', 'Outfit', -apple-system, system-ui, sans-serif;
   font-size: 13px; -webkit-font-smoothing: antialiased;
 }
@@ -14,8 +14,8 @@ input:focus, textarea:focus { outline: none; }
 /* ── Scrollbars ───────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #1e1e1e; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #2a2a2a; }
+::-webkit-scrollbar-thumb { background: #1b2328; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #243035; }
 
 /* ── Keyframes ────────────────────────────────────────────────── */
 @keyframes spin     { to { transform: rotate(360deg); } }
@@ -25,11 +25,11 @@ input:focus, textarea:focus { outline: none; }
 
 /* ── Design tokens ────────────────────────────────────────────── */
 :root {
-  --bg:         #0a0a0a;
-  --bg2:        #111111;
-  --bg3:        #181818;
-  --bg4:        #1f1f1f;
-  --bg5:        #272727;
+  --bg:         #0b0e10;
+  --bg2:        #101518;
+  --bg3:        #161c20;
+  --bg4:        #1b2328;
+  --bg5:        #1f2a30;
   --border:     rgba(255,255,255,.06);
   --border2:    rgba(255,255,255,.10);
   --border3:    rgba(255,255,255,.18);
@@ -146,7 +146,7 @@ input:focus, textarea:focus { outline: none; }
 .diff-del-gutter { color: #cc5555; }
 
 /* ── Terminal (Warp-inspired) ─────────────────────────────────── */
-.term-topbar { height: 34px; background: #111; border-bottom: 1px solid rgba(255,255,255,.05); display: flex; align-items: center; padding: 0 14px; gap: 8px; flex-shrink: 0; }
+.term-topbar { height: 34px; background: #101518; border-bottom: 1px solid rgba(255,255,255,.05); display: flex; align-items: center; padding: 0 14px; gap: 8px; flex-shrink: 0; }
 .term-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.12); flex-shrink: 0; }
 .term-dot.on { background: rgba(255,255,255,.55); }
 .term-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: rgba(255,255,255,.3); letter-spacing: .04em; }

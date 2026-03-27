@@ -542,7 +542,7 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
               </div>
             )}
             {!loading && error && (
-              <div style={{ padding: "12px 14px", background: "rgba(200,80,80,.08)", border: `1px solid rgba(200,80,80,.18)`, borderRadius: 10, fontSize: 12, color: C.red, fontFamily: SANS }}>{error}</div>
+              <div style={{ padding: "12px 14px", background: "rgba(255,255,255,.04)", border: `1px solid rgba(200,80,80,.18)`, borderRadius: 10, fontSize: 12, color: C.red, fontFamily: SANS }}>{error}</div>
             )}
             {!loading && !error && visible.length === 0 && (
               <div style={{ padding: "40px 0", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
