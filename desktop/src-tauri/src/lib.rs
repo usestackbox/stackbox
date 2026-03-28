@@ -130,6 +130,8 @@ pub fn run() {
             commands::fs::fs_create_dir,
             commands::fs::fs_create_file,
             commands::fs::copy_to_clipboard,
+            commands::fs::fs_write_file,         // ← NEW
+            commands::fs::fs_search_in_files, 
             // ── Browser ──────────────────────────────────────────────────────
             browser::webview::browser_create,
             browser::webview::browser_destroy,

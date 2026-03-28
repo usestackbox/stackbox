@@ -8,7 +8,7 @@ import { CreateRunboxModal }  from "./sidebar/CreateRunboxModal";
 import { IcoBrain, IcoFiles, IcoGit } from "./shared/icons";
 
 import { C, SANS, loadRunboxes, saveRunboxes } from "./shared/constants";
-import { NotificationToasts, useMemorySummaryBackfill } from "./shared/Notificationsystem";
+import { useMemorySummaryBackfill } from "./shared/Notificationsystem";
 import type { Runbox }                          from "./shared/types";
 
 const SIDEBAR_W     = 220;
@@ -201,7 +201,6 @@ export default function App() {
         />
       )}
 
-      <NotificationToasts />
 
       <style>{`
         @keyframes sbFadeUp { from{opacity:0;transform:translateY(8px) scale(.98)} to{opacity:1;transform:translateY(0) scale(1)} }

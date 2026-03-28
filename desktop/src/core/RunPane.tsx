@@ -48,7 +48,7 @@ const CSS = `
 .rp-titlebar {
   height: 32px; flex-shrink: 0;
   display: flex; align-items: center;
-  padding: 0 10px; gap: 8px;
+  padding: 0 6px 0 10px; gap: 6px;
   background: rgba(255,255,255,.02);
   border-bottom: 1px solid rgba(255,255,255,.05);
   cursor: grab; user-select: none;
@@ -61,7 +61,6 @@ const CSS = `
 }
 .rp-titlebar:active { cursor: grabbing; }
 
-/* dot — simple active indicator, no traffic lights */
 .rp-dot {
   width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
   background: rgba(255,255,255,.12);
@@ -101,18 +100,24 @@ const CSS = `
   border-color: rgba(255,255,255,.12);
 }
 
-/* close btn */
-.rp-close {
-  width: 20px; height: 20px; flex-shrink: 0;
+/* ── Titlebar action buttons ── */
+.rp-tbtn {
+  width: 22px; height: 22px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 4px; cursor: pointer;
-  color: rgba(255,255,255,.2);
-  font-size: 14px; line-height: 1;
+  border-radius: 5px; cursor: pointer;
+  color: rgba(255,255,255,.18);
+  border: none; background: transparent;
   transition: background .12s, color .12s;
+  padding: 0;
 }
-.rp-win.rp-active .rp-close:hover {
-  background: rgba(255,255,255,.08);
-  color: rgba(255,255,255,.7);
+.rp-win.rp-active .rp-tbtn { color: rgba(255,255,255,.3); }
+.rp-win.rp-active .rp-tbtn:hover {
+  background: rgba(255,255,255,.09);
+  color: rgba(255,255,255,.75);
+}
+.rp-tbtn.rp-close-btn:hover {
+  background: rgba(239,68,68,.2) !important;
+  color: #f87171 !important;
 }
 
 /* ── Body ── */
@@ -180,6 +185,69 @@ function parseOsc7(data: string): string | null {
   } catch { return null; }
 }
 
+// ── Titlebar icon buttons ─────────────────────────────────────────────────────
+function TBtn({
+  title, onClick, danger, children,
+}: {
+  title: string;
+  onClick: (e: React.MouseEvent) => void;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      className={`rp-tbtn${danger ? " rp-close-btn" : ""}`}
+      title={title}
+      onMouseDown={e => e.stopPropagation()}
+      onClick={e => { e.stopPropagation(); onClick(e); }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── Split-down icon ───────────────────────────────────────────────────────────
+function IcoSplitDown() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2"/>
+      <line x1="1.5" y1="8.5" x2="14.5" y2="8.5"/>
+    </svg>
+  );
+}
+
+// ── Split-left icon ───────────────────────────────────────────────────────────
+function IcoSplitLeft() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2"/>
+      <line x1="8.5" y1="1.5" x2="8.5" y2="14.5"/>
+    </svg>
+  );
+}
+
+// ── Minimize icon — rounded square with pill bar at the bottom (matches design) ─
+function IcoMinimize() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+      {/* Outer rounded square — slightly thicker to match the bold outer ring in the icon */}
+      <rect x="1" y="1" width="14" height="14" rx="3.5" strokeWidth="1.8"/>
+      {/* Inner pill / dash — thick, centred near the bottom third */}
+      <line x1="4.5" y1="11.5" x2="11.5" y2="11.5" strokeWidth="2.2"/>
+    </svg>
+  );
+}
+
+// ── Close icon ────────────────────────────────────────────────────────────────
+function IcoClose() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <line x1="4" y1="4" x2="12" y2="12"/>
+      <line x1="12" y1="4" x2="4" y2="12"/>
+    </svg>
+  );
+}
+
 export default function RunPane({
   runboxCwd    = "~/",
   runboxId     = "default",
@@ -193,6 +261,8 @@ export default function RunPane({
   onClose,
   onMinimize,
   onMaximize,
+  onSplitDown,
+  onSplitLeft,
   onDragStart,
   onResizeStart,
 }: {
@@ -208,6 +278,8 @@ export default function RunPane({
   onClose?:         () => void;
   onMinimize?:      () => void;
   onMaximize?:      () => void;
+  onSplitDown?:     () => void;
+  onSplitLeft?:     () => void;
   onDragStart?:     (e: React.MouseEvent) => void;
   onResizeStart?:   (e: React.MouseEvent, dir: string) => void;
 }) {
@@ -225,10 +297,10 @@ export default function RunPane({
   useEffect(() => {
     ["sbx-css","sbx-css-v2","sbx-css-v3","sbx-css-v4","sbx-css-v5",
      "rp-css-v1","rp-css-v2","rp-css-v3","rp-css-v4","rp-css-v5",
-     "rp-css-v6","rp-css-v7","rp-css-v8"]
+     "rp-css-v6","rp-css-v7","rp-css-v8","rp-css-v9","rp-css-v10"]
       .forEach(id => document.getElementById(id)?.remove());
     const s = document.createElement("style");
-    s.id = "rp-css-v8"; s.textContent = CSS;
+    s.id = "rp-css-v10"; s.textContent = CSS;
     document.head.appendChild(s);
   }, []);
 
@@ -254,7 +326,6 @@ export default function RunPane({
       letterSpacing:   0,
       fontWeight:      "normal",
       fontWeightBold:  "bold",
-      // System terminal font stack — no Google Fonts download
       fontFamily:      "ui-monospace, 'SF Mono', Menlo, Monaco, 'Cascadia Mono', 'Consolas', 'Courier New', monospace",
       theme:           THEME,
       convertEol:      true,
@@ -295,16 +366,12 @@ export default function RunPane({
 
     const applyScreenMargin = () => {
       const screen = container?.querySelector('.xterm-screen') as HTMLElement;
-      if (screen) {
-        screen.style.marginTop  = '8px';
-        screen.style.marginLeft = '10px';
-      }
+      if (screen) { screen.style.marginTop = '8px'; screen.style.marginLeft = '10px'; }
     };
 
     const sid = sidRef.current;
     let unO: UnlistenFn | null = null;
     let unE: UnlistenFn | null = null;
-    const osc133 = /\x1b\]133;([A-D])(?:;(\d+))?[\x07\x1b\\]/g;
 
     Promise.all([
       listen<string>(`pty://output/${sid}`, ({ payload }) => {
@@ -312,9 +379,6 @@ export default function RunPane({
         term.write(payload);
         const cwd = parseOsc7(payload);
         if (cwd) { setLiveCwd(cwd); onCwdChange?.(cwd); }
-        osc133.lastIndex = 0;
-        let m: RegExpExecArray | null;
-        while ((m = osc133.exec(payload)) !== null) { /* exit tracking */ }
       }),
       listen<void>(`pty://ended/${sid}`, () => {
         if (gone.current) return;
@@ -341,12 +405,9 @@ export default function RunPane({
       if (!entry) return;
       const { width, height } = entry.contentRect;
       if (width <= 0 || height <= 0) return;
-
       try { fit.fit(); } catch { return; }
       if (term.cols <= 0 || term.rows <= 0) return;
-
       invoke("pty_resize", { sessionId: sid, cols: term.cols, rows: term.rows }).catch(() => {});
-
       if (!spawned.current && !gone.current) {
         spawned.current = true;
         styleScrollbar();
@@ -393,25 +454,42 @@ export default function RunPane({
           onMouseDown={e => { e.stopPropagation(); onResizeStart?.(e, dir); }} />
       ))}
 
+      {/* ── Title bar ── */}
       <div
         className="rp-titlebar"
         onMouseDown={e => {
-          if ((e.target as HTMLElement).closest('.rp-close')) return;
+          if ((e.target as HTMLElement).closest('.rp-tbtn')) return;
           onDragStart?.(e);
         }}
       >
-        {/* single dot = active indicator, replaces traffic lights */}
         <div className="rp-dot" />
         <div className="rp-vsep" />
         <span className="rp-cwd">{liveCwd || runboxCwd}</span>
         {label && <span className="rp-chip">{label}</span>}
-        {onClose && (
-          <div className="rp-close"
-            onMouseDown={e => e.stopPropagation()}
-            onClick={e => { e.stopPropagation(); onClose(); }}
-            title="Close"
-          >×</div>
-        )}
+
+        {/* ── Action buttons — right side ── */}
+        <div style={{ display: "flex", alignItems: "center", gap: 1, marginLeft: 2 }}>
+          {onSplitDown && (
+            <TBtn title="Split down" onClick={onSplitDown}>
+              <IcoSplitDown />
+            </TBtn>
+          )}
+          {onSplitLeft && (
+            <TBtn title="Split left" onClick={onSplitLeft}>
+              <IcoSplitLeft />
+            </TBtn>
+          )}
+          {onMinimize && (
+            <TBtn title="Minimize" onClick={onMinimize}>
+              <IcoMinimize />
+            </TBtn>
+          )}
+          {onClose && (
+            <TBtn title="Close" onClick={onClose} danger>
+              <IcoClose />
+            </TBtn>
+          )}
+        </div>
       </div>
 
       <div className="rp-body">

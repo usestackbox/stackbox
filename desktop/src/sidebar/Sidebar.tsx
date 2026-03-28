@@ -160,7 +160,6 @@ function IconPicker({ anchorX, anchorY, onSelect, onClose }: {
   );
 }
 
-// ── Context Menu ──────────────────────────────────────────────────────────────
 function ContextMenu({ x, y, rbName, onDelete, onChangeIcon, onClose }: {
   x: number; y: number; rbName: string;
   onDelete: () => void; onChangeIcon: () => void; onClose: () => void;
