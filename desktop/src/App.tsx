@@ -129,15 +129,12 @@ export default function App() {
   const safeId          = runboxes.find(r => r.id === activeId)?.id ?? runboxes[0]?.id ?? null;
   const runboxesSummary = runboxes.map(r => ({ id: r.id, name: r.name }));
 
-  // ── Key fix: pass margin to WorkspaceView so it applies ONLY to the
-  //    content area below the tab bar — the tab bar itself stays full-width
-  //    and never participates in the transition.
   const contentMarginLeft = sidebarCollapsed ? 0 : SIDEBAR_TOTAL;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", background: C.bg0, overflow: "hidden" }}>
 
-      {/* ── Floating Sidebar (position:fixed overlay, zIndex:200) ── */}
+      {/* ── Floating Sidebar ── */}
       <Sidebar
         runboxes={runboxes}
         activeId={safeId}
@@ -153,7 +150,7 @@ export default function App() {
         onOpenFile={(path) => fileOpenerRefs.current[safeId ?? ""]?.open(path)}
       />
 
-      {/* ── Workspace rows (tab bar + content, stacked per runbox) ── */}
+      {/* ── Workspace rows ── */}
       {runboxes.map(rb => (
         <div
           key={rb.id}
@@ -171,8 +168,6 @@ export default function App() {
             sidePanel={sidePanel}
             sidebarCollapsed={sidebarCollapsed}
             fileTreeOpen={fileTreeOpen}
-            // NEW: WorkspaceView applies this margin only to its inner
-            // content area (below the tab bar), not to the tab bar row itself.
             contentMarginLeft={contentMarginLeft}
             onSidePanelToggle={toggleSide}
             onSidebarToggle={handleSidebarToggle}
@@ -201,16 +196,53 @@ export default function App() {
         />
       )}
 
-
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap');
+
         @keyframes sbFadeUp { from{opacity:0;transform:translateY(8px) scale(.98)} to{opacity:1;transform:translateY(0) scale(1)} }
         @keyframes spin     { to{transform:rotate(360deg)} }
+
         * { box-sizing: border-box; }
+
+        /* ── Scrollbar ── */
         ::-webkit-scrollbar       { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #1b2328; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #263037; }
+        ::-webkit-scrollbar-thumb { background: ${C.bg3}; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: ${C.bg4}; }
         ::selection { background: rgba(255,255,255,.12); color: rgba(255,255,255,.90); }
+
+        /* ── Pixelify Sans brand ── */
+        .stackbox-brand {
+          font-family: "Pixelify Sans", sans-serif !important;
+          font-optical-sizing: auto;
+          font-weight: 600;
+        }
+
+        /* ── Toolbar strip icons: hover/active → white bg + black icon ── */
+        .strip-icon-btn {
+          transition: background .12s, color .12s !important;
+        }
+        .strip-icon-btn:hover,
+        .strip-icon-btn[data-active="true"] {
+          background: rgba(255,255,255,.92) !important;
+          border-radius: 7px;
+        }
+        .strip-icon-btn:hover svg,
+        .strip-icon-btn[data-active="true"] svg {
+          stroke: #0b0e10 !important;
+          color: #0b0e10 !important;
+        }
+        .strip-icon-btn:hover path,
+        .strip-icon-btn:hover circle,
+        .strip-icon-btn:hover line,
+        .strip-icon-btn:hover rect,
+        .strip-icon-btn[data-active="true"] path,
+        .strip-icon-btn[data-active="true"] circle,
+        .strip-icon-btn[data-active="true"] line,
+        .strip-icon-btn[data-active="true"] rect {
+          stroke: #0b0e10 !important;
+          fill: none !important;
+        }
       `}</style>
     </div>
   );

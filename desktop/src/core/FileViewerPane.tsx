@@ -193,7 +193,6 @@ interface FileViewerPaneProps {
   onResizeStart: (e: React.MouseEvent, dir: string) => void;
 }
 
-// ── Highlight whole file → per-line HTML, keeping spans self-contained ────────
 function highlightLines(code: string, lang: string): string[] {
   let html: string;
   try {

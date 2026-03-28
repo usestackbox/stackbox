@@ -4,8 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { C, MONO, SANS } from "../shared/constants";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-
 export interface Memory {
   id: string; runbox_id: string; session_id: string;
   content: string; pinned: boolean; timestamp: number;
@@ -13,32 +11,29 @@ export interface Memory {
   parent_id: string; agent_name: string;
   memory_type: string; importance: number; resolved: boolean;
   decay_at: number; scope: string; agent_type: string;
-  // V3
   level: string; agent_id: string; key: string;
 }
 
 type Tab = "LOCKED" | "PREFERRED" | "TEMPORARY" | "SESSION" | "all" | "context";
 
-// ── Level metadata ─────────────────────────────────────────────────────────────
-
 const LEVEL_META: Record<string, { label: string; icon: string; color: string; bg: string; desc: string }> = {
-  LOCKED:    { label: "Locked",    icon: "🔒", color: "#e8c87a", bg: "rgba(232,200,122,.07)", desc: "Hard constraints. Set by you. Agents can never violate these." },
-  PREFERRED: { label: "Preferred", icon: "◎",  color: "#6898c0", bg: "rgba(104,152,192,.07)", desc: "Persistent facts. Key-versioned — writing port=3456 resolves old port=3000." },
-  TEMPORARY: { label: "Temporary", icon: "⏳", color: "#8a9ab0", bg: "rgba(138,154,176,.07)", desc: "Agent working notes. Private per agent. Auto-expires when session ends." },
-  SESSION:   { label: "Sessions",  icon: "⌛", color: "#9080c0", bg: "rgba(144,128,192,.07)", desc: "End-of-session summaries. Last 3 per agent kept. Agents see each other's." },
-  all:       { label: "All",       icon: "≡",  color: C.t2,      bg: "transparent",           desc: "All memories across all levels." },
-  context:   { label: "Context",   icon: "↺",  color: "#9080c0", bg: "transparent",           desc: "What agents receive when they call memory_context()." },
+  LOCKED:    { label: "Locked",    icon: "🔒", color: C.amber,  bg: C.amberBg,  desc: "Hard constraints. Set by you. Agents can never violate these." },
+  PREFERRED: { label: "Preferred", icon: "◎",  color: C.blue,   bg: C.blueDim,  desc: "Persistent facts. Key-versioned — writing port=3456 resolves old port=3000." },
+  TEMPORARY: { label: "Temporary", icon: "⏳", color: C.t2,     bg: C.tealDim,  desc: "Agent working notes. Private per agent. Auto-expires when session ends." },
+  SESSION:   { label: "Sessions",  icon: "⌛", color: C.teal,   bg: C.tealDim,  desc: "End-of-session summaries. Last 3 per agent kept. Agents see each other's." },
+  all:       { label: "All",       icon: "≡",  color: C.t2,     bg: "transparent", desc: "All memories across all levels." },
+  context:   { label: "Context",   icon: "↺",  color: C.teal,   bg: "transparent", desc: "What agents receive when they call memory_context()." },
 };
 
 const AGENT_COLOR: Record<string, { fg: string; bg: string }> = {
-  "claude-code": { fg: "#a88840", bg: "rgba(168,136,64,.10)" },
-  "codex":       { fg: "#4a8f55", bg: "rgba(74,143,85,.10)"  },
-  "gemini":      { fg: "#4a78a8", bg: "rgba(74,120,168,.10)" },
-  "cursor":      { fg: "#8850a8", bg: "rgba(136,80,168,.10)" },
-  "copilot":     { fg: "#4a68a8", bg: "rgba(74,104,168,.10)" },
-  "human":       { fg: "#585858", bg: "rgba(88,88,88,.10)"   },
+  "claude-code": { fg: C.amber,  bg: C.amberBg  },
+  "codex":       { fg: C.green,  bg: C.greenBg  },
+  "gemini":      { fg: C.blue,   bg: C.blueDim  },
+  "cursor":      { fg: C.teal,   bg: C.tealDim  },
+  "copilot":     { fg: C.blue,   bg: C.blueDim  },
+  "human":       { fg: C.t2,     bg: C.bg3      },
 };
-const agentStyle = (at: string) => AGENT_COLOR[at?.toLowerCase()] ?? { fg: "#555", bg: "rgba(85,85,85,.10)" };
+const agentStyle = (at: string) => AGENT_COLOR[at?.toLowerCase()] ?? { fg: C.t3, bg: C.bg3 };
 
 function reltime(ms: number): string {
   const d = Date.now() - ms;
@@ -50,7 +45,6 @@ function reltime(ms: number): string {
 
 function effectiveLevel(m: Memory): string {
   if (m.level && m.level !== "") return m.level;
-  // Derive from V2 memory_type for legacy rows
   const mt = m.memory_type || "";
   if (mt === "goal")        return "LOCKED";
   if (mt === "session")     return "SESSION";
@@ -66,8 +60,6 @@ const tbtn: React.CSSProperties = {
   fontFamily: SANS, transition: "all .1s",
 };
 
-// ── Level badge ────────────────────────────────────────────────────────────────
-
 function LevelBadge({ level }: { level: string }) {
   const m = LEVEL_META[level]; if (!m) return null;
   return (
@@ -77,8 +69,6 @@ function LevelBadge({ level }: { level: string }) {
   );
 }
 
-// ── Health bar ─────────────────────────────────────────────────────────────────
-
 function HealthBar({ memories }: { memories: Memory[] }) {
   const locked    = memories.filter(m => effectiveLevel(m) === "LOCKED" && !m.resolved);
   const preferred = memories.filter(m => effectiveLevel(m) === "PREFERRED" && !m.resolved);
@@ -86,9 +76,9 @@ function HealthBar({ memories }: { memories: Memory[] }) {
   if (locked.length === 0 && preferred.length === 0) return null;
 
   const stats = [
-    { v: locked.length,    label: "locked rules",   color: "#e8c87a" },
-    { v: preferred.length, label: "preferred facts", color: "#6898c0" },
-    { v: sessions.length,  label: "sessions",        color: "#9080c0" },
+    { v: locked.length,    label: "locked rules",   color: C.amber },
+    { v: preferred.length, label: "preferred facts", color: C.blue  },
+    { v: sessions.length,  label: "sessions",        color: C.teal  },
   ].filter(s => s.v > 0);
 
   return (
@@ -105,8 +95,6 @@ function HealthBar({ memories }: { memories: Memory[] }) {
     </div>
   );
 }
-
-// ── MemCard V3 ─────────────────────────────────────────────────────────────────
 
 function MemCard({ mem, onDelete, onPin, onEdit, isLocked }: {
   mem: Memory;
@@ -134,14 +122,12 @@ function MemCard({ mem, onDelete, onPin, onEdit, isLocked }: {
     finally { setSaving(false); }
   };
 
-  const borderLeft = level === "LOCKED"    ? "3px solid rgba(232,200,122,.5)"
-    : level === "TEMPORARY" ? "3px solid rgba(138,154,176,.4)"
+  const borderLeft = level === "LOCKED"    ? `3px solid ${C.amber}80`
+    : level === "TEMPORARY" ? `3px solid ${C.t2}66`
     : undefined;
 
   return (
     <div style={{ background: meta.bg, border: `1px solid ${meta.color}22`, borderLeft, borderRadius: 10, padding: "11px 13px", display: "flex", flexDirection: "column", gap: 8 }}>
-
-      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
         <LevelBadge level={level} />
         {mem.key && mem.key.length > 0 && level === "PREFERRED" && (
@@ -150,7 +136,7 @@ function MemCard({ mem, onDelete, onPin, onEdit, isLocked }: {
           </span>
         )}
         {mem.resolved && (
-          <span style={{ fontSize: 9, fontFamily: MONO, color: "#70c878", background: "rgba(112,200,120,.10)", border: "1px solid rgba(112,200,120,.25)", borderRadius: 5, padding: "2px 7px" }}>✓ resolved</span>
+          <span style={{ fontSize: 9, fontFamily: MONO, color: C.green, background: C.greenBg, border: `1px solid ${C.green}40`, borderRadius: 5, padding: "2px 7px" }}>✓ resolved</span>
         )}
         {mem.pinned && <span style={{ fontSize: 10 }}>📌</span>}
         <span style={{ flex: 1 }} />
@@ -167,7 +153,6 @@ function MemCard({ mem, onDelete, onPin, onEdit, isLocked }: {
         <span style={{ fontSize: 10, fontFamily: MONO, color: C.t3 }}>{reltime(mem.timestamp)}</span>
       </div>
 
-      {/* Content */}
       {editing ? (
         <textarea ref={taRef} value={editContent} onChange={e => setEditContent(e.target.value)}
           rows={Math.max(3, editContent.split("\n").length + 1)}
@@ -182,12 +167,11 @@ function MemCard({ mem, onDelete, onPin, onEdit, isLocked }: {
         </p>
       )}
       {!editing && isLong && (
-        <button onClick={() => setExpanded(v => !v)} style={{ ...tbtn, padding: 0, fontSize: 10, color: "#6090d0", alignSelf: "flex-start" }}>
+        <button onClick={() => setExpanded(v => !v)} style={{ ...tbtn, padding: 0, fontSize: 10, color: C.blue, alignSelf: "flex-start" }}>
           {expanded ? "↑ less" : "↓ more"}
         </button>
       )}
 
-      {/* Actions */}
       <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
         {editing ? (
           <>
@@ -211,8 +195,6 @@ function MemCard({ mem, onDelete, onPin, onEdit, isLocked }: {
   );
 }
 
-// ── Add Locked form ────────────────────────────────────────────────────────────
-
 function AddLockedForm({ runboxId, onAdded }: { runboxId: string; onAdded: () => void }) {
   const [open,    setOpen]    = useState(false);
   const [content, setContent] = useState("");
@@ -231,32 +213,30 @@ function AddLockedForm({ runboxId, onAdded }: { runboxId: string; onAdded: () =>
   };
 
   if (!open) return (
-    <button onClick={() => setOpen(true)} style={{ width: "100%", padding: "9px 14px", borderRadius: 9, background: "transparent", border: `1px dashed rgba(232,200,122,.3)`, color: "#e8c87a", fontSize: 11, fontFamily: SANS, cursor: "pointer", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-      onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(232,200,122,.07)"; el.style.borderColor = "rgba(232,200,122,.5)"; }}
-      onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.borderColor = "rgba(232,200,122,.3)"; }}>
+    <button onClick={() => setOpen(true)} style={{ width: "100%", padding: "9px 14px", borderRadius: 9, background: "transparent", border: `1px dashed ${C.amber}4d`, color: C.amber, fontSize: 11, fontFamily: SANS, cursor: "pointer", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+      onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.amberBg; el.style.borderColor = `${C.amber}80`; }}
+      onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.borderColor = `${C.amber}4d`; }}>
       🔒 Add locked rule
     </button>
   );
 
   return (
-    <div style={{ background: "rgba(232,200,122,.06)", border: `1px solid rgba(232,200,122,.25)`, borderRadius: 11, padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
-      <div style={{ fontSize: 10, fontFamily: MONO, color: "#e8c87a", letterSpacing: ".06em" }}>🔒 NEW LOCKED RULE</div>
+    <div style={{ background: C.amberBg, border: `1px solid ${C.amber}40`, borderRadius: 11, padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
+      <div style={{ fontSize: 10, fontFamily: MONO, color: C.amber, letterSpacing: ".06em" }}>🔒 NEW LOCKED RULE</div>
       <textarea ref={taRef} value={content} onChange={e => setContent(e.target.value)}
         placeholder={"UI is black/white only — client requirement\nnever touch login-app/app.js\nno new npm dependencies"}
         rows={3}
         onKeyDown={e => { if (e.key === "Escape") { setOpen(false); setContent(""); } if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }}
-        style={{ background: C.bg0, border: `1px solid rgba(232,200,122,.3)`, borderRadius: 8, color: C.t0, fontSize: 12.5, padding: "9px 11px", resize: "vertical", fontFamily: MONO, outline: "none", lineHeight: 1.65, width: "100%", boxSizing: "border-box" }} />
+        style={{ background: C.bg0, border: `1px solid ${C.amber}4d`, borderRadius: 8, color: C.t0, fontSize: 12.5, padding: "9px 11px", resize: "vertical", fontFamily: MONO, outline: "none", lineHeight: 1.65, width: "100%", boxSizing: "border-box" }} />
       <div style={{ display: "flex", gap: 7 }}>
         <button onClick={() => { setOpen(false); setContent(""); }} style={{ padding: "7px 13px", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, color: C.t2, fontSize: 11, fontFamily: SANS, cursor: "pointer" }}>Cancel</button>
-        <button onClick={submit} disabled={loading || !content.trim()} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: content.trim() && !loading ? "#e8c87a" : C.bg4, color: content.trim() && !loading ? "#111" : C.t2, fontSize: 12, fontWeight: 600, fontFamily: SANS, cursor: content.trim() && !loading ? "pointer" : "default", transition: "all .15s" }}>
+        <button onClick={submit} disabled={loading || !content.trim()} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: content.trim() && !loading ? C.amber : C.bg4, color: content.trim() && !loading ? C.bg0 : C.t2, fontSize: 12, fontWeight: 600, fontFamily: SANS, cursor: content.trim() && !loading ? "pointer" : "default", transition: "all .15s" }}>
           {loading ? "Saving…" : "🔒 Lock it"}
         </button>
       </div>
     </div>
   );
 }
-
-// ── Add Preferred form ─────────────────────────────────────────────────────────
 
 function AddPreferredForm({ runboxId, onAdded }: { runboxId: string; onAdded: () => void }) {
   const [open,    setOpen]    = useState(false);
@@ -291,25 +271,23 @@ function AddPreferredForm({ runboxId, onAdded }: { runboxId: string; onAdded: ()
   );
 
   return (
-    <div style={{ background: "rgba(104,152,192,.06)", border: `1px solid rgba(104,152,192,.25)`, borderRadius: 11, padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
-      <div style={{ fontSize: 10, fontFamily: MONO, color: "#6898c0", letterSpacing: ".06em" }}>◎ NEW PREFERRED FACT</div>
+    <div style={{ background: C.blueDim, border: `1px solid ${C.blue}40`, borderRadius: 11, padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
+      <div style={{ fontSize: 10, fontFamily: MONO, color: C.blue, letterSpacing: ".06em" }}>◎ NEW PREFERRED FACT</div>
       <div style={{ fontSize: 10, color: C.t3, fontFamily: MONO }}>Key=value for env: port=3456, node=v18. One atomic fact per save.</div>
       <textarea ref={taRef} value={content} onChange={e => setContent(e.target.value)}
         placeholder={"port=3456\npython not available — use node/npm\napi base url=https://api.example.com/v2"}
         rows={3}
         onKeyDown={e => { if (e.key === "Escape") { setOpen(false); setContent(""); } if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }}
-        style={{ background: C.bg0, border: `1px solid rgba(104,152,192,.3)`, borderRadius: 8, color: C.t0, fontSize: 12.5, padding: "9px 11px", resize: "vertical", fontFamily: MONO, outline: "none", lineHeight: 1.65, width: "100%", boxSizing: "border-box" }} />
+        style={{ background: C.bg0, border: `1px solid ${C.blue}4d`, borderRadius: 8, color: C.t0, fontSize: 12.5, padding: "9px 11px", resize: "vertical", fontFamily: MONO, outline: "none", lineHeight: 1.65, width: "100%", boxSizing: "border-box" }} />
       <div style={{ display: "flex", gap: 7 }}>
         <button onClick={() => { setOpen(false); setContent(""); }} style={{ padding: "7px 13px", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, color: C.t2, fontSize: 11, fontFamily: SANS, cursor: "pointer" }}>Cancel</button>
-        <button onClick={submit} disabled={loading || !content.trim()} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: content.trim() && !loading ? "#6898c0" : C.bg4, color: content.trim() && !loading ? "#fff" : C.t2, fontSize: 12, fontWeight: 600, fontFamily: SANS, cursor: content.trim() && !loading ? "pointer" : "default", transition: "all .15s" }}>
+        <button onClick={submit} disabled={loading || !content.trim()} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: content.trim() && !loading ? C.blue : C.bg4, color: content.trim() && !loading ? C.tealBright : C.t2, fontSize: 12, fontWeight: 600, fontFamily: SANS, cursor: content.trim() && !loading ? "pointer" : "default", transition: "all .15s" }}>
           {loading ? "Saving…" : "◎ Save fact"}
         </button>
       </div>
     </div>
   );
 }
-
-// ── Context preview ────────────────────────────────────────────────────────────
 
 function ContextPreview({ runboxId }: { runboxId: string }) {
   const [context, setContext] = useState("");
@@ -340,8 +318,6 @@ function ContextPreview({ runboxId }: { runboxId: string }) {
   );
 }
 
-// ── Main panel ─────────────────────────────────────────────────────────────────
-
 export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxId: string; runboxName: string; onClose: () => void }) {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading,  setLoading]  = useState(true);
@@ -352,12 +328,11 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
   const [search,   setSearch]   = useState("");
   const [toast,    setToast]    = useState<{ msg: string; color: string } | null>(null);
 
-  const showToast = useCallback((msg: string, color = "#70c878") => {
+  const showToast = useCallback((msg: string, color = C.green) => {
     setToast({ msg, color });
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  // Wait for DB ready
   useEffect(() => {
     let cancelled = false;
     const readyUnsub = listen<void>("memory-ready", () => { if (!cancelled) setDbReady(true); });
@@ -415,7 +390,6 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
     setMemories(p => p.map(m => m.id === id ? { ...m, content } : m));
   }, []);
 
-  // Per-level filtered lists
   const byLevel = (l: string) => memories.filter(m => effectiveLevel(m) === l && !m.resolved);
   const locked    = byLevel("LOCKED");
   const preferred = byLevel("PREFERRED");
@@ -423,12 +397,8 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
   const session   = byLevel("SESSION");
 
   const tabMemories: Record<Tab, Memory[]> = {
-    LOCKED:    locked,
-    PREFERRED: preferred,
-    TEMPORARY: temporary,
-    SESSION:   session,
-    all:       memories.filter(m => !m.resolved),
-    context:   [],
+    LOCKED: locked, PREFERRED: preferred, TEMPORARY: temporary, SESSION: session,
+    all: memories.filter(m => !m.resolved), context: [],
   };
 
   const visible = tab === "context"
@@ -438,12 +408,12 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
       );
 
   const TABS: { id: Tab; icon: string; label: string; count?: number; color?: string }[] = [
-    { id: "LOCKED",    icon: "🔒", label: "Locked",    count: locked.length,    color: "#e8c87a" },
-    { id: "PREFERRED", icon: "◎",  label: "Preferred", count: preferred.length, color: "#6898c0" },
-    { id: "TEMPORARY", icon: "⏳", label: "Temporary", count: temporary.length, color: "#8a9ab0" },
-    { id: "SESSION",   icon: "⌛", label: "Sessions",  count: session.length,   color: "#9080c0" },
+    { id: "LOCKED",    icon: "🔒", label: "Locked",    count: locked.length,    color: C.amber },
+    { id: "PREFERRED", icon: "◎",  label: "Preferred", count: preferred.length, color: C.blue  },
+    { id: "TEMPORARY", icon: "⏳", label: "Temporary", count: temporary.length, color: C.t2    },
+    { id: "SESSION",   icon: "⌛", label: "Sessions",  count: session.length,   color: C.teal  },
     { id: "all",       icon: "≡",  label: "All",       count: memories.filter(m => !m.resolved).length },
-    { id: "context",   icon: "↺",  label: "Context",   color: "#9080c0" },
+    { id: "context",   icon: "↺",  label: "Context",   color: C.teal },
   ];
 
   if (!dbReady) return (
@@ -458,8 +428,6 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg1 }}>
-
-      {/* Header */}
       <div style={{ padding: "12px 14px 11px", flexShrink: 0, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: C.t0, flex: 1, fontFamily: SANS, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{runboxName}</span>
         {loading && <div style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${C.border}`, borderTopColor: C.t1, animation: "spin .7s linear infinite", flexShrink: 0 }} />}
@@ -468,7 +436,6 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
           onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = C.t2; }}>✕</button>
       </div>
 
-      {/* Toast */}
       {toast && (
         <div style={{ margin: "6px 10px 0", padding: "8px 11px", background: `${toast.color}18`, border: `1px solid ${toast.color}44`, borderRadius: 8, fontSize: 11, color: toast.color, fontFamily: SANS, display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <span style={{ flex: 1, lineHeight: 1.4 }}>{toast.msg}</span>
@@ -476,16 +443,14 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
         </div>
       )}
 
-      {/* Health bar */}
       <HealthBar memories={memories} />
 
-      {/* Tabs */}
       <div style={{ padding: "8px 10px 0", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 3 }}>
           {TABS.map(({ id, icon, label, count, color }) => {
             const on = tab === id;
             return (
-              <button key={id} onClick={() => setTab(id)} style={{ padding: "6px 2px", borderRadius: 7, border: `1px solid ${on ? (color ?? C.borderMd) + "66" : C.border}`, background: on ? (color ? `${color}18` : C.bg3) : "transparent", color: on ? (color ?? C.t0) : C.t2, fontSize: 10, fontFamily: MONO, cursor: "pointer", transition: "all .1s", display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+              <button key={id} onClick={() => setTab(id)} style={{ padding: "6px 2px", borderRadius: 7, border: "none", background: on ? C.bg4 : "transparent", color: on ? C.t0 : C.t2, fontSize: 10, fontFamily: MONO, cursor: "pointer", transition: "all .1s", display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                 <span>{icon} {label}</span>
                 {count !== undefined && count > 0 && <span style={{ fontSize: 9, color: on ? (color ?? C.t1) : C.t3 }}>{count}</span>}
               </button>
@@ -494,21 +459,18 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
         </div>
       </div>
 
-      {/* Tab description */}
       {LEVEL_META[tab] && tab !== "context" && (
         <div style={{ padding: "5px 12px", flexShrink: 0, fontSize: 10, color: C.t3, fontFamily: SANS, borderBottom: `1px solid ${C.border}` }}>
           {LEVEL_META[tab].desc}
         </div>
       )}
 
-      {/* Context tab */}
       {tab === "context" ? (
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
           <ContextPreview runboxId={runboxId} />
         </div>
       ) : (
         <>
-          {/* Search */}
           <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
             <div style={{ position: "relative" }}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={C.t2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -517,21 +479,17 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
             </div>
           </div>
 
-          {/* Cards */}
           <div style={{ flex: 1, overflowY: "auto", padding: "10px 10px 16px", display: "flex", flexDirection: "column", gap: 7 }}>
-
-            {/* Write form — only on LOCKED and PREFERRED tabs */}
             {tab === "LOCKED"    && <AddLockedForm    runboxId={runboxId} onAdded={() => { loadAll(); showToast("🔒 Locked rule added"); }} />}
             {tab === "PREFERRED" && <AddPreferredForm runboxId={runboxId} onAdded={() => { loadAll(); showToast("◎ Fact saved"); }} />}
 
-            {/* Temporary read-only note */}
             {tab === "TEMPORARY" && (
-              <div style={{ padding: "8px 12px", background: "rgba(138,154,176,.07)", border: `1px solid rgba(138,154,176,.2)`, borderRadius: 9, fontSize: 10, color: C.t3, fontFamily: SANS, lineHeight: 1.5 }}>
+              <div style={{ padding: "8px 12px", background: C.tealDim, border: `1px solid ${C.tealBorder}`, borderRadius: 9, fontSize: 10, color: C.t3, fontFamily: SANS, lineHeight: 1.5 }}>
                 Agents write TEMPORARY facts during tasks. They auto-expire when the session ends. Read-only from the panel.
               </div>
             )}
             {tab === "SESSION" && (
-              <div style={{ padding: "8px 12px", background: "rgba(144,128,192,.07)", border: `1px solid rgba(144,128,192,.2)`, borderRadius: 9, fontSize: 10, color: C.t3, fontFamily: SANS, lineHeight: 1.5 }}>
+              <div style={{ padding: "8px 12px", background: C.tealDim, border: `1px solid ${C.tealBorder}`, borderRadius: 9, fontSize: 10, color: C.t3, fontFamily: SANS, lineHeight: 1.5 }}>
                 End-of-session summaries written by agents. Last 3 per agent kept. All agents see each other's summaries.
               </div>
             )}
@@ -542,7 +500,7 @@ export default function MemoryPanel({ runboxId, runboxName, onClose }: { runboxI
               </div>
             )}
             {!loading && error && (
-              <div style={{ padding: "12px 14px", background: "rgba(255,255,255,.04)", border: `1px solid rgba(200,80,80,.18)`, borderRadius: 10, fontSize: 12, color: C.red, fontFamily: SANS }}>{error}</div>
+              <div style={{ padding: "12px 14px", background: C.redBg, border: `1px solid ${C.red}2d`, borderRadius: 10, fontSize: 12, color: C.red, fontFamily: SANS }}>{error}</div>
             )}
             {!loading && !error && visible.length === 0 && (
               <div style={{ padding: "40px 0", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>

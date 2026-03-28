@@ -4,7 +4,6 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import RunPane from "../core/RunPane";
 import BrowsePane from "../core/BrowsePane";
-import { EditorPane } from "../panels/FileTreePanel";
 import { DiffViewer } from "./DiffViewer";
 import { FileChangeList } from "../panels/FileChangeList";
 import { GitWorktreePanel } from "../panels/Gitworktreepanel";
@@ -19,7 +18,6 @@ const GAP   = 8;
 const MIN_W = 280;
 const MIN_H = 180;
 
-// ── Terminal window state (floating canvas) ───────────────────────────────────
 interface WinState {
   id:        string;
   label:     string;
@@ -38,7 +36,6 @@ interface WinState {
   zIndex:    number;
 }
 
-// ── File tab state (tabbed editor, NOT floating) ──────────────────────────────
 interface FileTab {
   id:       string;
   filePath: string;
@@ -92,6 +89,7 @@ export function StripIcon({ children, title, active, onClick }: {
   children: React.ReactNode; title: string; active?: boolean; onClick: () => void;
 }) {
   const [hov, setHov] = useState(false);
+  const lit = active || hov;
   return (
     <button title={title}
       onMouseDown={e => e.stopPropagation()}
@@ -100,10 +98,10 @@ export function StripIcon({ children, title, active, onClick }: {
       style={{
         width: 30, height: 30, flexShrink: 0,
         display: "flex", alignItems: "center", justifyContent: "center",
-        background: active ? "rgba(63,182,139,.15)" : hov ? C.bg3 : "transparent",
-        border: `1px solid ${active ? "rgba(63,182,139,.35)" : "transparent"}`,
+        background: lit ? "rgba(0,229,255,.15)" : "transparent",
+        border: `1px solid ${lit ? "rgba(0,229,255,.3)" : "transparent"}`,
         borderRadius: 8, cursor: "pointer", transition: "all .12s",
-        color: active ? "#3fb68b" : hov ? "#c8d3e0" : "#8b9ab5",
+        color: lit ? "#00e5ff" : C.t2,
       }}>{children}</button>
   );
 }
@@ -114,9 +112,9 @@ function WinBtn({ children, title, hoverBg, hoverColor, onClick }: {
 }) {
   return (
     <button title={title} onClick={onClick}
-      style={{ width: 28, height: 28, borderRadius: 7, border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,.45)", transition: "all .12s", flexShrink: 0 }}
+      style={{ width: 28, height: 28, borderRadius: 7, border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.t1, transition: "all .12s", flexShrink: 0 }}
       onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = hoverBg; el.style.color = hoverColor; }}
-      onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = "rgba(255,255,255,.45)"; }}>
+      onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = C.t1; }}>
       {children}
     </button>
   );
@@ -127,17 +125,17 @@ function PanelHeader({ title, icon, onClose }: { title: string; icon?: React.Rea
   return (
     <div style={{
       height: 48, padding: "0 12px 0 14px", flexShrink: 0,
-      borderBottom: `1px solid rgba(255,255,255,.08)`,
-      display: "flex", alignItems: "center", gap: 8, background: "#1c2026",
+      borderBottom: `1px solid ${C.border}`,
+      display: "flex", alignItems: "center", gap: 8, background: C.bg1,
     }}>
       {icon && <span style={{ flexShrink: 0, opacity: .75 }}>{icon}</span>}
-      <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.85)", flex: 1, fontFamily: SANS }}>{title}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: C.t0, flex: 1, fontFamily: SANS }}>{title}</span>
       <button
         onMouseDown={e => e.stopPropagation()}
         onClick={onClose}
-        style={{ ...tbtn, width: 28, height: 28, borderRadius: 8, fontSize: 14, color: "rgba(255,255,255,.4)" }}
-        onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(239,68,68,.2)"; el.style.color = "#f87171"; }}
-        onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = "rgba(255,255,255,.4)"; }}>✕</button>
+        style={{ ...tbtn, width: 28, height: 28, borderRadius: 8, fontSize: 14, color: C.t2 }}
+        onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.redBg; el.style.color = C.red; }}
+        onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = C.t2; }}>✕</button>
     </div>
   );
 }
@@ -540,8 +538,8 @@ export function WorkspaceView({
 
         {/* Left: brand + toggles */}
         <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0, paddingRight: 8, borderRight: `1px solid rgba(255,255,255,.08)`, marginRight: 2 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,.75)", fontFamily: SANS, letterSpacing: "0.05em", userSelect: "none", paddingLeft: 2 }}>
-            stackbox
+          <span style={{ fontSize: 22, fontWeight: 400, color: "#ffffff", fontFamily: '"VT323", monospace', letterSpacing: "0.08em", userSelect: "none", paddingLeft: 2, lineHeight: "1" }}>
+            Stackbox
           </span>
           <StripIcon title="Toggle Runboxes" active={!sidebarCollapsed && !fileTreeOpen} onClick={handleToolbarSidebarToggle}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -657,7 +655,6 @@ export function WorkspaceView({
               {fileTabs.map(tab => {
                 const isActive   = activeFileId === tab.id;
                 const fileName   = tab.filePath.split(/[/\\]/).pop() ?? tab.filePath;
-                // fileColor gives per-extension colour consistent with the file tree
                 const iconStroke = isActive ? "#00e5ff" : fileColor(fileName, false);
 
                 return (
@@ -675,7 +672,6 @@ export function WorkspaceView({
                     onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = C.bg2; }}
                     onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
 
-                    {/* File icon — coloured by extension via fileColor */}
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
                       stroke={iconStroke} strokeWidth="2" style={{ flexShrink: 0 }}>
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -727,17 +723,15 @@ export function WorkspaceView({
         transition: "margin-left .18s cubic-bezier(.4,0,.2,1)",
       }}>
 
-        {/* Main content: file editor OR terminal canvas */}
+        {/* Main content */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
 
-          {/* ── File editor pane (tabbed, one at a time) ── */}
           {activeFileTab && (
-            <div style={{ position: "absolute", inset: 0, zIndex: 10, background: C.bg0 }}>
+            <div style={{ position: "absolute", inset: 0, zIndex: 10, background: C.bg0, display: "flex", flexDirection: "column" }}>
               <FileEditorPane path={activeFileTab.filePath} onClose={() => closeFileTab(activeFileTab.id)} />
             </div>
           )}
 
-          {/* ── Terminal / browser floating canvas ── */}
           <div
             ref={areaRef}
             style={{
@@ -794,7 +788,7 @@ export function WorkspaceView({
         {sidePanel === "files" && (
           <div style={{ width: panelWidth, flexShrink: 0, display: "flex", alignItems: "stretch", borderLeft: `1px solid ${C.border}`, animation: "slideIn .14s ease-out" }}>
             <PanelResizeHandle onResize={setPanelWidth} />
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: filesView === "diff" ? C.bg0 : "#181b20", border: `1px solid rgba(255,255,255,.09)`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 24px rgba(0,0,0,.45)" }}>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: filesView === "diff" ? C.bg0 : C.bg1, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 24px rgba(0,0,0,.45)" }}>
               {filesView === "list" && (
                 <>
                   <PanelHeader title="Changed Files" icon={<IcoFiles on />} onClose={() => { onSidePanelToggle?.("files"); setActiveDiff(null); setFilesView("list"); }} />
@@ -812,7 +806,7 @@ export function WorkspaceView({
         {sidePanel && sidePanel !== "files" && (
           <div style={{ width: panelWidth, flexShrink: 0, display: "flex", alignItems: "stretch", borderLeft: `1px solid ${C.border}`, animation: "slideIn .14s ease-out" }}>
             <PanelResizeHandle onResize={setPanelWidth} />
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "#181b20", border: `1px solid rgba(255,255,255,.09)`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 24px rgba(0,0,0,.45)" }}>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 24px rgba(0,0,0,.45)" }}>
               {sidePanel === "git"    && <GitWorktreePanel runboxCwd={runbox.cwd} runboxId={runbox.id} branch={branch} onClose={() => onSidePanelToggle?.("git")} />}
               {sidePanel === "memory" && <MemoryPanel runboxId={runbox.id} runboxName={runbox.name} onClose={() => onSidePanelToggle?.("memory")} />}
             </div>
@@ -828,6 +822,7 @@ export function WorkspaceView({
       )}
 
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
         @keyframes slideIn     { from { opacity:0; transform:translateX(10px);  } to { opacity:1; transform:translateX(0); } }
         @keyframes slideInLeft { from { opacity:0; transform:translateX(-10px); } to { opacity:1; transform:translateX(0); } }
         @keyframes sp { to { transform: rotate(360deg); } }

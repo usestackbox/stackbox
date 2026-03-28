@@ -28,7 +28,46 @@ interface GitPanelProps {
   onClose: () => void; onFileClick?: (fc: LiveDiffFile) => void;
 }
 
+// ── No-git placeholder ────────────────────────────────────────────────────────
+function NoGitPane({ onClose }: { onClose: () => void }) {
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", background:C.bg1 }}>
+      {/* Header */}
+      <div style={{ height:48, padding:"0 14px", flexShrink:0, borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:8 }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.t2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0 }}>
+          <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
+        </svg>
+        <span style={{ fontSize:13, fontWeight:600, color:C.t0, flex:1, fontFamily:SANS }}>Source Control</span>
+        <button onClick={onClose}
+          style={{ width:28, height:28, display:"flex", alignItems:"center", justifyContent:"center", background:"none", border:"none", color:C.t2, fontSize:14, borderRadius:8, cursor:"pointer", transition:"all .1s" }}
+          onMouseEnter={e => { const el=e.currentTarget as HTMLElement; el.style.background=C.bg3; el.style.color=C.t0; }}
+          onMouseLeave={e => { const el=e.currentTarget as HTMLElement; el.style.background="transparent"; el.style.color=C.t2; }}>✕</button>
+      </div>
+      {/* Body */}
+      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:12, padding:24 }}>
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
+        </svg>
+        <span style={{ fontSize:13, fontWeight:600, color:C.t1, fontFamily:SANS }}>No Git repository</span>
+        <span style={{ fontSize:11, color:C.t3, fontFamily:SANS, textAlign:"center", lineHeight:1.6 }}>
+          This folder is not a Git repository.<br/>Initialize one to use source control.
+        </span>
+        <button
+          onClick={async () => {
+            try { await invoke("git_init", { cwd: "" }); } catch { /**/ }
+          }}
+          style={{ marginTop:4, padding:"8px 20px", borderRadius:8, background:"transparent", border:`1px solid ${C.borderMd}`, color:C.t1, fontSize:12, fontFamily:SANS, cursor:"pointer", transition:"all .12s" }}
+          onMouseEnter={e => { const el=e.currentTarget as HTMLElement; el.style.background=C.bg3; el.style.color=C.t0; }}
+          onMouseLeave={e => { const el=e.currentTarget as HTMLElement; el.style.background="transparent"; el.style.color=C.t1; }}>
+          Initialize Repository
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileClick }: GitPanelProps) {
+  const [isGitRepo,   setIsGitRepo]   = useState<boolean | null>(null); // null = loading
   const [tab,         setTab]         = useState<Tab>("changes");
   const [files,       setFiles]       = useState<LiveDiffFile[]>([]);
   const [commits,     setCommits]     = useState<GitCommit[]>([]);
@@ -50,15 +89,54 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
 
   const showNotice = (text: string, ok: boolean) => { setNotice({ text, ok }); setTimeout(() => setNotice(null), 3000); };
 
+  // ── Detect git repo first ─────────────────────────────────────────────────
+  useEffect(() => {
+    invoke<string>("git_current_branch", { cwd: runboxCwd })
+      .then(b => setIsGitRepo(!!b))
+      .catch(() => setIsGitRepo(false));
+  }, [runboxCwd]);
+
   const loadFiles     = useCallback(() => { invoke<LiveDiffFile[]>("git_diff_live", { cwd:runboxCwd, runboxId }).then(f => setFiles(f.sort((a,b)=>(b.modified_at||0)-(a.modified_at||0)))).catch(() => {}); }, [runboxCwd, runboxId]);
   const loadCommits   = useCallback(() => { invoke<GitCommit[]>("git_log_for_runbox", { cwd:runboxCwd, runboxId }).then(setCommits).catch(() => {}); }, [runboxCwd, runboxId]);
   const loadWorktrees = useCallback(() => { invoke<WorktreeEntry[]>("git_worktree_list", { cwd:runboxCwd }).then(setWorktrees).catch(() => {}); }, [runboxCwd]);
   const loadConflicts = useCallback(() => { invoke<ConflictFile[]>("git_conflicts", { cwd:runboxCwd }).then(setConflicts).catch(() => setConflicts([])); }, [runboxCwd]);
   const loadBranches  = useCallback(() => { invoke<string[]>("git_branches", { cwd:runboxCwd }).then(setAllBranches).catch(() => {}); }, [runboxCwd]);
 
-  useEffect(() => { loadFiles(); loadCommits(); loadWorktrees(); loadConflicts(); loadBranches(); }, [loadFiles, loadCommits, loadWorktrees, loadConflicts, loadBranches]);
-  useEffect(() => { invoke("git_watch_start", { cwd:runboxCwd, runboxId }).catch(() => {}); return () => { invoke("git_watch_stop", { cwd:runboxCwd }).catch(() => {}); }; }, [runboxCwd, runboxId]);
-  useEffect(() => { const u = listen<LiveDiffFile[]>("git:live-diff", ({ payload }) => { setFiles(payload.sort((a,b)=>(b.modified_at||0)-(a.modified_at||0))); loadConflicts(); }); return () => { u.then(f => f()); }; }, [loadConflicts]);
+  useEffect(() => {
+    if (!isGitRepo) return;
+    loadFiles(); loadCommits(); loadWorktrees(); loadConflicts(); loadBranches();
+  }, [isGitRepo, loadFiles, loadCommits, loadWorktrees, loadConflicts, loadBranches]);
+
+  useEffect(() => {
+    if (!isGitRepo) return;
+    invoke("git_watch_start", { cwd:runboxCwd, runboxId }).catch(() => {});
+    return () => { invoke("git_watch_stop", { cwd:runboxCwd }).catch(() => {}); };
+  }, [isGitRepo, runboxCwd, runboxId]);
+
+  useEffect(() => {
+    if (!isGitRepo) return;
+    const u = listen<LiveDiffFile[]>("git:live-diff", ({ payload }) => { setFiles(payload.sort((a,b)=>(b.modified_at||0)-(a.modified_at||0))); loadConflicts(); });
+    return () => { u.then(f => f()); };
+  }, [isGitRepo, loadConflicts]);
+
+  // ── Loading state ─────────────────────────────────────────────────────────
+  if (isGitRepo === null) {
+    return (
+      <div style={{ display:"flex", flexDirection:"column", height:"100%", background:C.bg1 }}>
+        <div style={{ height:48, padding:"0 14px", flexShrink:0, borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ fontSize:13, fontWeight:600, color:C.t0, flex:1, fontFamily:SANS }}>Source Control</span>
+          <button onClick={onClose} style={{ width:28, height:28, display:"flex", alignItems:"center", justifyContent:"center", background:"none", border:"none", color:C.t2, fontSize:14, borderRadius:8, cursor:"pointer" }}>✕</button>
+        </div>
+        <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ width:16, height:16, border:`2px solid ${C.border}`, borderTopColor:C.t1, borderRadius:"50%", animation:"gitspin .7s linear infinite" }} />
+        </div>
+        <style>{`@keyframes gitspin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // ── No git repo ───────────────────────────────────────────────────────────
+  if (!isGitRepo) return <NoGitPane onClose={onClose} />;
 
   const handleCommit = async () => {
     if (!message.trim()) { textRef.current?.focus(); return; }
@@ -114,7 +192,7 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
           <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
         </svg>
         <span style={{ fontSize:13, fontWeight:600, color:C.t0, flex:1, fontFamily:SANS }}>Source Control</span>
-        {conflicts.length > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:C.t2, background:C.bg3, border:`1px solid ${C.borderMd}`, borderRadius:6, padding:"2px 7px" }}>⚡ {conflicts.length}</span>}
+        {conflicts.length > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:C.amber, background:C.amberBg, border:`1px solid ${C.amber}40`, borderRadius:6, padding:"2px 7px" }}>⚡ {conflicts.length}</span>}
         <button onClick={handlePush} disabled={busy}
           style={{ padding:"5px 11px", background:"transparent", border:`1px solid ${C.border}`, borderRadius:8, color:busy?C.t3:C.t2, fontSize:11, fontFamily:SANS, cursor:busy?"default":"pointer", transition:"all .1s" }}
           onMouseEnter={e => { if (!busy) { const el=e.currentTarget as HTMLElement; el.style.borderColor=C.borderMd; el.style.color=C.t0; } }}
@@ -140,15 +218,15 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
 
       {/* Notice */}
       {notice && (
-        <div style={{ margin:"0 8px 4px", padding:"7px 12px", borderRadius:8, background: notice.ok?"rgba(255,255,255,.04)":"rgba(255,255,255,.04)", border:`1px solid ${notice.ok?C.border:"rgba(200,80,80,.2)"}`, fontSize:11, color:notice.ok?C.t1:"rgba(255,255,255,.50)", fontFamily:SANS }}>
+        <div style={{ margin:"0 8px 4px", padding:"7px 12px", borderRadius:8, background:C.bg2, border:`1px solid ${notice.ok?C.border:C.red+"33"}`, fontSize:11, color:notice.ok?C.t1:C.red, fontFamily:SANS }}>
           {notice.text}
         </div>
       )}
 
       {/* Conflict list */}
       {conflicts.length > 0 && (
-        <div style={{ margin:"0 8px 4px", padding:"8px 12px", borderRadius:8, background:"rgba(255,255,255,.03)", border:`1px solid ${C.borderMd}` }}>
-          <div style={{ fontSize:11, fontWeight:600, color:C.t1, fontFamily:SANS, marginBottom:5 }}>⚡ Conflicts</div>
+        <div style={{ margin:"0 8px 4px", padding:"8px 12px", borderRadius:8, background:C.amberBg, border:`1px solid ${C.amber}33` }}>
+          <div style={{ fontSize:11, fontWeight:600, color:C.amber, fontFamily:SANS, marginBottom:5 }}>⚡ Conflicts</div>
           {conflicts.map(cf => (
             <div key={cf.path} style={{ display:"flex", gap:6, alignItems:"center", marginBottom:3 }}>
               <span style={{ fontSize:9, fontFamily:MONO, color:C.t2, background:C.bg4, borderRadius:3, padding:"0 4px" }}>{cf.status}</span>
@@ -178,29 +256,27 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
       {/* ── Changes ── */}
       {tab === "changes" && (
         <div style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-          {/* Compact stats */}
           {files.length > 0 && (
             <div style={{ display:"flex", borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
               {[{l:"ADDED",val:files.filter(f=>f.change_type==="created").length},{l:"CHANGED",val:files.filter(f=>f.change_type==="modified").length},{l:"DELETED",val:files.filter(f=>f.change_type==="deleted").length}]
                 .filter(x=>x.val>0).map(({l,val})=>(
                 <div key={l} style={{ flex:1, padding:"6px 12px", borderRight:`1px solid ${C.border}` }}>
                   <div style={{ fontSize:8, fontFamily:MONO, letterSpacing:".10em", color:C.t3, marginBottom:2 }}>{l}</div>
-                  <span style={{ fontSize:14, fontFamily:MONO, fontWeight:700, color:C.t0 }}>{val}</span>
+                  <span style={{ fontSize:14, fontFamily:MONO, fontWeight:700, color: l==="ADDED" ? C.green : l==="DELETED" ? C.red : C.t0 }}>{val}</span>
                 </div>
               ))}
               {(totalIns > 0 || totalDel > 0) && (
                 <div style={{ flex:1, padding:"6px 12px" }}>
                   <div style={{ fontSize:8, fontFamily:MONO, letterSpacing:".10em", color:C.t3, marginBottom:2 }}>LINES</div>
                   <div style={{ display:"flex", gap:4 }}>
-                    {totalIns > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"rgba(255,255,255,.55)" }}>+{totalIns}</span>}
-                    {totalDel > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:"rgba(255,255,255,.45)" }}>-{totalDel}</span>}
+                    {totalIns > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:C.green }}>+{totalIns}</span>}
+                    {totalDel > 0 && <span style={{ fontSize:12, fontFamily:MONO, fontWeight:700, color:C.red }}>-{totalDel}</span>}
                   </div>
                 </div>
               )}
             </div>
           )}
 
-          {/* Commit box */}
           <div style={{ padding:"8px", borderBottom:`1px solid ${C.border}`, flexShrink:0, display:"flex", flexDirection:"column", gap:6 }}>
             <textarea ref={textRef} value={message} onChange={e => setMessage(e.target.value)}
               placeholder="Commit message…" rows={2}
@@ -220,7 +296,6 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
             </div>
           </div>
 
-          {/* File list */}
           <div style={{ flex:1, overflowY:"auto", padding:"8px", display:"flex", flexDirection:"column", gap:3 }}>
             {files.length === 0 && (
               <div style={{ padding:"32px 0", display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
@@ -229,10 +304,10 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
               </div>
             )}
             {files.map(fc => {
-              const fileName = fc.path.split(/[/\\]/).pop() ?? fc.path;
-              const dirPart  = fc.path.slice(0, fc.path.length - fileName.length);
+              const fileName    = fc.path.split(/[/\\]/).pop() ?? fc.path;
+              const dirPart     = fc.path.slice(0, fc.path.length - fileName.length);
               const letter      = { created:"A", modified:"M", deleted:"D" }[fc.change_type];
-              const letterColor = { created:"rgba(255,255,255,.55)", modified:"#888888", deleted:"rgba(255,255,255,.45)" }[fc.change_type];
+              const letterColor = { created:C.green, modified:C.t2, deleted:C.red }[fc.change_type];
               return (
                 <div key={fc.path} onClick={() => onFileClick?.(fc)}
                   style={{ background:C.bg2, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", cursor:"pointer", transition:"all .1s", display:"flex", alignItems:"center", gap:8 }}
@@ -244,8 +319,8 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
                     {dirPart && <div style={{ fontSize:10, fontFamily:MONO, color:C.t2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginTop:1 }}>{dirPart}</div>}
                   </div>
                   <div style={{ display:"flex", gap:5, flexShrink:0 }}>
-                    {fc.insertions > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"rgba(255,255,255,.55)", fontWeight:600 }}>+{fc.insertions}</span>}
-                    {fc.deletions  > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"rgba(255,255,255,.45)", fontWeight:600 }}>-{fc.deletions}</span>}
+                    {fc.insertions > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:C.green, fontWeight:600 }}>+{fc.insertions}</span>}
+                    {fc.deletions  > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:C.red,   fontWeight:600 }}>-{fc.deletions}</span>}
                   </div>
                 </div>
               );
@@ -310,7 +385,6 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
       {/* ── Worktrees ── */}
       {tab === "worktrees" && (
         <div style={{ flex:1, overflowY:"auto", padding:"8px", display:"flex", flexDirection:"column", gap:4 }}>
-          {/* New worktree */}
           {!showNewWt ? (
             <button onClick={() => setShowNewWt(true)}
               style={{ width:"100%", padding:"10px", borderRadius:8, background:"transparent", border:`1px dashed ${C.border}`, color:C.t2, fontSize:12, fontFamily:SANS, cursor:"pointer", transition:"all .15s", display:"flex", alignItems:"center", justifyContent:"center", gap:7 }}
@@ -334,6 +408,15 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
                   {creating?"Creating…":"Create"}
                 </button>
               </div>
+            </div>
+          )}
+
+          {worktrees.length === 0 && !showNewWt && (
+            <div style={{ padding:"24px 0", display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
+              </svg>
+              <span style={{ fontSize:12, color:C.t2, fontFamily:SANS }}>No worktrees yet</span>
             </div>
           )}
 
@@ -373,6 +456,8 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
           })}
         </div>
       )}
+
+      <style>{`@keyframes gitspin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

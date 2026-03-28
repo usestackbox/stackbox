@@ -2,32 +2,10 @@
 import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { MONO, SANS } from "../shared/constants";
+import { C, MONO, SANS } from "../shared/constants";
 import { CreateRunboxModal } from "./CreateRunboxModal";
 import type { Runbox } from "../shared/types";
 import FileTreePanel from "../panels/FileTreePanel";
-
-// ── Teal-dark palette ─────────────────────────────────────────────────────────
-const P = {
-  c0: "#2a3a44",   // active item bg
-  c2: "#243039",   // hover bg
-  c4: "#1a2228",   // badge bg
-  c5: "#20292f",   // panel bg
-  c6: "#1a2228",   // header/footer bg
-  c7: "#101518",   // input bg
-
-  border:   "rgba(255,255,255,.07)",
-  borderMd: "rgba(255,255,255,.11)",
-  borderHi: "rgba(255,255,255,.18)",
-
-  t0: "rgba(255,255,255,.92)",
-  t1: "rgba(255,255,255,.62)",
-  t2: "rgba(255,255,255,.38)",
-  t3: "rgba(255,255,255,.22)",
-  t4: "rgba(255,255,255,.11)",
-
-  red: "#f87171",
-};
 
 interface SidebarProps {
   runboxes:          Runbox[];
@@ -54,8 +32,13 @@ const ICON_GROUPS = [
   { label: "Symbols", icons: ["✅","❌","⚠️","💬","💭","❓","❗","🔴","🟠","🟡","🟢","🔵","🟣","⚫","⚪"] },
 ];
 
+// ── Fixed useGitStats: each runbox queries its own cwd independently ──────────
 function useGitStats(runboxes: Runbox[], cwdMap: Record<string, string>) {
   const [stats, setStats] = useState<Record<string, GitStats>>({});
+  const runboxKey = runboxes.map(r => r.id).join(",");
+  const cwdKey    = JSON.stringify(cwdMap);
+
+  // Initial load: query each runbox separately by its own cwd
   useEffect(() => {
     runboxes.forEach(async rb => {
       const cwd = cwdMap[rb.id] ?? rb.cwd;
@@ -63,21 +46,29 @@ function useGitStats(runboxes: Runbox[], cwdMap: Record<string, string>) {
         const files = await invoke<any[]>("git_diff_live", { cwd, runboxId: rb.id });
         const ins = files.reduce((s: number, f: any) => s + (f.insertions ?? 0), 0);
         const del = files.reduce((s: number, f: any) => s + (f.deletions  ?? 0), 0);
-        if (ins + del > 0) setStats(prev => ({ ...prev, [rb.id]: { insertions: ins, deletions: del, files: files.length } }));
+        setStats(prev => ({ ...prev, [rb.id]: { insertions: ins, deletions: del, files: files.length } }));
       } catch { /**/ }
     });
-  }, [runboxes.map(r => r.id).join(",")]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runboxKey, cwdKey]);
+
+  // Live updates: re-query EACH runbox by its OWN cwd — never apply one payload to all
   useEffect(() => {
-    const unsub = listen<any[]>("git:live-diff", ({ payload }) => {
-      if (!payload?.length) return;
-      runboxes.forEach(rb => {
-        const ins = payload.reduce((s: number, f: any) => s + (f.insertions ?? 0), 0);
-        const del = payload.reduce((s: number, f: any) => s + (f.deletions  ?? 0), 0);
-        setStats(prev => ({ ...prev, [rb.id]: { insertions: ins, deletions: del, files: payload.length } }));
+    const unsub = listen<any[]>("git:live-diff", () => {
+      runboxes.forEach(async rb => {
+        const cwd = cwdMap[rb.id] ?? rb.cwd;
+        try {
+          const files = await invoke<any[]>("git_diff_live", { cwd, runboxId: rb.id });
+          const ins = files.reduce((s: number, f: any) => s + (f.insertions ?? 0), 0);
+          const del = files.reduce((s: number, f: any) => s + (f.deletions  ?? 0), 0);
+          setStats(prev => ({ ...prev, [rb.id]: { insertions: ins, deletions: del, files: files.length } }));
+        } catch { /**/ }
       });
     });
     return () => { unsub.then(f => f()); };
-  }, [runboxes.map(r => r.id).join(",")]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runboxKey, cwdKey]);
+
   return stats;
 }
 
@@ -127,19 +118,19 @@ function IconPicker({ anchorX, anchorY, onSelect, onClose }: {
 
   return (
     <div ref={ref} onClick={e => e.stopPropagation()}
-      style={{ position: "fixed", left, top, width: W, height: H, background: P.c6, border: `1px solid ${P.borderMd}`, borderRadius: 12, boxShadow: "0 20px 60px rgba(0,0,0,.7)", display: "flex", flexDirection: "column", zIndex: 99999, overflow: "hidden" }}>
+      style={{ position: "fixed", left, top, width: W, height: H, background: C.bg2, border: `1px solid ${C.borderMd}`, borderRadius: 12, boxShadow: "0 20px 60px rgba(0,0,0,.7)", display: "flex", flexDirection: "column", zIndex: 99999, overflow: "hidden" }}>
       <div style={{ padding: "10px 10px 6px", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, background: P.c7, border: `1px solid ${P.border}`, borderRadius: 8, padding: "5px 10px" }}>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={P.t3} strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.bg0, border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 10px" }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)} placeholder="Search icons…"
-            style={{ background: "none", border: "none", outline: "none", color: P.t0, fontSize: 12, fontFamily: SANS, flex: 1 }} />
+            style={{ background: "none", border: "none", outline: "none", color: C.t0, fontSize: 12, fontFamily: SANS, flex: 1 }} />
         </div>
       </div>
       {!search && (
         <div style={{ display: "flex", gap: 2, padding: "0 10px 6px", flexShrink: 0, overflowX: "auto" }}>
           {ICON_GROUPS.map((g, i) => (
             <button key={g.label} onClick={() => setActiveGroup(i)}
-              style={{ border: "none", cursor: "pointer", borderRadius: 6, padding: "3px 9px", fontSize: 10, fontFamily: MONO, fontWeight: 700, letterSpacing: ".08em", whiteSpace: "nowrap", background: activeGroup === i ? P.c0 : "transparent", color: activeGroup === i ? P.t0 : P.t3, transition: "all .12s" }}>
+              style={{ border: "none", cursor: "pointer", borderRadius: 6, padding: "3px 9px", fontSize: 10, fontFamily: MONO, fontWeight: 700, letterSpacing: ".08em", whiteSpace: "nowrap", background: activeGroup === i ? C.bg4 : "transparent", color: activeGroup === i ? C.t0 : C.t3, transition: "all .12s" }}>
               {g.label}
             </button>
           ))}
@@ -149,17 +140,18 @@ function IconPicker({ anchorX, anchorY, onSelect, onClose }: {
         {filtered.map((icon, i) => (
           <button key={i} onClick={() => { onSelect(icon); onClose(); }}
             style={{ border: "none", cursor: "pointer", borderRadius: 8, fontSize: 20, lineHeight: 1, padding: "6px 0", background: "transparent", transition: "background .1s, transform .1s", display: "flex", alignItems: "center", justifyContent: "center" }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = P.c2; el.style.transform = "scale(1.15)"; }}
+            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.bg3; el.style.transform = "scale(1.15)"; }}
             onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.transform = "scale(1)"; }}>
             {icon}
           </button>
         ))}
-        {filtered.length === 0 && <div style={{ gridColumn: "1/-1", padding: "20px 0", textAlign: "center", color: P.t3, fontSize: 11, fontFamily: SANS }}>No icons found</div>}
+        {filtered.length === 0 && <div style={{ gridColumn: "1/-1", padding: "20px 0", textAlign: "center", color: C.t3, fontSize: 11, fontFamily: SANS }}>No icons found</div>}
       </div>
     </div>
   );
 }
 
+// ── Context Menu ──────────────────────────────────────────────────────────────
 function ContextMenu({ x, y, rbName, onDelete, onChangeIcon, onClose }: {
   x: number; y: number; rbName: string;
   onDelete: () => void; onChangeIcon: () => void; onClose: () => void;
@@ -192,16 +184,16 @@ function ContextMenu({ x, y, rbName, onDelete, onChangeIcon, onClose }: {
   ];
 
   return (
-    <div ref={ref} onClick={e => e.stopPropagation()} style={{ position: "fixed", left, top, width: 200, background: P.c6, border: `1px solid ${P.border}`, borderRadius: 12, boxShadow: "0 16px 48px rgba(0,0,0,.7)", zIndex: 99998, overflow: "hidden", padding: "5px", opacity: visible ? 1 : 0, transform: visible ? "scale(1) translateY(0)" : "scale(.95) translateY(-4px)", transformOrigin: "top left", transition: "opacity .15s ease, transform .15s cubic-bezier(.16,1,.3,1)" }}>
-      <div style={{ padding: "5px 10px", fontSize: 9, fontFamily: MONO, fontWeight: 700, letterSpacing: ".12em", color: P.t3, userSelect: "none" }}>
+    <div ref={ref} onClick={e => e.stopPropagation()} style={{ position: "fixed", left, top, width: 200, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 16px 48px rgba(0,0,0,.7)", zIndex: 99998, overflow: "hidden", padding: "5px", opacity: visible ? 1 : 0, transform: visible ? "scale(1) translateY(0)" : "scale(.95) translateY(-4px)", transformOrigin: "top left", transition: "opacity .15s ease, transform .15s cubic-bezier(.16,1,.3,1)" }}>
+      <div style={{ padding: "5px 10px", fontSize: 9, fontFamily: MONO, fontWeight: 700, letterSpacing: ".12em", color: C.t3, userSelect: "none" }}>
         {rbName.toUpperCase()}
       </div>
-      <div style={{ height: 1, background: P.border, margin: "0 0 4px" }} />
+      <div style={{ height: 1, background: C.border, margin: "0 0 4px" }} />
       {items.map((item, i) => (
         <button key={i} onClick={item.action}
-          style={{ width: "100%", border: "none", cursor: "pointer", background: "transparent", borderRadius: 8, display: "flex", alignItems: "center", gap: 9, padding: "7px 10px", textAlign: "left", color: item.danger ? "rgba(248,113,113,.85)" : P.t1, fontSize: 12, fontFamily: SANS, transition: "background .08s, color .08s" }}
-          onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = item.danger ? "rgba(248,113,113,.10)" : P.c2; el.style.color = item.danger ? P.red : P.t0; }}
-          onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = item.danger ? "rgba(248,113,113,.85)" : P.t1; }}>
+          style={{ width: "100%", border: "none", cursor: "pointer", background: "transparent", borderRadius: 8, display: "flex", alignItems: "center", gap: 9, padding: "7px 10px", textAlign: "left", color: item.danger ? C.red : C.t1, fontSize: 12, fontFamily: SANS, transition: "background .08s, color .08s" }}
+          onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = item.danger ? C.redBg : C.bg3; el.style.color = item.danger ? C.red : C.t0; }}
+          onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = item.danger ? C.red : C.t1; }}>
           <span style={{ opacity: .55, display: "flex", alignItems: "center", flexShrink: 0 }}>{item.icon}</span>
           {item.label}
         </button>
@@ -229,6 +221,7 @@ function RunboxRow({ rb, isOn, gitStats, dockerStatus, customIcon, onSelect, onR
     setRenaming(false);
   };
 
+  // Only show git stats if there are actual changes
   const hasGit  = gitStats && (gitStats.insertions + gitStats.deletions) > 0;
   const dirName = rb.cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? rb.cwd;
 
@@ -239,12 +232,12 @@ function RunboxRow({ rb, isOn, gitStats, dockerStatus, customIcon, onSelect, onR
       onContextMenu={onContextMenu}
       style={{
         borderRadius: 10, marginBottom: 4, cursor: "pointer",
-        background: isOn ? P.c0 : "transparent",
-        border: `1px solid ${isOn ? P.borderMd : "transparent"}`,
+        background: isOn ? C.bg2 : "transparent",
+        border: `1px solid ${isOn ? C.borderMd : "transparent"}`,
         padding: "10px 12px",
         transition: "all .12s", userSelect: "none",
       }}
-      onMouseEnter={e => { if (!isOn) (e.currentTarget as HTMLElement).style.background = P.c2; }}
+      onMouseEnter={e => { if (!isOn) (e.currentTarget as HTMLElement).style.background = C.bg3; }}
       onMouseLeave={e => { if (!isOn) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
 
       {/* Top row: icon + name + delete */}
@@ -253,7 +246,7 @@ function RunboxRow({ rb, isOn, gitStats, dockerStatus, customIcon, onSelect, onR
           <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0 }}>{customIcon}</span>
         ) : (
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-            stroke={isOn ? "#4ade80" : P.t2}
+            stroke={isOn ? C.teal : C.t2}
             strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
             style={{ flexShrink: 0 }}>
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
@@ -270,9 +263,9 @@ function RunboxRow({ rb, isOn, gitStats, dockerStatus, customIcon, onSelect, onR
                 if (e.key === "Escape") { setRenaming(false); setRenameVal(rb.name); }
               }}
               onClick={e => e.stopPropagation()}
-              style={{ background: P.c7, border: `1px solid ${P.borderHi}`, borderRadius: 6, color: P.t0, fontSize: 12, padding: "2px 7px", width: "100%", outline: "none", fontFamily: MONO }} />
+              style={{ background: C.bg0, border: `1px solid ${C.borderHi}`, borderRadius: 6, color: C.t0, fontSize: 12, padding: "2px 7px", width: "100%", outline: "none", fontFamily: MONO }} />
           ) : (
-            <span style={{ fontSize: 13, fontFamily: SANS, fontWeight: isOn ? 600 : 500, color: isOn ? "#ffffff" : P.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block" }}>
+            <span style={{ fontSize: 13, fontFamily: SANS, fontWeight: isOn ? 600 : 500, color: isOn ? C.t0 : C.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block" }}>
               {rb.name}
             </span>
           )}
@@ -281,9 +274,9 @@ function RunboxRow({ rb, isOn, gitStats, dockerStatus, customIcon, onSelect, onR
         {isOn && !renaming && (
           <button
             onClick={e => { e.stopPropagation(); if (confirm(`Delete "${rb.name}"?`)) onDelete(); }}
-            style={{ background: "transparent", border: "none", cursor: "pointer", color: P.t3, fontSize: 15, lineHeight: 1, flexShrink: 0, padding: "0 2px", borderRadius: 4, transition: "color .1s", display: "flex", alignItems: "center" }}
-            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = P.red}
-            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = P.t3}>
+            style={{ background: "transparent", border: "none", cursor: "pointer", color: C.t3, fontSize: 15, lineHeight: 1, flexShrink: 0, padding: "0 2px", borderRadius: 4, transition: "color .1s", display: "flex", alignItems: "center" }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = C.red}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = C.t3}>
             ×
           </button>
         )}
@@ -292,34 +285,34 @@ function RunboxRow({ rb, isOn, gitStats, dockerStatus, customIcon, onSelect, onR
       {/* Bottom row: dir + git + docker */}
       {!renaming && (
         <div style={{ paddingLeft: 21, marginTop: 6, display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ fontSize: 10, fontFamily: MONO, color: P.t3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 10, fontFamily: MONO, color: C.t3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 }}>
             {dirName}
           </span>
 
           {hasGit && (
             <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={P.t3} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
                 <path d="M18 9a9 9 0 0 1-9 9"/>
               </svg>
               {gitStats!.insertions > 0 && (
-                <span style={{ fontSize: 10, fontFamily: MONO, color: "#4ade80", fontWeight: 600 }}>+{gitStats!.insertions}</span>
+                <span style={{ fontSize: 10, fontFamily: MONO, color: C.green, fontWeight: 600 }}>+{gitStats!.insertions}</span>
               )}
               {gitStats!.deletions > 0 && (
-                <span style={{ fontSize: 10, fontFamily: MONO, color: "#f87171", fontWeight: 600 }}>-{gitStats!.deletions}</span>
+                <span style={{ fontSize: 10, fontFamily: MONO, color: C.red, fontWeight: 600 }}>-{gitStats!.deletions}</span>
               )}
             </div>
           )}
 
           {dockerStatus === "running" && (
-            <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0, padding: "1px 5px", borderRadius: 5, background: "rgba(56,189,248,.08)", border: "1px solid rgba(56,189,248,.18)" }}>
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0, padding: "1px 5px", borderRadius: 5, background: C.blueDim, border: `1px solid ${C.tealBorder}` }}>
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={C.blue} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="8" width="4" height="3" rx=".5"/><rect x="7" y="8" width="4" height="3" rx=".5"/>
                 <rect x="12" y="8" width="4" height="3" rx=".5"/><rect x="7" y="4" width="4" height="3" rx=".5"/>
                 <rect x="12" y="4" width="4" height="3" rx=".5"/>
                 <path d="M2 13s1 2.5 8 2.5 12-2.5 12-2.5"/>
               </svg>
-              <span style={{ fontSize: 9, fontFamily: MONO, color: "#38bdf8" }}>docker</span>
+              <span style={{ fontSize: 9, fontFamily: MONO, color: C.blue }}>docker</span>
             </div>
           )}
         </div>
@@ -341,8 +334,19 @@ export function Sidebar({
   const [icons,      setIcons]      = useState<Record<string, string>>({});
   const [ctxMenu,    setCtxMenu]    = useState<{ x: number; y: number; id: string } | null>(null);
   const [iconPicker, setIconPicker] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [wsName,     setWsName]     = useState("WORKSPACE");
+  const [wsEditing,  setWsEditing]  = useState(false);
+  const [wsVal,      setWsVal]      = useState("WORKSPACE");
+  const wsInputRef                  = useRef<HTMLInputElement>(null);
   const gitStats     = useGitStats(runboxes, cwdMap);
   const dockerStatus = useDockerStatus(runboxes);
+
+  useEffect(() => { if (wsEditing) setTimeout(() => wsInputRef.current?.select(), 20); }, [wsEditing]);
+  const submitWsRename = () => {
+    if (wsVal.trim()) setWsName(wsVal.trim().toUpperCase());
+    else setWsVal(wsName);
+    setWsEditing(false);
+  };
 
   return (
     <>
@@ -372,7 +376,7 @@ export function Sidebar({
       {/* ── Floating panel ── */}
       <div style={{
         position: "fixed", left: 8, top: TOOLBAR_H + 8, bottom: 8, width: PANEL_W,
-        background: P.c5, border: `1px solid ${P.border}`, borderRadius: 10,
+        background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 10,
         display: "flex", flexDirection: "column",
         transform: collapsed ? `translateX(-${PANEL_W + 24}px)` : "translateX(0)",
         opacity: collapsed ? 0 : 1,
@@ -384,10 +388,7 @@ export function Sidebar({
       }}>
 
         {fileTreeOpen ? (
-          /* ── File tree view ── */
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            {/* File tree header with back button */}
-            
             <FileTreePanel
               cwd={runboxes.find(r => r.id === activeId)?.cwd ?? "~"}
               onClose={() => onFileTreeToggle?.()}
@@ -397,20 +398,36 @@ export function Sidebar({
         ) : (
           <>
             {/* Header */}
-            <div style={{ height: 42, padding: "0 10px 0 14px", flexShrink: 0, borderBottom: `1px solid ${P.border}`, display: "flex", alignItems: "center", gap: 8, background: P.c6 }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={P.t2} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <div style={{ height: 42, padding: "0 10px 0 14px", flexShrink: 0, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 8, background: C.bg1 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.t2} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                 <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
               </svg>
-              <span style={{ flex: 1, fontSize: 11, fontWeight: 700, letterSpacing: ".09em", fontFamily: MONO, color: P.t2, userSelect: "none" }}>WORKSPACE</span>
+              {wsEditing ? (
+                <input ref={wsInputRef} value={wsVal}
+                  onChange={e => setWsVal(e.target.value)}
+                  onBlur={submitWsRename}
+                  onKeyDown={e => {
+                    if (e.key === "Enter")  { e.preventDefault(); submitWsRename(); }
+                    if (e.key === "Escape") { setWsEditing(false); setWsVal(wsName); }
+                  }}
+                  style={{ flex: 1, background: C.bg0, border: `1px solid ${C.borderHi}`, borderRadius: 5, color: C.t0, fontSize: 10, fontWeight: 700, letterSpacing: ".09em", fontFamily: MONO, padding: "2px 6px", outline: "none", textTransform: "uppercase" }} />
+              ) : (
+                <span
+                  onClick={() => { setWsEditing(true); setWsVal(wsName); }}
+                  title="Click to rename"
+                  style={{ flex: 1, fontSize: 11, fontWeight: 700, letterSpacing: ".09em", fontFamily: MONO, color: C.t2, userSelect: "none", cursor: "text" }}>
+                  {wsName}
+                </span>
+              )}
               {runboxes.length > 0 && (
-                <span style={{ fontSize: 9, fontFamily: MONO, fontWeight: 700, color: P.t3, background: P.c4, border: `1px solid ${P.border}`, borderRadius: 5, padding: "1px 6px" }}>
+                <span style={{ fontSize: 9, fontFamily: MONO, fontWeight: 700, color: C.t3, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 5, padding: "1px 6px" }}>
                   {runboxes.length}
                 </span>
               )}
               <button onClick={() => setShowModal(true)} title="New runbox"
-                style={{ background: "transparent", border: "none", cursor: "pointer", color: P.t2, borderRadius: 6, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, transition: "background .1s, color .1s", flexShrink: 0 }}
-                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = P.c2; el.style.color = P.t0; }}
-                onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = P.t2; }}>
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: C.t2, borderRadius: 6, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, transition: "background .1s, color .1s", flexShrink: 0 }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.bg3; el.style.color = C.t0; }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = C.t2; }}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
                   <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
@@ -436,14 +453,14 @@ export function Sidebar({
 
               {runboxes.length === 0 && (
                 <div style={{ padding: "32px 8px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke={P.t4} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke={C.border} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
                   </svg>
-                  <span style={{ fontSize: 11, color: P.t3, fontFamily: SANS, textAlign: "center", lineHeight: 1.6 }}>No runboxes yet</span>
+                  <span style={{ fontSize: 11, color: C.t3, fontFamily: SANS, textAlign: "center", lineHeight: 1.6 }}>No runboxes yet</span>
                   <button onClick={() => setShowModal(true)}
-                    style={{ padding: "7px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${P.borderMd}`, color: P.t1, fontSize: 11, fontFamily: SANS, cursor: "pointer", transition: "all .12s" }}
-                    onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = P.c2; el.style.color = P.t0; }}
-                    onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = P.t1; }}>
+                    style={{ padding: "7px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${C.borderMd}`, color: C.t1, fontSize: 11, fontFamily: SANS, cursor: "pointer", transition: "all .12s" }}
+                    onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = C.bg3; el.style.color = C.t0; }}
+                    onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.color = C.t1; }}>
                     + New runbox
                   </button>
                 </div>
@@ -451,7 +468,7 @@ export function Sidebar({
             </div>
 
             {/* Footer */}
-            <div style={{ padding: "6px 12px", borderTop: `1px solid ${P.border}`, fontSize: 10, color: P.t4, fontFamily: MONO, background: P.c6, flexShrink: 0, letterSpacing: ".04em" }}>
+            <div style={{ padding: "6px 12px", borderTop: `1px solid ${C.border}`, fontSize: 10, color: C.t3, fontFamily: MONO, background: C.bg1, flexShrink: 0, letterSpacing: ".04em" }}>
               Double-click to rename · Right-click for options
             </div>
           </>

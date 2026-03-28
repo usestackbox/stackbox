@@ -16,13 +16,11 @@ export const C = {
   borderMd: "rgba(255,255,255,.10)",
   borderHi: "rgba(255,255,255,.18)",
 
-  // Text hierarchy — white only
   t0: "rgba(255,255,255,.92)",
   t1: "rgba(255,255,255,.62)",
   t2: "rgba(255,255,255,.38)",
   t3: "rgba(255,255,255,.22)",
 
-  // Status — all white toned
   green:   "rgba(255,255,255,.70)",
   greenBg: "rgba(255,255,255,.06)",
   red:     "rgba(255,255,255,.55)",

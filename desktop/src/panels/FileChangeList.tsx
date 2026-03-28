@@ -48,9 +48,10 @@ function reltime(ms: number) {
   return `${Math.floor(d/86400_000)}d`;
 }
 
-// Change type — monochrome only
-const CHANGE_LABEL = { created: "A", modified: "M", deleted: "D" };
-const CHANGE_COLOR  = { created: "#4a9955", modified: "#888888", deleted: "#cc5555" };
+// Change type colors from C palette
+const CHANGE_LETTER = { created: "A", modified: "M", deleted: "D" };
+const changeColor   = (t: "created"|"modified"|"deleted") =>
+  t === "created" ? C.green : t === "deleted" ? C.red : C.t2;
 
 export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
   runboxId: string; runboxCwd: string; onFileClick: (fc: LiveDiffFile) => void;
@@ -75,15 +76,13 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
   }, [runboxId]);
 
   useEffect(() => {
-    const short = runboxId.slice(0, 8);
-    const parts = runboxCwd.replace(/\\/g,"/").split("/"); parts.pop();
-    const candidate = parts.join("/") + "/stackbox-wt-" + short;
-    invoke<string>("git_current_branch", { cwd: candidate })
-      .then(b => { if (b) { setWorktreeCwd(candidate); worktreeCwdRef.current = candidate; setBranch(b); } })
-      .catch(() => {
-        invoke<string>("git_current_branch", { cwd: runboxCwd }).then(b => { if (b) setBranch(b); }).catch(() => {});
-        setWorktreeCwd(runboxCwd); worktreeCwdRef.current = runboxCwd;
-      });
+    // Only use the actual runboxCwd — never auto-probe for worktree paths,
+    // which can trigger unintended git worktree creation on the backend.
+    invoke<string>("git_current_branch", { cwd: runboxCwd })
+      .then(b => { if (b) setBranch(b); })
+      .catch(() => {});
+    setWorktreeCwd(runboxCwd);
+    worktreeCwdRef.current = runboxCwd;
   }, [runboxId, runboxCwd]);
 
   const applyAndSet = (raw: LiveDiffFile[]) =>
@@ -117,7 +116,7 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
 
       {/* Stats */}
       {deduped.length > 0 && (
-        <div style={{ display:"flex", flexShrink:0, borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ display:"flex", flexShrink:0, borderBottom:`1px solid ${C.border}`, background:C.bg0 }}>
           {[
             { label:"ADDED",   val: counts.created  },
             { label:"CHANGED", val: counts.modified },
@@ -126,14 +125,14 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
           ].map(({ label, val }) => val !== null && val > 0 ? (
             <div key={label} style={{ flex:1, padding:"8px 12px", borderRight:`1px solid ${C.border}` }}>
               <div style={{ fontSize:9, fontFamily:MONO, letterSpacing:".10em", color:C.t3, marginBottom:3 }}>{label}</div>
-              <span style={{ fontSize:16, fontFamily:MONO, fontWeight:700, color:C.t0 }}>{val}</span>
+              <span style={{ fontSize:16, fontFamily:MONO, fontWeight:700, color: label==="ADDED" ? C.green : label==="DELETED" ? C.red : C.t0 }}>{val}</span>
             </div>
           ) : label === "LINES" && (totalIns > 0 || totalDel > 0) ? (
             <div key={label} style={{ flex:1, padding:"8px 12px" }}>
               <div style={{ fontSize:9, fontFamily:MONO, letterSpacing:".10em", color:C.t3, marginBottom:3 }}>{label}</div>
               <div style={{ display:"flex", gap:5 }}>
-                {totalIns > 0 && <span style={{ fontSize:13, fontFamily:MONO, fontWeight:700, color:"#4a9955" }}>+{totalIns}</span>}
-                {totalDel > 0 && <span style={{ fontSize:13, fontFamily:MONO, fontWeight:700, color:"#cc5555" }}>-{totalDel}</span>}
+                {totalIns > 0 && <span style={{ fontSize:13, fontFamily:MONO, fontWeight:700, color:C.green }}>+{totalIns}</span>}
+                {totalDel > 0 && <span style={{ fontSize:13, fontFamily:MONO, fontWeight:700, color:C.red   }}>-{totalDel}</span>}
               </div>
             </div>
           ) : null)}
@@ -141,9 +140,9 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
       )}
 
       {/* Branch + refresh */}
-      <div style={{ padding:"8px 12px", borderBottom:`1px solid ${C.border}`, flexShrink:0, display:"flex", alignItems:"center", gap:8 }}>
+      <div style={{ padding:"8px 12px", borderBottom:`1px solid ${C.border}`, flexShrink:0, display:"flex", alignItems:"center", gap:8, background:C.bg0 }}>
         {branch && (
-          <div style={{ display:"flex", alignItems:"center", gap:5, flex:1, background:C.bg2, border:`1px solid ${C.border}`, borderRadius:8, padding:"5px 10px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:5, flex:1, background:C.bg1, border:`1px solid ${C.border}`, borderRadius:8, padding:"5px 10px" }}>
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
             </svg>
@@ -162,8 +161,8 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
       </div>
 
       {/* Filter tabs */}
-      <div style={{ padding:"8px 12px", borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
-        <div style={{ display:"flex", background:C.bg0, borderRadius:8, padding:3, gap:0 }}>
+      <div style={{ padding:"8px 12px", borderBottom:`1px solid ${C.border}`, flexShrink:0, background:C.bg0 }}>
+        <div style={{ display:"flex", background:C.bg1, borderRadius:8, padding:3, gap:0 }}>
           {(["all","modified","created","deleted"] as const).map(f => {
             const on    = filter === f;
             const count = f === "all" ? deduped.length : counts[f];
@@ -186,7 +185,7 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
           </div>
         )}
         {!loading && error && (
-          <div style={{ margin:"4px", padding:"10px 12px", background:"rgba(200,80,80,.08)", border:"1px solid rgba(200,80,80,.15)", borderRadius:10, fontSize:12, color:"#cc6666", fontFamily:SANS }}>
+          <div style={{ margin:"4px", padding:"10px 12px", background:C.redBg, border:`1px solid ${C.red}26`, borderRadius:10, fontSize:12, color:C.red, fontFamily:SANS }}>
             {error}
             <button onClick={() => load(false)} style={{ display:"block", marginTop:8, padding:"4px 12px", background:C.bg3, border:`1px solid ${C.border}`, borderRadius:6, color:C.t2, fontSize:11, fontFamily:SANS, cursor:"pointer" }}>Retry</button>
           </div>
@@ -203,7 +202,8 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
             const dirPart   = fc.path.slice(0, fc.path.length - fileName.length);
             const agentName = agentAt(agentSpans, fc.modified_at);
             const ts        = reltime(fc.modified_at);
-            const letter    = CHANGE_LABEL[fc.change_type];
+            const letter    = CHANGE_LETTER[fc.change_type];
+            const lColor    = changeColor(fc.change_type);
 
             return (
               <div key={fc.path} onClick={() => onFileClick(fc)}
@@ -211,29 +211,24 @@ export function FileChangeList({ runboxId, runboxCwd, onFileClick }: {
                 onMouseEnter={e => { const el=e.currentTarget as HTMLElement; el.style.background=C.bg3; el.style.borderColor=C.borderMd; }}
                 onMouseLeave={e => { const el=e.currentTarget as HTMLElement; el.style.background=C.bg2; el.style.borderColor=C.border; }}>
 
-                {/* Change letter */}
-                <span style={{ fontSize:10, fontFamily:MONO, fontWeight:700, color:CHANGE_COLOR[fc.change_type], width:12, flexShrink:0, textAlign:"center" }}>{letter}</span>
+                <span style={{ fontSize:10, fontFamily:MONO, fontWeight:700, color:lColor, width:12, flexShrink:0, textAlign:"center" }}>{letter}</span>
 
-                {/* File info */}
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize:12, fontFamily:MONO, color:C.t0, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fileName}</div>
                   {dirPart && <div style={{ fontSize:10, fontFamily:MONO, color:C.t3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginTop:1 }}>{dirPart}</div>}
                 </div>
 
-                {/* Agent */}
                 {agentName && (
                   <span style={{ fontSize:9, fontFamily:MONO, color:C.t3, background:C.bg4, border:`1px solid ${C.border}`, borderRadius:4, padding:"1px 5px", flexShrink:0, letterSpacing:".03em" }}>
                     {agentName}
                   </span>
                 )}
 
-                {/* Stats */}
                 <div style={{ display:"flex", gap:5, flexShrink:0 }}>
-                  {fc.insertions > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"#4a9955", fontWeight:600 }}>+{fc.insertions}</span>}
-                  {fc.deletions  > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:"#cc5555", fontWeight:600 }}>-{fc.deletions}</span>}
+                  {fc.insertions > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:C.green, fontWeight:600 }}>+{fc.insertions}</span>}
+                  {fc.deletions  > 0 && <span style={{ fontSize:10, fontFamily:MONO, color:C.red,   fontWeight:600 }}>-{fc.deletions}</span>}
                 </div>
 
-                {/* Time */}
                 {ts && <span style={{ fontSize:10, fontFamily:MONO, color:C.t3, flexShrink:0 }}>{ts}</span>}
               </div>
             );
