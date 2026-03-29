@@ -29,7 +29,30 @@ interface GitPanelProps {
 }
 
 // ── No-git placeholder ────────────────────────────────────────────────────────
-function NoGitPane({ onClose }: { onClose: () => void }) {
+function NoGitPane({ cwd, onClose, onInitDone }: { cwd: string; onClose: () => void; onInitDone: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  // Auto-poll every 2s — strict detection, no false positives
+  useEffect(() => {
+    const t = setInterval(async () => {
+      try {
+        const b = await invoke<string>("git_current_branch", { cwd });
+        if (b && b.trim().length > 0) { clearInterval(t); onInitDone(); return; }
+      } catch { /* not yet */ }
+      try {
+        const wts = await invoke<any[]>("git_worktree_list", { cwd });
+        if (Array.isArray(wts) && wts.length > 0) { clearInterval(t); onInitDone(); return; }
+      } catch { /* not yet */ }
+    }, 2000);
+    return () => clearInterval(t);
+  }, [cwd, onInitDone]);
+
+  const handleCopy = async () => {
+    try { await navigator.clipboard.writeText("git init"); } catch { /**/ }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"100%", background:C.bg1 }}>
       {/* Header */}
@@ -38,30 +61,66 @@ function NoGitPane({ onClose }: { onClose: () => void }) {
           <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
         </svg>
         <span style={{ fontSize:13, fontWeight:600, color:C.t0, flex:1, fontFamily:SANS }}>Source Control</span>
+        {/* Pulsing dot to show auto-polling is active */}
+        <div title="Auto-detecting git repo…" style={{ width:6, height:6, borderRadius:"50%", background:C.t3, animation:"gitpulse 2s ease-in-out infinite", marginRight:4 }} />
         <button onClick={onClose}
           style={{ width:28, height:28, display:"flex", alignItems:"center", justifyContent:"center", background:"none", border:"none", color:C.t2, fontSize:14, borderRadius:8, cursor:"pointer", transition:"all .1s" }}
           onMouseEnter={e => { const el=e.currentTarget as HTMLElement; el.style.background=C.bg3; el.style.color=C.t0; }}
           onMouseLeave={e => { const el=e.currentTarget as HTMLElement; el.style.background="transparent"; el.style.color=C.t2; }}>✕</button>
       </div>
+
       {/* Body */}
       <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:12, padding:24 }}>
+
         <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
         </svg>
+
         <span style={{ fontSize:13, fontWeight:600, color:C.t1, fontFamily:SANS }}>No Git repository</span>
-        <span style={{ fontSize:11, color:C.t3, fontFamily:SANS, textAlign:"center", lineHeight:1.6 }}>
-          This folder is not a Git repository.<br/>Initialize one to use source control.
+
+        <span style={{ fontSize:11, color:C.t3, fontFamily:SANS, textAlign:"center", lineHeight:1.7 }}>
+          Run this in the terminal — the panel will<br/>
+          <strong style={{ color:C.t2 }}>update automatically</strong> once detected.
         </span>
-        <button
-          onClick={async () => {
-            try { await invoke("git_init", { cwd: "" }); } catch { /**/ }
-          }}
-          style={{ marginTop:4, padding:"8px 20px", borderRadius:8, background:"transparent", border:`1px solid ${C.borderMd}`, color:C.t1, fontSize:12, fontFamily:SANS, cursor:"pointer", transition:"all .12s" }}
-          onMouseEnter={e => { const el=e.currentTarget as HTMLElement; el.style.background=C.bg3; el.style.color=C.t0; }}
-          onMouseLeave={e => { const el=e.currentTarget as HTMLElement; el.style.background="transparent"; el.style.color=C.t1; }}>
-          Initialize Repository
-        </button>
+
+        {/* Command box */}
+        <div style={{ width:"100%", boxSizing:"border-box" as const, background:C.bg0, border:`1px solid ${C.border}`, borderRadius:8, padding:"10px 12px", display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ fontSize:13, fontFamily:MONO, color:C.t0, flex:1 }}>git init</span>
+          <button onClick={handleCopy}
+            style={{ flexShrink:0, padding:"4px 12px", background: copied ? C.green + "22" : "transparent", border:`1px solid ${copied ? C.green : C.borderMd}`, borderRadius:6, color: copied ? C.green : C.t1, fontSize:10, fontFamily:SANS, cursor:"pointer", transition:"all .15s", whiteSpace:"nowrap" as const }}
+            onMouseEnter={e => { if (!copied) { const el=e.currentTarget as HTMLElement; el.style.background=C.bg3; el.style.color=C.t0; } }}
+            onMouseLeave={e => { if (!copied) { const el=e.currentTarget as HTMLElement; el.style.background="transparent"; el.style.color=C.t1; } }}>
+            {copied ? "✓ Copied" : "Copy"}
+          </button>
+        </div>
+
+        {/* Folder */}
+        <div style={{ width:"100%", boxSizing:"border-box" as const }}>
+          <div style={{ fontSize:9, fontFamily:MONO, color:C.t3, letterSpacing:".08em", marginBottom:4 }}>IN FOLDER</div>
+          <span style={{ fontSize:10, fontFamily:MONO, color:C.t2, background:C.bg2, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 10px", wordBreak:"break-all" as const, display:"block" }}>
+            {cwd}
+          </span>
+        </div>
+
+        {/* Steps — step 4 updated: no need to reopen */}
+        <div style={{ width:"100%", background:C.bg2, border:`1px solid ${C.border}`, borderRadius:8, padding:"10px 12px", display:"flex", flexDirection:"column", gap:6 }}>
+          {[
+            "1. Click Copy above",
+            "2. Open the terminal (w1 tab)",
+            "3. Paste & press Enter",
+            "4. This panel updates automatically ✓",
+          ].map((step, i) => (
+            <div key={i} style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <div style={{ width:5, height:5, borderRadius:"50%", background: i === 3 ? C.green : C.t3, flexShrink:0 }} />
+              <span style={{ fontSize:11, fontFamily:SANS, color: i === 3 ? C.green : C.t2 }}>{step}</span>
+            </div>
+          ))}
+        </div>
       </div>
+      <style>{`
+        @keyframes gitspin  { to { transform: rotate(360deg); } }
+        @keyframes gitpulse { 0%,100% { opacity:.3; } 50% { opacity:1; } }
+      `}</style>
     </div>
   );
 }
@@ -89,12 +148,38 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
 
   const showNotice = (text: string, ok: boolean) => { setNotice({ text, ok }); setTimeout(() => setNotice(null), 3000); };
 
-  // ── Detect git repo first ─────────────────────────────────────────────────
+  // ── Detect git repo — auto-init if missing ───────────────────────────────
   useEffect(() => {
-    invoke<string>("git_current_branch", { cwd: runboxCwd })
-      .then(b => setIsGitRepo(!!b))
-      .catch(() => setIsGitRepo(false));
-  }, [runboxCwd]);
+    const detect = async () => {
+      // Strategy 1: branch name returned = definitely a git repo
+      try {
+        const b = await invoke<string>("git_current_branch", { cwd: runboxCwd });
+        if (b && b.trim().length > 0) { setIsGitRepo(true); return; }
+      } catch { /* not git */ }
+
+      // Strategy 2: worktree list with at least one entry = git repo
+      try {
+        const wts = await invoke<any[]>("git_worktree_list", { cwd: runboxCwd });
+        if (Array.isArray(wts) && wts.length > 0) { setIsGitRepo(true); return; }
+      } catch { /* not git */ }
+
+      // No git repo — silently auto-init
+      try {
+        await invoke("git_init", { cwd: runboxCwd });
+        // Re-check after init
+        const b2 = await invoke<string>("git_current_branch", { cwd: runboxCwd });
+        if (b2 && b2.trim().length > 0) { setIsGitRepo(true); return; }
+        const wts2 = await invoke<any[]>("git_worktree_list", { cwd: runboxCwd });
+        if (Array.isArray(wts2) && wts2.length > 0) { setIsGitRepo(true); return; }
+        // init succeeded but branch still empty (fresh repo) — still treat as git repo
+        setIsGitRepo(true);
+      } catch {
+        // git_init not available — fall back to showing NoGitPane
+        setIsGitRepo(false);
+      }
+    };
+    detect();
+  }, [runboxCwd, runboxId]);
 
   const loadFiles     = useCallback(() => { invoke<LiveDiffFile[]>("git_diff_live", { cwd:runboxCwd, runboxId }).then(f => setFiles(f.sort((a,b)=>(b.modified_at||0)-(a.modified_at||0)))).catch(() => {}); }, [runboxCwd, runboxId]);
   const loadCommits   = useCallback(() => { invoke<GitCommit[]>("git_log_for_runbox", { cwd:runboxCwd, runboxId }).then(setCommits).catch(() => {}); }, [runboxCwd, runboxId]);
@@ -136,7 +221,7 @@ export function GitWorktreePanel({ runboxCwd, runboxId, branch, onClose, onFileC
   }
 
   // ── No git repo ───────────────────────────────────────────────────────────
-  if (!isGitRepo) return <NoGitPane onClose={onClose} />;
+  if (!isGitRepo) return <NoGitPane cwd={runboxCwd} onClose={onClose} onInitDone={() => setIsGitRepo(null)} />;
 
   const handleCommit = async () => {
     if (!message.trim()) { textRef.current?.focus(); return; }

@@ -114,6 +114,7 @@ pub fn run() {
             git::commands::git_watch_start,
             git::commands::git_watch_stop,
             git::commands::git_push,
+            git::commands::git_init,
             git::commands::git_stage_file,
             git::commands::git_unstage_file,
             git::commands::git_conflicts,

@@ -4,7 +4,7 @@ use tauri::Emitter;
 use super::{
     diff::{diff_for_commit, diff_live, clear_cache_for, LiveDiffFile},
     log::{log_for_runbox, GitCommit},
-    repo::{ensure_git_repo, git, git_dir_opt, has_git, remove_worktree},
+    repo::{ensure_git_repo, git, git_dir_opt, has_git, init_real_repo, remove_worktree},
 };
 
 #[tauri::command]
@@ -12,6 +12,11 @@ pub async fn git_ensure(cwd: String, runbox_id: String) -> Result<bool, String> 
     let had = has_git(&cwd, &runbox_id);
     ensure_git_repo(&cwd, &runbox_id)?;
     Ok(!had)
+}
+
+#[tauri::command]
+pub async fn git_init(cwd: String) -> Result<(), String> {
+    init_real_repo(&cwd)
 }
 
 #[tauri::command]
@@ -36,18 +41,55 @@ pub async fn git_worktree_create(
     cwd: String, branch: String, wt_name: String,
 ) -> Result<String, String> {
     let cwd_path = std::path::Path::new(&cwd);
+
+    // Derive prefix from the actual workspace/folder name
+    // e.g. cwd = /projects/my-app  →  folder_name = "my-app"
+    // Final worktree folder = /projects/my-app-feature
+    let folder_name = cwd_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("worktree");
+
+    // Auto-init if no .git exists — no manual git init needed
     if !cwd_path.join(".git").exists() {
-        return Err("No .git found — init a repo first.".to_string());
+        init_real_repo(&cwd).map_err(|e| format!("auto git init failed: {e}"))?;
     }
+
     let parent  = cwd_path.parent().ok_or("cwd has no parent")?;
-    let wt_path = parent.join(format!("stackbox-wt-{wt_name}"));
+
+    // {workspace-name}-{user-supplied-name}
+    // e.g. my-app-feature, my-app-hotfix, my-app-bugfix
+    let wt_path = parent.join(format!("{folder_name}-{wt_name}"));
     let wt_str  = wt_path.to_str().ok_or("non-UTF8 path")?;
+
+    // Already exists — idempotent
     if wt_path.exists() { return Ok(wt_str.to_string()); }
+
+    // Try creating with a new branch
     let out = std::process::Command::new("git")
         .args(["worktree", "add", "-b", &branch, wt_str, "HEAD"])
-        .current_dir(&cwd).output().map_err(|e| e.to_string())?;
-    if out.status.success() { Ok(wt_str.to_string()) }
-    else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        eprintln!("[git] worktree created: {wt_str} on branch {branch}");
+        return Ok(wt_str.to_string());
+    }
+
+    // Branch already exists — try without -b
+    let out2 = std::process::Command::new("git")
+        .args(["worktree", "add", wt_str, &branch])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out2.status.success() {
+        eprintln!("[git] worktree attached: {wt_str} on existing branch {branch}");
+        return Ok(wt_str.to_string());
+    }
+
+    Err(String::from_utf8_lossy(&out2.stderr).trim().to_string())
 }
 
 #[tauri::command]
@@ -60,7 +102,9 @@ pub async fn git_worktree_remove(wt_path: String) -> Result<(), String> {
 pub async fn git_current_branch(cwd: String) -> Result<String, String> {
     let out = std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(&cwd).output().map_err(|e| e.to_string())?;
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
@@ -87,9 +131,9 @@ pub async fn git_stage_and_commit(
         return Err("nothing to commit — working tree clean".to_string());
     }
 
-    let out   = git(&["commit", "-m", message.trim()], &cwd, gdo)?;
-    let hash  = git(&["rev-parse", "--short", "HEAD"], &cwd, gdo).unwrap_or_default();
-    let short = hash.trim();
+    let out     = git(&["commit", "-m", message.trim()], &cwd, gdo)?;
+    let hash    = git(&["rev-parse", "--short", "HEAD"], &cwd, gdo).unwrap_or_default();
+    let short   = hash.trim();
     let summary = out.lines().next().unwrap_or("").trim().to_string();
 
     eprintln!("[git] committed in {cwd}: [{short}] {summary}");
@@ -170,7 +214,9 @@ pub struct WorktreeEntry {
 pub async fn git_worktree_list(cwd: String) -> Result<Vec<WorktreeEntry>, String> {
     let out = std::process::Command::new("git")
         .args(["worktree", "list", "--porcelain"])
-        .current_dir(&cwd).output().map_err(|e| e.to_string())?;
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
@@ -185,7 +231,10 @@ pub async fn git_worktree_list(cwd: String) -> Result<Vec<WorktreeEntry>, String
     for line in text.lines() {
         if line.is_empty() {
             if !path.is_empty() {
-                entries.push(WorktreeEntry { path: path.clone(), branch: branch.clone(), head: head.clone(), is_main: first, is_bare, is_locked });
+                entries.push(WorktreeEntry {
+                    path: path.clone(), branch: branch.clone(),
+                    head: head.clone(), is_main: first, is_bare, is_locked,
+                });
                 path.clear(); branch.clear(); head.clear();
                 is_bare = false; is_locked = false; first = false;
             }
@@ -215,15 +264,12 @@ pub async fn git_watch_stop(cwd: String) -> Result<(), String> {
     Ok(())
 }
 
-// ── NEW: conflict detection ───────────────────────────────────────────────────
-
 #[derive(serde::Serialize)]
 pub struct ConflictFile {
     pub path:   String,
     pub status: String,
 }
 
-/// Returns files with merge conflict status (UU / AA / DD / AU / UA / DU / UD).
 #[tauri::command]
 pub async fn git_conflicts(cwd: String) -> Result<Vec<ConflictFile>, String> {
     let out = std::process::Command::new("git")
@@ -246,9 +292,6 @@ pub async fn git_conflicts(cwd: String) -> Result<Vec<ConflictFile>, String> {
         .collect())
 }
 
-// ── NEW: branch list ──────────────────────────────────────────────────────────
-
-/// List all local and remote branches.
 #[tauri::command]
 pub async fn git_branches(cwd: String) -> Result<Vec<String>, String> {
     let out = std::process::Command::new("git")
@@ -266,12 +309,8 @@ pub async fn git_branches(cwd: String) -> Result<Vec<String>, String> {
         .collect())
 }
 
-// ── NEW: checkout / switch branch ─────────────────────────────────────────────
-
-/// Switch to a branch. Creates it if it doesn't exist locally but exists on remote.
 #[tauri::command]
 pub async fn git_checkout(cwd: String, branch: String) -> Result<(), String> {
-    // Try direct checkout first
     let out = std::process::Command::new("git")
         .args(["checkout", &branch])
         .current_dir(&cwd)
@@ -282,7 +321,6 @@ pub async fn git_checkout(cwd: String, branch: String) -> Result<(), String> {
 
     let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
 
-    // If branch doesn't exist locally, try tracking from origin
     let out2 = std::process::Command::new("git")
         .args(["checkout", "-b", &branch, &format!("origin/{branch}")])
         .current_dir(&cwd)
@@ -294,10 +332,6 @@ pub async fn git_checkout(cwd: String, branch: String) -> Result<(), String> {
     Err(err)
 }
 
-// ── NEW: diff between worktrees ───────────────────────────────────────────────
-
-/// Show a diff between the HEAD commits of two worktrees.
-/// Returns stat + full diff (capped at 200 lines for display).
 #[tauri::command]
 pub async fn git_diff_between_worktrees(
     cwd:       String,
@@ -323,7 +357,6 @@ pub async fn git_diff_between_worktrees(
         return Ok("Worktrees are at the same commit — no differences.".to_string());
     }
 
-    // Stat summary
     let stat_out = std::process::Command::new("git")
         .args(["diff", "--stat", &cur_hash, &other_hash])
         .current_dir(&cwd)
@@ -331,7 +364,6 @@ pub async fn git_diff_between_worktrees(
         .map_err(|e| e.to_string())?;
     let stat = String::from_utf8_lossy(&stat_out.stdout).trim().to_string();
 
-    // Full diff capped at 200 lines
     let diff_out = std::process::Command::new("git")
         .args(["diff", &cur_hash, &other_hash])
         .current_dir(&cwd)

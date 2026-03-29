@@ -50,6 +50,64 @@ pub fn git_dir_opt(cwd: &str, runbox_id: &str) -> Option<String> {
     if Path::new(&shadow).exists() { Some(shadow) } else { None }
 }
 
+// ── NEW: Real (non-bare) git init ─────────────────────────────────────────────
+//
+// This is what the frontend calls when no .git exists.
+// Creates a proper .git folder, sets a local user config so commits work
+// even on machines with no global git config, and makes an initial empty
+// commit — which is required before `git worktree add` can succeed.
+pub fn init_real_repo(cwd: &str) -> Result<(), String> {
+    // 1. git init  →  creates .git/
+    let out = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("git init: {e}"))?;
+
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    // 2. Ensure a user identity exists locally so commits never fail with
+    //    "Please tell me who you are." on a fresh machine / CI environment.
+    //    We only set it if there is no global config already.
+    let has_global_email = std::process::Command::new("git")
+        .args(["config", "--global", "user.email"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !has_global_email {
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.email", "stackbox@local"])
+            .current_dir(cwd)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.name", "Stackbox"])
+            .current_dir(cwd)
+            .output();
+    }
+
+    // 3. Initial empty commit — WITHOUT this, `git worktree add` will fail
+    //    because HEAD points to an unborn branch with no commits yet.
+    let commit_out = std::process::Command::new("git")
+        .args(["commit", "--allow-empty", "-m", "stackbox: init"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("git commit: {e}"))?;
+
+    if !commit_out.status.success() {
+        // Non-fatal: repo is still valid, worktrees just may not work yet
+        eprintln!(
+            "[git] init commit warning: {}",
+            String::from_utf8_lossy(&commit_out.stderr).trim()
+        );
+    }
+
+    eprintln!("[git] real repo initialized at {cwd}");
+    Ok(())
+}
+
 pub fn ensure_git_repo(cwd: &str, runbox_id: &str) -> Result<String, String> {
     let dot_git = Path::new(cwd).join(".git");
     if dot_git.is_dir() { return Ok(dot_git.to_string_lossy().to_string()); }
@@ -93,7 +151,7 @@ pub fn ensure_worktree(cwd: &str, runbox_id: &str) -> Option<String> {
         return Some(wt_str);
     }
 
-    // Branch may already exist
+    // Branch may already exist — try without -b
     let out2 = std::process::Command::new("git")
         .args(["worktree", "add", &wt_str, &branch])
         .current_dir(cwd).output().ok()?;
