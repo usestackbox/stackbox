@@ -50,7 +50,16 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            protobuf-compiler
+
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc
 
       - name: Install frontend deps
         working-directory: desktop
@@ -74,9 +83,9 @@ jobs:
             ## Install
 
             **Quick install (macOS/Linux):**
-            ```sh
+```sh
             curl -fsSL https://usestackbox.github.io/stackbox/install.sh | sh
-            ```
+```
 
             Or download the installer for your platform below.
           releaseDraft: true
