@@ -14,10 +14,8 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       release_id: ${{ steps.create-release.outputs.releaseId }}
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Create Release
         id: create-release
         uses: tauri-apps/tauri-action@v0
@@ -41,6 +39,7 @@ jobs:
             Or download the installer for your platform below.
           releaseDraft: true
           prerelease: false
+          skipBuild: true
 
   build:
     needs: create-release
