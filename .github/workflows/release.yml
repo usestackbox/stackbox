@@ -82,10 +82,9 @@ jobs:
 
             ## Install
 
-            **Quick install (macOS/Linux):**
-```sh
+            Quick install (macOS/Linux):
+
             curl -fsSL https://usestackbox.github.io/stackbox/install.sh | sh
-```
 
             Or download the installer for your platform below.
           releaseDraft: true
