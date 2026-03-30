@@ -4,7 +4,7 @@ use tauri::AppHandle;
 use crate::{
     agent::kind::AgentKind,
     db::sessions::session_end,
-    git::repo::remove_worktree,
+    git::repo::{ensure_git_repo, ensure_worktree, has_git, remove_worktree},
     pty::{self, expand_cwd},
     state::AppState,
 };
@@ -18,10 +18,45 @@ pub async fn pty_spawn(
     agent_cmd:  Option<String>,
     cols:       Option<u16>,
     rows:       Option<u16>,
-    docker:     Option<bool>,   // ← NEW: passed from frontend workspace card
+    docker:     Option<bool>,
     state:      tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    pty::spawn(app, session_id, runbox_id, cwd, agent_cmd, cols, rows, docker.unwrap_or(false), &state).await
+    // ── 1. Resolve the real cwd (expands ~ etc.) ──────────────────────────────
+    let real_cwd = expand_cwd(&cwd);
+
+    // ── 2. Ensure git repo + eagerly create the agent's worktree ─────────────
+    //
+    // Only do this when there is already a .git (or a shadow repo) at cwd.
+    // We never auto-init here — that stays an explicit user action.
+    let worktree_path: Option<String> = if has_git(&real_cwd, &runbox_id) {
+        let _ = ensure_git_repo(&real_cwd, &runbox_id);
+        let wt = ensure_worktree(&real_cwd, &runbox_id);
+
+        // Persist worktree path to DB so cleanup and the frontend can read it
+        if let Some(ref wt_path) = wt {
+            let _ = crate::db::runboxes::runbox_set_worktree(
+                &state.db, &runbox_id, Some(wt_path.as_str()),
+            );
+            eprintln!("[pty_spawn] worktree ready for {runbox_id}: {wt_path}");
+        }
+        wt
+    } else {
+        None
+    };
+
+    // ── 3. Terminal starts INSIDE the worktree, not the raw workspace ─────────
+    //
+    // If a worktree was created the terminal's cwd is the isolated checkout.
+    // If not (no git yet, shadow repo, docker) the terminal uses the raw cwd.
+    let effective_cwd = worktree_path
+        .as_deref()
+        .unwrap_or(&real_cwd)
+        .to_string();
+
+    pty::spawn(
+        app, session_id, runbox_id, effective_cwd,
+        agent_cmd, cols, rows, docker.unwrap_or(false), &state,
+    ).await
 }
 
 #[tauri::command]
@@ -73,6 +108,8 @@ pub fn pty_write(
     }
 
     if let Some((rb, cwd, kind)) = inject {
+        // Note: `cwd` here is already the worktree path (set in pty_spawn).
+        // context::inject writes CLAUDE.md / AGENTS.md etc. into the worktree.
         let sid = session_id.clone();
         let db  = state.db.clone();
         tauri::async_runtime::spawn(async move {

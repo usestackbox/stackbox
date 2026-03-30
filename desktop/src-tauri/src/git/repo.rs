@@ -129,19 +129,36 @@ pub fn ensure_git_repo(cwd: &str, runbox_id: &str) -> Result<String, String> {
     Ok(shadow)
 }
 
-/// Auto-create an isolated worktree for a runbox agent session.
-/// Returns None if cwd has no real .git (shadow repos don't support worktrees).
+/// Create (or return existing) an isolated git worktree for one agent session.
+///
+/// Layout:
+///   cwd              = /projects/my-app          (main repo, shared read-only reference)
+///   worktree         = /projects/stackbox-wt-{short}  (agent's private checkout)
+///   branch           = stackbox/{short}
+///
+/// The agent must do ALL file writes inside the returned worktree path,
+/// never inside `cwd` directly.  Two terminals opening the same runbox_id
+/// get the same path back — that is intentional (same agent = same worktree).
+///
+/// Returns None only when cwd has no real .git directory (shadow repos don't
+/// support worktrees).
 pub fn ensure_worktree(cwd: &str, runbox_id: &str) -> Option<String> {
     if !Path::new(cwd).join(".git").exists() { return None; }
 
+    // Use first 8 chars for readable folder names, still unique enough for one repo
     let short   = &runbox_id[..runbox_id.len().min(8)];
     let branch  = format!("stackbox/{short}");
     let parent  = Path::new(cwd).parent()?;
     let wt_path = parent.join(format!("stackbox-wt-{short}"));
     let wt_str  = wt_path.to_str()?.to_string();
 
-    if wt_path.exists() { return Some(wt_str); }
+    // Idempotent — already exists means agent was already set up
+    if wt_path.exists() {
+        eprintln!("[git] worktree already exists: {wt_str}");
+        return Some(wt_str);
+    }
 
+    // First time — create the worktree on a new branch from HEAD
     let out = std::process::Command::new("git")
         .args(["worktree", "add", "-b", &branch, &wt_str, "HEAD"])
         .current_dir(cwd).output().ok()?;
@@ -151,12 +168,15 @@ pub fn ensure_worktree(cwd: &str, runbox_id: &str) -> Option<String> {
         return Some(wt_str);
     }
 
-    // Branch may already exist — try without -b
+    // Branch already exists (agent was restarted) — attach without -b
     let out2 = std::process::Command::new("git")
         .args(["worktree", "add", &wt_str, &branch])
         .current_dir(cwd).output().ok()?;
 
-    if out2.status.success() { Some(wt_str) } else {
+    if out2.status.success() {
+        eprintln!("[git] worktree reattached: {wt_str} on existing branch {branch}");
+        Some(wt_str)
+    } else {
         eprintln!("[git] worktree add failed: {}", String::from_utf8_lossy(&out2.stderr).trim());
         None
     }

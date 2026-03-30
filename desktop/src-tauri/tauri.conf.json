@@ -14,17 +14,17 @@
       {
         "label": "main",
         "width": 1280,
-        "height": 800,
+        "height": 700,
         "minWidth": 800,
         "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
-        "decorations": true,
+        "decorations": false,
         "transparent": false,
         "focus": true,
         "visible": true,
         "titleBarStyle": "Overlay",
-        "title": ""
+        "title": "Stackbox"
       }
     ],
     "security": {

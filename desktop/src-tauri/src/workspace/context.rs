@@ -18,6 +18,31 @@ pub async fn rewrite_context(
     Ok(())
 }
 
+/// Derives the git branch name from the worktree path.
+/// stackbox-wt-abc123  →  stackbox/abc123
+/// Falls back to reading HEAD directly if path doesn't match the pattern.
+fn branch_from_worktree(cwd: &str) -> String {
+    // Try to read branch from git directly — most reliable
+    if let Ok(out) = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(cwd)
+        .output()
+    {
+        let b = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !b.is_empty() && b != "HEAD" {
+            return b;
+        }
+    }
+
+    // Fallback: derive from folder name
+    std::path::Path::new(cwd)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_prefix("stackbox-wt-"))
+        .map(|short| format!("stackbox/{short}"))
+        .unwrap_or_else(|| "stackbox/unknown".to_string())
+}
+
 pub async fn build(
     _db:        &crate::db::Db,
     runbox_id:  &str,
@@ -27,6 +52,7 @@ pub async fn build(
 ) -> Result<String, String> {
     let short_sid  = &session_id[..session_id.len().min(8)];
     let agent_name = agent.display_name();
+    let branch     = branch_from_worktree(cwd);
 
     let pane_port: u16 = {
         let mut hash: u32 = 0x811c9dc5;
@@ -56,6 +82,53 @@ r#"# Stackbox — {agent_name}
 > session `{short_sid}` · runbox `{runbox_id}` · port `{pane_port}`
 
 {memory_block}
+---
+
+## Your Worktree
+
+You are working in an **isolated git worktree**. This is your private checkout.
+No other agent can see or touch the files in this directory.
+
+- **Worktree path:** `{cwd}`
+- **Your branch:**   `{branch}`
+- **Main repo:**     parent directory above your worktree
+
+All file reads and writes happen here. Do not navigate outside this directory.
+Do not touch the main workspace folder directly.
+
+---
+
+## Git & PR
+
+Your branch `{branch}` is isolated. When your task is complete:
+
+### 1. Commit your work
+```
+git add -A
+git commit -m "describe what you did"
+```
+
+### 2. Push and open a PR
+```
+gh pr create --title "stackbox: your task title" --body "what you changed" --base main
+```
+
+If `gh` is not installed, just push the branch:
+```
+git push origin {branch}
+```
+Then tell the user the branch name so they can open the PR manually.
+
+### 3. After the PR is merged
+The system will pull the merged changes back automatically.
+You do not need to do anything after the PR is merged.
+
+### Rules
+- Always commit before ending your session — uncommitted work is lost on cleanup.
+- Never push directly to `main`. Your branch is `{branch}`.
+- One PR per agent session. Do not create multiple PRs.
+- If the PR already exists, `gh pr create` will tell you — run `gh pr view` to get the URL.
+
 ---
 
 ## You have a memory system. Use it.
@@ -165,11 +238,12 @@ When your task is complete, before you stop, write one paragraph:
 session_summary(text="Converted styles.css and all components under components/ui/
 to black/white palette. Changed 34 colour variables. Node v18, port {pane_port}.
 Did not touch login-app/app.js per LOCKED rule.
+Branch: {branch} — PR opened, waiting for review.
 Next: test mobile viewport at 375px, check button contrast ratios pass WCAG AA.")
 ```
 
 Cover: what you changed · what you used (port, node version, key commands) ·
-what you deliberately did not touch · what still needs doing.
+what you deliberately did not touch · branch and PR status · what still needs doing.
 
 The next agent starts their session and sees your summary first. Make it the brief
 you would want to read if you were coming in cold.
@@ -194,9 +268,10 @@ Do not guess. This port is stable across sessions for this runbox.
 - One fact per remember call. Key=value format where possible.
 - LOCKED rules are absolute. Stop and tell the user if they block the task.
 - session_log after each step. Prefix with [step] [done] [error] [blocked].
-- session_summary when done. One paragraph. Assume the next agent reads nothing else.
+- session_summary when done. One paragraph. Include branch and PR status.
 - Never create temporary files like payload.json, fix.py, rewrite_app.js.
 - Port is {pane_port}. Not 3000.
+- Commit before ending. Branch is {branch}. Never push to main.
 
 ---
 
@@ -207,5 +282,7 @@ Do not guess. This port is stable across sessions for this runbox.
         runbox_id    = runbox_id,
         pane_port    = pane_port,
         memory_block = memory_block,
+        cwd          = cwd,
+        branch       = branch,
     ))
 }

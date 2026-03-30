@@ -4,14 +4,53 @@ use tauri::Emitter;
 use super::{
     diff::{diff_for_commit, diff_live, clear_cache_for, LiveDiffFile},
     log::{log_for_runbox, GitCommit},
-    repo::{ensure_git_repo, git, git_dir_opt, has_git, init_real_repo, remove_worktree},
+    repo::{ensure_git_repo, ensure_worktree, git, git_dir_opt, has_git, init_real_repo, remove_worktree},
 };
 
+/// Returned by git_ensure so the frontend/agent knows:
+///   - whether git was freshly initialised this call
+///   - the worktree path the agent should use for ALL its file operations
+#[derive(serde::Serialize)]
+pub struct GitEnsureResult {
+    /// true if the git repo was created for the first time right now
+    pub is_new:        bool,
+    /// The isolated worktree path for this agent, e.g. /projects/stackbox-wt-abc123
+    /// None only when the cwd has no real .git yet (shadow-repo path — no worktrees possible)
+    pub worktree_path: Option<String>,
+    /// The branch name inside the worktree, e.g. "stackbox/abc123"
+    pub branch:        Option<String>,
+}
+
+/// Called once when an agent (runbox) starts.
+///
+/// 1. Ensures a git repo exists at `cwd` (creates shadow repo if needed).
+/// 2. Eagerly creates an isolated worktree for this agent if a real .git exists.
+/// 3. Returns the worktree path so the agent knows exactly where to work.
 #[tauri::command]
-pub async fn git_ensure(cwd: String, runbox_id: String) -> Result<bool, String> {
-    let had = has_git(&cwd, &runbox_id);
+pub async fn git_ensure(cwd: String, runbox_id: String) -> Result<GitEnsureResult, String> {
+    let is_new = !has_git(&cwd, &runbox_id);
     ensure_git_repo(&cwd, &runbox_id)?;
-    Ok(!had)
+
+    let worktree_path = ensure_worktree(&cwd, &runbox_id);
+
+    let short  = &runbox_id[..runbox_id.len().min(8)];
+    let branch = worktree_path.as_ref().map(|_| format!("stackbox/{short}"));
+
+    if let Some(ref wt) = worktree_path {
+        eprintln!("[git_ensure] agent {short} → worktree: {wt}");
+    } else {
+        eprintln!("[git_ensure] agent {short} → no worktree (shadow repo or no .git)");
+    }
+
+    Ok(GitEnsureResult { is_new, worktree_path, branch })
+}
+
+/// Lightweight query — returns the worktree path for an agent that is already running.
+/// Use this when a second terminal connects to an existing agent so it can
+/// navigate to the same worktree without calling git_ensure again.
+#[tauri::command]
+pub async fn git_agent_worktree(cwd: String, runbox_id: String) -> Result<Option<String>, String> {
+    Ok(ensure_worktree(&cwd, &runbox_id))
 }
 
 #[tauri::command]
@@ -36,36 +75,267 @@ pub async fn git_diff_live(cwd: String, runbox_id: String) -> Result<Vec<LiveDif
     diff_live(&cwd, &runbox_id)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PR — push branch + open PR via gh CLI
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Returned by git_push_pr and git_pull_merged so the frontend always gets
+/// a structured response it can display.
+#[derive(serde::Serialize)]
+pub struct PrResult {
+    /// The PR URL (GitHub) or remote branch compare URL (fallback)
+    pub url:       String,
+    /// The branch that was pushed / merged
+    pub branch:    String,
+    /// true = real PR was created/found, false = only branch was pushed
+    pub is_pr:     bool,
+    /// Human-readable status line for the frontend to display
+    pub status:    String,
+}
+
+/// Push the agent's worktree branch and open a Pull Request via the `gh` CLI.
+///
+/// Flow:
+///   1. Determine the current branch (must be stackbox/*)
+///   2. Push to origin (set upstream on first push)
+///   3. Create PR via `gh pr create` if gh is installed
+///   4. If PR already exists, return the existing URL
+///   5. If gh is not installed, return a GitHub compare URL as fallback
+#[tauri::command]
+pub async fn git_push_pr(
+    cwd:         String,
+    runbox_id:   String,
+    title:       Option<String>,
+    body:        Option<String>,
+    base_branch: Option<String>,
+) -> Result<PrResult, String> {
+    let gdo_owned = git_dir_opt(&cwd, &runbox_id);
+    let gdo: Option<&str> = gdo_owned.as_deref();
+
+    // ── 1. Determine current branch ──────────────────────────────────────────
+    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"], &cwd, gdo)
+        .unwrap_or_default();
+    let branch = branch.trim().to_string();
+
+    if branch.is_empty() || branch == "HEAD" {
+        return Err("Not on a named branch — cannot push PR.".to_string());
+    }
+
+    // ── 2. Guard: only create PRs from agent branches ────────────────────────
+    if !branch.starts_with("stackbox/") {
+        return Err(format!(
+            "PRs are only created from agent branches (stackbox/*). Current branch: {branch}"
+        ));
+    }
+
+    // ── 3. Push the branch ───────────────────────────────────────────────────
+    let remotes = git(&["remote"], &cwd, gdo).unwrap_or_default();
+    if !remotes.lines().any(|l| l.trim() == "origin") {
+        return Err("No remote 'origin' configured. Add a remote first.".to_string());
+    }
+
+    let push_result = git(&["push", "origin", &branch], &cwd, gdo);
+    if let Err(e) = push_result {
+        if e.contains("no upstream") || e.contains("--set-upstream") {
+            git(&["push", "--set-upstream", "origin", &branch], &cwd, gdo)?;
+        } else {
+            return Err(format!("push failed: {e}"));
+        }
+    }
+    eprintln!("[git_push_pr] pushed branch {branch}");
+
+    // ── 4. Build PR title/body ────────────────────────────────────────────────
+    let base = base_branch.as_deref().unwrap_or("main");
+
+    let pr_title = title.unwrap_or_else(|| {
+        branch
+            .strip_prefix("stackbox/")
+            .map(|s| format!("stackbox: {s}"))
+            .unwrap_or_else(|| branch.clone())
+    });
+
+    let pr_body = body.unwrap_or_else(|| {
+        format!("Automated PR from Stackbox agent branch `{branch}`.")
+    });
+
+    // ── 5. Try gh CLI ─────────────────────────────────────────────────────────
+    let gh_available = std::process::Command::new("gh")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !gh_available {
+        let remote_url = git(&["remote", "get-url", "origin"], &cwd, gdo)
+            .unwrap_or_default();
+        let remote_url = remote_url.trim();
+        let https_url = remote_url
+            .replace("git@github.com:", "https://github.com/")
+            .trim_end_matches(".git")
+            .to_string();
+        let compare_url = if https_url.contains("github.com") {
+            format!("{https_url}/compare/{base}...{branch}?expand=1")
+        } else {
+            https_url
+        };
+        eprintln!("[git_push_pr] gh CLI not found — returning compare URL");
+        return Ok(PrResult {
+            url:    compare_url,
+            branch,
+            is_pr:  false,
+            status: "Branch pushed. Open the URL to create a PR manually.".to_string(),
+        });
+    }
+
+    // Run: gh pr create
+    let gh_out = std::process::Command::new("gh")
+        .args(["pr", "create",
+               "--title", &pr_title,
+               "--body",  &pr_body,
+               "--base",  base,
+               "--head",  &branch])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh exec: {e}"))?;
+
+    if gh_out.status.success() {
+        let url = String::from_utf8_lossy(&gh_out.stdout).trim().to_string();
+        eprintln!("[git_push_pr] PR created: {url}");
+        return Ok(PrResult {
+            url,
+            branch,
+            is_pr:  true,
+            status: "PR created.".to_string(),
+        });
+    }
+
+    let err = String::from_utf8_lossy(&gh_out.stderr).trim().to_string();
+
+    // PR already exists — return existing URL
+    if err.contains("already exists") {
+        let view_out = std::process::Command::new("gh")
+            .args(["pr", "view", &branch, "--json", "url", "--jq", ".url"])
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("gh pr view: {e}"))?;
+        let url = String::from_utf8_lossy(&view_out.stdout).trim().to_string();
+        eprintln!("[git_push_pr] PR already open: {url}");
+        return Ok(PrResult {
+            url,
+            branch,
+            is_pr:  true,
+            status: "PR already open.".to_string(),
+        });
+    }
+
+    Err(format!("gh pr create failed: {err}"))
+}
+
+/// Pull the merged changes back into the worktree after a PR is merged.
+///
+/// Flow:
+///   1. Fetch latest from origin
+///   2. Check if the agent's branch is merged (via gh pr view, or merge-base fallback)
+///   3. If merged: checkout base branch + pull
+///   4. Return status so the frontend can update the UI
+#[tauri::command]
+pub async fn git_pull_merged(
+    cwd:         String,
+    runbox_id:   String,
+    base_branch: Option<String>,
+) -> Result<PrResult, String> {
+    let gdo_owned = git_dir_opt(&cwd, &runbox_id);
+    let gdo: Option<&str> = gdo_owned.as_deref();
+
+    let base = base_branch.as_deref().unwrap_or("main");
+
+    // ── 1. Determine current branch ──────────────────────────────────────────
+    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"], &cwd, gdo)
+        .unwrap_or_default();
+    let branch = branch.trim().to_string();
+
+    // ── 2. Fetch ──────────────────────────────────────────────────────────────
+    git(&["fetch", "origin"], &cwd, gdo)?;
+
+    // ── 3. Check merge status ─────────────────────────────────────────────────
+    let gh_available = std::process::Command::new("gh")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let (is_merged, pr_url) = if gh_available && branch.starts_with("stackbox/") {
+        // Ask gh for PR state
+        let state_out = std::process::Command::new("gh")
+            .args(["pr", "view", &branch, "--json", "state,url", "--jq", "[.state, .url] | @tsv"])
+            .current_dir(&cwd)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+        let mut parts = state_out.splitn(2, '\t');
+        let state = parts.next().unwrap_or("").to_uppercase();
+        let url   = parts.next().unwrap_or("").to_string();
+        (state == "MERGED", url)
+    } else {
+        // Fallback: check if agent branch tip is an ancestor of origin/base
+        let merged = git(
+            &["merge-base", "--is-ancestor",
+              &format!("origin/{branch}"),
+              &format!("origin/{base}")],
+            &cwd, gdo,
+        ).is_ok();
+        (merged, String::new())
+    };
+
+    if !is_merged {
+        return Ok(PrResult {
+            url:    pr_url,
+            branch,
+            is_pr:  true,
+            status: "PR is not merged yet. Nothing pulled.".to_string(),
+        });
+    }
+
+    // ── 4. Checkout base and pull ─────────────────────────────────────────────
+    git(&["checkout", base], &cwd, gdo)?;
+    git(&["pull", "origin", base], &cwd, gdo)?;
+
+    eprintln!("[git_pull_merged] pulled {base} after merge of {branch}");
+
+    Ok(PrResult {
+        url:    pr_url,
+        branch,
+        is_pr:  true,
+        status: format!("Merged. Worktree is now on '{base}' with latest changes."),
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Worktree management
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[tauri::command]
 pub async fn git_worktree_create(
     cwd: String, branch: String, wt_name: String,
 ) -> Result<String, String> {
     let cwd_path = std::path::Path::new(&cwd);
 
-    // Derive prefix from the actual workspace/folder name
-    // e.g. cwd = /projects/my-app  →  folder_name = "my-app"
-    // Final worktree folder = /projects/my-app-feature
     let folder_name = cwd_path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("worktree");
 
-    // Auto-init if no .git exists — no manual git init needed
     if !cwd_path.join(".git").exists() {
         init_real_repo(&cwd).map_err(|e| format!("auto git init failed: {e}"))?;
     }
 
     let parent  = cwd_path.parent().ok_or("cwd has no parent")?;
-
-    // {workspace-name}-{user-supplied-name}
-    // e.g. my-app-feature, my-app-hotfix, my-app-bugfix
     let wt_path = parent.join(format!("{folder_name}-{wt_name}"));
     let wt_str  = wt_path.to_str().ok_or("non-UTF8 path")?;
 
-    // Already exists — idempotent
     if wt_path.exists() { return Ok(wt_str.to_string()); }
 
-    // Try creating with a new branch
     let out = std::process::Command::new("git")
         .args(["worktree", "add", "-b", &branch, wt_str, "HEAD"])
         .current_dir(&cwd)
@@ -77,7 +347,6 @@ pub async fn git_worktree_create(
         return Ok(wt_str.to_string());
     }
 
-    // Branch already exists — try without -b
     let out2 = std::process::Command::new("git")
         .args(["worktree", "add", wt_str, &branch])
         .current_dir(&cwd)
@@ -111,6 +380,10 @@ pub async fn git_current_branch(cwd: String) -> Result<String, String> {
         Ok(String::new())
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Commit / push / stage
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn git_stage_and_commit(
@@ -199,6 +472,10 @@ pub async fn git_unstage_file(
     }
     Ok(())
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Worktree list / watch / conflicts / branches / checkout / diff
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
 pub struct WorktreeEntry {

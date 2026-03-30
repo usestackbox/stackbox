@@ -103,6 +103,9 @@ pub fn run() {
             commands::db::db_events_for_runbox,
             // ── Git ──────────────────────────────────────────────────────────
             git::commands::git_ensure,
+            git::commands::git_agent_worktree,       // second terminal → same worktree
+            git::commands::git_push_pr,              // push branch + open PR via gh CLI
+            git::commands::git_pull_merged,          // pull after PR is merged on GitHub
             git::commands::git_log_for_runbox,
             git::commands::git_diff_for_commit,
             git::commands::git_diff_live,
@@ -131,8 +134,8 @@ pub fn run() {
             commands::fs::fs_create_dir,
             commands::fs::fs_create_file,
             commands::fs::copy_to_clipboard,
-            commands::fs::fs_write_file,         // ← NEW
-            commands::fs::fs_search_in_files, 
+            commands::fs::fs_write_file,
+            commands::fs::fs_search_in_files,
             // ── Browser ──────────────────────────────────────────────────────
             browser::webview::browser_create,
             browser::webview::browser_destroy,
