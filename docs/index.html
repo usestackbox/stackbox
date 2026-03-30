@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stackbox — Run Every AI Agent. At Once.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <script>
+    const GITHUB_REPO = 'your-org/stackbox';
+    const YOUTUBE_ID  = 'dQw4w9WgXcQ';
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #040404;
+      --s1:      #111111;
+      --s2:      #0d0d0d;
+      --s3:      #0a0a0a;
+      --border:  #1e1e1e;
+      --border2: #2a2a2a;
+      --white:   #ffffff;
+      --soft:    #888888;
+      --muted:   #444444;
+      --dim:     #222222;
+      --accent:  #ffffff;
+      --accent2: #aaaaaa;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: #040404;
+      color: var(--white);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+      overflow-x: hidden;
+    }
+
+    /* ── BG: pure black with very subtle dot grid ── */
+    .bg-grid {
+      position: fixed; inset: 0; z-index: 2; pointer-events: none;
+      background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: radial-gradient(ellipse 85% 65% at 50% 40%, black 20%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 85% 65% at 50% 40%, black 20%, transparent 100%);
+    }
+
+    /* subtle top spot */
+    .bg-spot {
+      position: fixed; inset: 0; z-index: 3; pointer-events: none;
+      background: radial-gradient(ellipse 45% 30% at 50% -2%, rgba(255,255,255,0.025) 0%, transparent 70%);
+    }
+
+    canvas#pts { position: fixed; inset: 0; z-index: 4; pointer-events: none; }
+
+    nav, .hero, .feat-row, section, footer, hr { position: relative; z-index: 20; }
+
+    /* ══════════════ NAV ══════════════ */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      height: 58px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 2rem;
+      background: rgba(4,4,4,0.92);
+      backdrop-filter: blur(22px) saturate(160%);
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    nav::after {
+      content: '';
+      position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.12) 50%, transparent 100%);
+    }
+
+    .logo {
+      font-family: 'Pixelify Sans', sans-serif;
+      font-size: 21px; font-weight: 600;
+      color: var(--white); text-decoration: none;
+      letter-spacing: 0.06em;
+      text-shadow: none;
+    }
+    .nav-right { display: flex; align-items: center; gap: 1.25rem; }
+    .nav-link { color: var(--muted); text-decoration: none; font-size: 13px; transition: color .2s; }
+    .nav-link:hover { color: var(--white); }
+
+    .gh-btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: rgba(255,255,255,0.025);
+      border: 1px solid var(--border2);
+      color: var(--soft); font-size: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 6px 12px; border-radius: 6px; text-decoration: none;
+      transition: background .2s, border-color .2s, color .2s;
+    }
+    .gh-btn:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.25); color: var(--white); }
+    .gh-btn svg { width: 14px; height: 14px; fill: currentColor; }
+    .star-count { background: rgba(0,0,0,0.6); border-radius: 3px; padding: 1px 6px; font-size: 10px; color: var(--accent); }
+
+    .nav-dl {
+      background: #ffffff; color: #000;
+      font-size: 13px; font-weight: 600;
+      font-family: 'Pixelify Sans', sans-serif; letter-spacing: 0.05em;
+      padding: 7px 18px; border-radius: 6px; text-decoration: none;
+      box-shadow: none;
+      transition: opacity .2s;
+    }
+    .nav-dl:hover { opacity: 0.8; }
+
+    /* ══════════════ HERO ══════════════ */
+    .hero {
+      min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 115px 2rem 75px;
+    }
+
+    .hero-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px; color: var(--soft);
+      letter-spacing: 0.22em; text-transform: uppercase;
+      margin-bottom: 1.75rem;
+      display: inline-flex; align-items: center; gap: 14px;
+      opacity: 0.7;
+    }
+    .hero-tag::before { content: ''; width: 40px; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4)); }
+    .hero-tag::after  { content: ''; width: 40px; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0.4), transparent); }
+
+    h1 {
+      font-family: 'Pixelify Sans', sans-serif;
+      font-size: clamp(48px, 9vw, 110px);
+      font-weight: 700; line-height: 1.07;
+      margin-bottom: 1.3rem; color: var(--white);
+      letter-spacing: 0.02em;
+      text-shadow: none;
+    }
+    h1 .ghost {
+      color: transparent;
+      -webkit-text-stroke: 1.5px rgba(255,255,255,0.2);
+      text-shadow: none;
+    }
+
+    .hero-sub {
+      font-size: clamp(14px, 1.8vw, 17px); color: var(--muted);
+      max-width: 480px; font-weight: 300; margin: 0 auto 2.25rem; line-height: 1.85;
+    }
+
+    .hero-ctas { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 1.75rem; }
+
+    .btn-w {
+      background: #ffffff; color: #000;
+      font-weight: 600; font-size: 14px;
+      font-family: 'Pixelify Sans', sans-serif; letter-spacing: 0.05em;
+      padding: 12px 30px; border-radius: 7px; text-decoration: none;
+      transition: opacity .2s, transform .15s;
+    }
+    .btn-w:hover { opacity: 0.85; transform: translateY(-2px); }
+
+    .btn-o {
+      background: rgba(255,255,255,0.02); color: var(--muted);
+      font-size: 14px; padding: 11px 22px; border-radius: 7px;
+      border: 1px solid var(--border2); text-decoration: none;
+      transition: color .2s, border-color .2s, background .2s;
+    }
+    .btn-o:hover { color: var(--soft); border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.03); }
+
+    .agents-row { display: flex; align-items: center; gap: 6px; justify-content: center; flex-wrap: wrap; margin-bottom: 2.75rem; }
+    .agents-label { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-right: 4px; }
+    .agent-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+      color: var(--soft); font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 4px 11px; border-radius: 5px;
+      transition: border-color .2s, background .2s;
+    }
+    .agent-chip:hover { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.03); }
+    .agent-chip .dot { width: 5px; height: 5px; border-radius: 50%; background: #ffffff; opacity: 0.4; }
+
+    /* ══════════════ HERO VIDEO ══════════════ */
+    .hero-video-wrap { width: 100%; max-width: 1000px; margin: 0 auto; position: relative; }
+    .video-glow-ring {
+      position: absolute; inset: -2px; border-radius: 16px; z-index: -1;
+      background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.03) 50%, rgba(255,255,255,0.1));
+      filter: blur(14px); opacity: 0.5;
+    }
+    .video-frame {
+      background: var(--s3);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px; overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.02), 0 40px 90px rgba(0,0,0,0.9);
+    }
+    .video-bar {
+      background: rgba(0,0,0,0.7); border-bottom: 1px solid rgba(255,255,255,0.04);
+      padding: 11px 14px; display: flex; align-items: center; gap: 6px;
+    }
+    .vdot { width: 11px; height: 11px; border-radius: 50%; }
+    .vdot.r { background: #444; } .vdot.y { background: #555; } .vdot.g { background: #666; }
+    .vtitle { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); margin-left: 6px; }
+    .yt-wrap { position: relative; aspect-ratio: 16/9; background: #000; }
+    .yt-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
+
+    /* ══════════════ DIVIDERS ══════════════ */
+    .divider {
+      border: none; border-top: 1px solid rgba(255,255,255,0.03); position: relative; z-index: 20;
+    }
+    .divider::after {
+      content: ''; position: absolute; top: -1px; left: 50%; transform: translateX(-50%);
+      width: 220px; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+    }
+
+    .sec-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--soft); letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 0.5rem; opacity: 0.6; }
+    h2 { font-family: 'Pixelify Sans', sans-serif; font-size: clamp(28px, 4vw, 52px); font-weight: 700; line-height: 1.15; margin-bottom: 0.6rem; }
+
+    /* ══════════════ FEATURE ROWS ══════════════ */
+    .feat-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4rem;
+      align-items: center; padding: 88px 2rem;
+      max-width: 1100px; margin: 0 auto;
+    }
+    .feat-row.flip { direction: rtl; }
+    .feat-row.flip > * { direction: ltr; }
+
+    .feat-text h3 {
+      font-family: 'Pixelify Sans', sans-serif;
+      font-size: clamp(22px, 2.8vw, 38px); font-weight: 600; line-height: 1.2; margin-bottom: 0.75rem;
+    }
+    .feat-text p { color: var(--muted); font-size: 14px; font-weight: 300; line-height: 1.88; margin-bottom: 1.1rem; }
+    .feat-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .feat-pill {
+      font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--soft);
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+      padding: 3px 10px; border-radius: 4px;
+    }
+
+    .feat-visual {
+      border-radius: 13px; overflow: hidden;
+      border: 1px solid #1e1e1e;
+      background: #0a0a0a;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.015), 0 24px 65px rgba(0,0,0,0.8);
+      transition: border-color .35s, box-shadow .35s;
+    }
+    .feat-visual:hover {
+      border-color: rgba(255,255,255,0.14);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 32px 80px rgba(0,0,0,0.85);
+    }
+
+    /* MOCK UIs */
+    .mock-ui { background: #0a0a0a; display: flex; flex-direction: column; min-height: 300px; }
+    .mock-bar {
+      background: rgba(0,0,0,0.45); border-bottom: 1px solid rgba(255,255,255,0.04);
+      padding: 9px 12px; display: flex; align-items: center; gap: 5px; flex-shrink: 0;
+    }
+    .mock-body { flex: 1; padding: 14px; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.72; overflow: hidden; }
+    .t-g { color: #cccccc; } .t-y { color: #999999; } .t-m { color: var(--muted); } .t-s { color: var(--soft); }
+
+    .ws-list { display: flex; flex-direction: column; padding: 0; }
+    .ws-card {
+      background: transparent; border-bottom: 1px solid rgba(255,255,255,0.055);
+      padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;
+      transition: background .2s; cursor: pointer;
+    }
+    .ws-card:first-child { border-top: none; }
+    .ws-card:hover { background: rgba(255,255,255,0.03); }
+    .ws-card-left { display: flex; flex-direction: column; gap: 4px; }
+    .ws-card-name {
+      font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600;
+      color: var(--white); display: flex; align-items: center; gap: 6px;
+    }
+    .ws-card-name .slash { color: var(--muted); font-weight: 400; }
+    .ws-card-name .branch-icon { color: var(--muted); font-size: 11px; }
+    .ws-card-proj { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); }
+    .ws-card-stats { display: flex; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; }
+    .ws-stat-add { color: #3dd68c; }
+    .ws-stat-rem { color: #ff6b6b; }
+    .ws-new {
+      padding: 12px 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      color: var(--muted); text-align: center; border-top: 1px solid rgba(255,255,255,0.04);
+      cursor: pointer; transition: color .2s;
+    }
+    .ws-new:hover { color: var(--soft); }
+
+    .tree-line { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; }
+    .tree-con { color: var(--border2); font-size: 11px; }
+    .tree-badge { font-size: 8px; background: var(--s1); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; color: var(--muted); }
+
+    .diff-header { padding: 7px 12px; background: rgba(0,0,0,0.5); border-bottom: 1px solid rgba(255,255,255,0.04); font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--muted); }
+    .diff-line { display: flex; font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1.65; }
+    .diff-num { width: 26px; color: var(--muted); text-align: right; padding-right: 7px; flex-shrink: 0; border-right: 1px solid var(--border); }
+    .diff-code { padding-left: 9px; }
+    .diff-add { background: rgba(40,200,64,0.06); color: #4dcc6a; }
+    .diff-rem { background: rgba(255,95,95,0.06); color: #ff7070; }
+    .diff-ctx { color: var(--muted); }
+
+    .mem-list { padding: 10px; display: flex; flex-direction: column; gap: 7px; }
+    .mem-entry { background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; }
+    .mem-tier { font-family: 'JetBrains Mono', monospace; font-size: 8px; color: var(--accent); margin-bottom: 3px; letter-spacing: 0.08em; opacity: 0.7; }
+    .mem-text { font-size: 10px; color: var(--soft); line-height: 1.5; font-family: 'JetBrains Mono', monospace; }
+
+    .browser-bar { display: flex; align-items: center; gap: 7px; padding: 7px 10px; background: rgba(0,0,0,0.6); border-bottom: 1px solid rgba(255,255,255,0.04); flex-shrink: 0; }
+    .browser-url { flex: 1; background: #0a0a0a; border: 1px solid var(--border); border-radius: 3px; padding: 3px 8px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); }
+    .browser-body { flex: 1; background: #edf0f3; padding: 16px; display: flex; flex-direction: column; gap: 7px; }
+    .sk { height: 7px; background: #d0d5da; border-radius: 3px; }
+
+    /* ══════════════ INSTALL ══════════════ */
+    .install-sec { text-align: center; }
+    .sec-inner { max-width: 800px; margin: 0 auto; padding: 105px 2rem; }
+    .sec-desc { color: var(--muted); font-size: 15px; font-weight: 300; max-width: 440px; margin: 0 auto; line-height: 1.75; }
+
+    .install-box {
+      display: inline-flex; flex-direction: column; align-items: center; gap: 1.1rem;
+      background: rgba(255,255,255,0.012);
+      border: 1px solid rgba(0,200,255,0.12);
+      border-radius: 18px; padding: 2.75rem 3.5rem; margin-top: 2.75rem;
+      box-shadow: 0 0 50px rgba(0,100,230,0.06), inset 0 1px 0 rgba(255,255,255,0.025);
+    }
+
+    .curl-line {
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(0,0,0,0.7); border: 1px solid var(--border2);
+      border-radius: 8px; padding: 12px 18px; cursor: pointer;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted);
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .curl-line:hover { border-color: rgba(0,200,255,0.3); box-shadow: 0 0 18px rgba(0,200,255,0.07); }
+    .curl-dollar { color: var(--accent); }
+    .copy-btn { font-size: 10px; color: var(--dim); transition: color .2s; user-select: none; margin-left: 10px; }
+    .curl-line:hover .copy-btn { color: var(--accent); }
+
+    .gh-star-big {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: rgba(0,0,0,0.5); border: 1px solid var(--border2);
+      color: var(--soft); font-size: 13px; padding: 11px 22px; border-radius: 9px;
+      text-decoration: none; font-family: 'JetBrains Mono', monospace;
+      transition: background .2s, border-color .2s, box-shadow .2s, color .2s;
+    }
+    .gh-star-big:hover { background: rgba(0,200,255,0.04); border-color: rgba(0,200,255,0.28); box-shadow: 0 0 26px rgba(0,200,255,0.09); color: var(--white); }
+    .gh-star-big svg { width: 16px; height: 16px; fill: currentColor; }
+    .star-num { font-size: 11px; color: var(--accent); }
+    .install-note { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+    /* ══════════════ FOOTER ══════════════ */
+    footer {
+      border-top: 1px solid rgba(255,255,255,0.04); padding: 1.75rem 2rem;
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;
+    }
+    .footer-logo { font-family: 'Pixelify Sans', sans-serif; font-size: 17px; font-weight: 600; color: var(--white); text-decoration: none; text-shadow: 0 0 18px rgba(0,200,255,0.25); }
+    .footer-links { display: flex; gap: 1.5rem; list-style: none; }
+    .footer-links a { font-size: 12px; color: var(--muted); text-decoration: none; transition: color .2s; }
+    .footer-links a:hover { color: var(--accent); }
+    .footer-copy { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); }
+
+    /* ══════════════ ANIMATIONS ══════════════ */
+    @keyframes fadeUp { from { opacity:0; transform:translateY(22px); } to { opacity:1; transform:translateY(0); } }
+    .hero-tag        { animation: fadeUp .55s ease both; }
+    h1               { animation: fadeUp .55s .1s ease both; }
+    .hero-sub        { animation: fadeUp .55s .2s ease both; }
+    .hero-ctas       { animation: fadeUp .55s .28s ease both; }
+    .agents-row      { animation: fadeUp .55s .35s ease both; }
+    .hero-video-wrap { animation: fadeUp .55s .45s ease both; }
+
+    /* ══════════════ RESPONSIVE ══════════════ */
+    @media (max-width: 860px) { .feat-row { grid-template-columns: 1fr; gap: 2rem; } .feat-row.flip { direction: ltr; } }
+    @media (max-width: 600px) { nav { padding: 0 1rem; } .nav-link { display: none; } .install-box { padding: 2rem 1.5rem; } footer { flex-direction: column; text-align: center; } .footer-links { justify-content: center; } }
+  </style>
+</head>
+<body>
+
+<!-- BACKGROUND -->
+<div class="bg-grid"></div>
+<div class="bg-spot"></div>
+<canvas id="pts"></canvas>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="logo">Stackbox</a>
+  <div class="nav-right">
+    <a href="#features" class="nav-link">Features</a>
+    <a href="#install" class="nav-link">Install</a>
+    <a id="nav-gh" href="#" class="gh-btn" target="_blank">
+      <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub <span class="star-count" id="nav-stars">★ —</span>
+    </a>
+    <a href="#install" class="nav-dl">Download</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-tag">Open Source · Free</div>
+  <h1>Run Every<br><span class="ghost">AI Agent.</span><br>At Once.</h1>
+  <p class="hero-sub">Claude Code, Gemini CLI, Codex, Cursor, Copilot — running in parallel, isolated workspaces. One desktop app.</p>
+  <div class="hero-ctas">
+    <a href="#install" class="btn-w">Download Free</a>
+    <a id="hero-gh" href="#" class="btn-o" target="_blank">View on GitHub →</a>
+  </div>
+  <div class="agents-row">
+    <span class="agents-label">works with</span>
+    <span class="agent-chip"><span class="dot"></span>Claude Code</span>
+    <span class="agent-chip"><span class="dot"></span>Gemini CLI</span>
+    <span class="agent-chip"><span class="dot"></span>Codex</span>
+    <span class="agent-chip"><span class="dot"></span>Cursor</span>
+    <span class="agent-chip"><span class="dot"></span>Copilot</span>
+    <span class="agent-chip"><span class="dot"></span>+ any PTY agent</span>
+  </div>
+  <div class="hero-video-wrap">
+    <div class="video-glow-ring"></div>
+    <div class="video-frame">
+      <div class="video-bar">
+        <div class="vdot r"></div><div class="vdot y"></div><div class="vdot g"></div>
+        <span class="vtitle">Stackbox · workspace/my-saas · 3 agents running</span>
+      </div>
+      <div class="yt-wrap">
+        <iframe id="yt-embed" src="" title="Stackbox Demo" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- F1 WORKSPACES -->
+<div class="feat-row" id="features">
+  <div class="feat-text">
+    <div class="sec-label">// workspaces</div>
+    <h3>Multiple Workspaces.<br>All Isolated.</h3>
+    <p>Each project is its own world — its own agents, environment, and memory. Switch instantly. Nothing bleeds between projects.</p>
+    <div class="feat-pills"><span class="feat-pill">per-project isolation</span><span class="feat-pill">instant switch</span><span class="feat-pill">independent agents</span></div>
+  </div>
+  <div class="feat-visual">
+    <div class="mock-ui">
+      <div class="mock-bar"><div class="vdot r"></div><div class="vdot y"></div><div class="vdot g"></div><span class="vtitle">workspaces</span></div>
+      <div class="ws-list">
+        <div class="ws-card">
+          <div class="ws-card-left">
+            <div class="ws-card-name"><span class="slash">/</span> fix-notification-i… <span class="branch-icon">⎇</span></div>
+            <div class="ws-card-proj">Nodebook</div>
+          </div>
+          <div class="ws-card-stats"><span class="ws-stat-add">+1073</span><span class="ws-stat-rem">−619</span></div>
+        </div>
+        <div class="ws-card">
+          <div class="ws-card-left">
+            <div class="ws-card-name"><span class="slash">/</span> fix-docker <span class="branch-icon">⎇</span></div>
+            <div class="ws-card-proj">stackbox-web</div>
+          </div>
+          <div class="ws-card-stats"><span class="ws-stat-add">+213</span></div>
+        </div>
+        <div class="ws-card">
+          <div class="ws-card-left">
+            <div class="ws-card-name"><span class="slash">/</span> fix-ui <span class="branch-icon">⎇</span></div>
+            <div class="ws-card-proj">supercontext</div>
+          </div>
+          <div class="ws-card-stats"><span class="ws-stat-add">+213</span></div>
+        </div>
+        <div class="ws-card">
+          <div class="ws-card-left">
+            <div class="ws-card-name"><span class="slash">/</span> fix-app <span class="branch-icon">⎇</span></div>
+            <div class="ws-card-proj">openland</div>
+          </div>
+          <div class="ws-card-stats"><span class="ws-stat-add">+213</span></div>
+        </div>
+        <div class="ws-card">
+          <div class="ws-card-left">
+            <div class="ws-card-name"><span class="slash">/</span> fix-autofix <span class="branch-icon">⎇</span></div>
+            <div class="ws-card-proj">newapp</div>
+          </div>
+          <div class="ws-card-stats"><span class="ws-stat-add">+213</span></div>
+        </div>
+        <div class="ws-card" style="border-bottom:none;">
+          <div class="ws-card-left">
+            <div class="ws-card-name"><span class="slash">/</span> fix-docker <span class="branch-icon">⎇</span></div>
+            <div class="ws-card-proj">stackbox</div>
+          </div>
+          <div class="ws-card-stats"><span class="ws-stat-add">+10180</span><span class="ws-stat-rem">−1890</span></div>
+        </div>
+      </div>
+      <div class="ws-new">+ new runbox</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- F2 GIT WORKTREES -->
+<div class="feat-row flip">
+  <div class="feat-text">
+    <div class="sec-label">// git worktrees</div>
+    <h3>One Repo.<br>Every Agent<br>Has Its Lane.</h3>
+    <p>All agents share one git worktree per workspace. Stackbox controls who writes and when — no conflicts, no stepping on each other.</p>
+    <div class="feat-pills"><span class="feat-pill">shared worktree</span><span class="feat-pill">access control</span><span class="feat-pill">git diff tracking</span></div>
+  </div>
+  <div class="feat-visual">
+    <div class="mock-ui">
+      <div class="mock-bar"><div class="vdot r"></div><div class="vdot y"></div><div class="vdot g"></div><span class="vtitle">git worktree · my-saas-app</span></div>
+      <div class="mock-body">
+        <div class="tree-line"><span class="tree-con">├─</span><span class="t-s">claude-code</span><span class="tree-badge" style="color:#4dcc6a;border-color:#1a3a20">● writing</span></div>
+        <div class="tree-line"><span class="tree-con">├─</span><span class="t-y">gemini-cli</span><span class="tree-badge">⏸ waiting</span></div>
+        <div class="tree-line"><span class="tree-con">└─</span><span class="t-m">codex</span><span class="tree-badge">○ idle</span></div>
+        <div style="margin:12px 0;border-top:1px solid rgba(255,255,255,0.04)"></div>
+        <div class="t-m" style="font-size:9px;margin-bottom:6px;letter-spacing:.1em">GIT DIFF HEAD</div>
+        <div class="tree-line"><span class="tree-con">+</span><span class="t-g">src/api/routes.ts</span></div>
+        <div class="tree-line"><span class="tree-con">+</span><span class="t-g">src/db/schema.ts</span></div>
+        <div class="tree-line"><span class="tree-con">~</span><span style="color:#ff7070">src/utils/auth.ts</span></div>
+        <div class="tree-line"><span class="tree-con">~</span><span style="color:#ff7070">tests/api.test.ts</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- F3 DOCKER -->
+<div class="feat-row">
+  <div class="feat-text">
+    <div class="sec-label">// docker</div>
+    <h3>Docker Per<br>Workspace.<br>Optional.</h3>
+    <p>Toggle Docker on or off per workspace. Each gets its own container — clean environment, isolated storage, clean teardown. Agents run inside automatically.</p>
+    <div class="feat-pills"><span class="feat-pill">per-workspace toggle</span><span class="feat-pill">auto-provision</span><span class="feat-pill">isolated storage</span><span class="feat-pill">clean teardown</span></div>
+  </div>
+  <div class="feat-visual">
+    <div class="mock-ui">
+      <div class="mock-bar"><div class="vdot r"></div><div class="vdot y"></div><div class="vdot g"></div><span class="vtitle">docker · my-saas-app</span></div>
+      <div class="mock-body">
+        <div style="display:flex;gap:6px;margin-bottom:5px"><span class="t-g">✓</span><span class="t-s">Container ready</span><span class="t-m" style="margin-left:4px">stackbox-my-saas</span></div>
+        <div style="display:flex;gap:6px;margin-bottom:5px"><span class="t-g">✓</span><span class="t-s">Storage mounted</span><span class="t-m" style="margin-left:4px">/workspace</span></div>
+        <div style="display:flex;gap:6px;margin-bottom:12px"><span class="t-g">✓</span><span class="t-s">Agents injected</span></div>
+        <div style="border-top:1px solid rgba(255,255,255,0.04);padding-top:10px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span class="t-m">image</span><span class="t-s">ubuntu:22.04</span></div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span class="t-m">storage</span><span class="t-s">4.2 / 20 GB</span></div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span class="t-m">cpu</span><span class="t-s">2 cores</span></div>
+          <div style="display:flex;justify-content:space-between"><span class="t-m">status</span><span class="t-g">running</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- F4 BROWSER -->
+<div class="feat-row flip">
+  <div class="feat-text">
+    <div class="sec-label">// built-in browser</div>
+    <h3>Preview Without<br>Leaving.</h3>
+    <p>Inline browser panel. Opens localhost and file:// URLs instantly. Watch your agents' changes render live without touching another window.</p>
+    <div class="feat-pills"><span class="feat-pill">localhost preview</span><span class="feat-pill">file:// support</span><span class="feat-pill">inline panel</span></div>
+  </div>
+  <div class="feat-visual">
+    <div class="mock-ui">
+      <div class="mock-bar"><div class="vdot r"></div><div class="vdot y"></div><div class="vdot g"></div><span class="vtitle">browser · panel</span></div>
+      <div class="browser-bar">
+        <span class="t-m" style="font-size:10px">← →</span>
+        <div class="browser-url">localhost:5173</div>
+        <span class="t-m" style="font-size:10px">⟳</span>
+      </div>
+      <div class="browser-body">
+        <div class="sk" style="width:38%;height:12px;background:#bfc4ca;border-radius:2px"></div>
+        <div class="sk"></div><div class="sk" style="width:75%"></div><div class="sk" style="width:55%"></div>
+        <div style="height:8px"></div>
+        <div style="display:flex;gap:7px"><div style="width:66px;height:24px;background:#1a1a1a;border-radius:3px"></div><div style="width:66px;height:24px;background:#e2e5e8;border-radius:3px;border:1px solid #ccc"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- F5 DIFF -->
+<div class="feat-row">
+  <div class="feat-text">
+    <div class="sec-label">// file editor & diff</div>
+    <h3>See Every<br>Change. Inline.</h3>
+    <p>Built-in diff viewer, file tree, and editor. Watch what agents are writing in real time. Review before anything commits. No external editor needed.</p>
+    <div class="feat-pills"><span class="feat-pill">live diff</span><span class="feat-pill">file tree</span><span class="feat-pill">inline editor</span><span class="feat-pill">agent-aware</span></div>
+  </div>
+  <div class="feat-visual">
+    <div class="mock-ui">
+      <div class="mock-bar"><div class="vdot r"></div><div class="vdot y"></div><div class="vdot g"></div><span class="vtitle">diff · src/api/routes.ts</span></div>
+      <div class="diff-header">claude-code · +14 additions · −3 removals</div>
+      <div class="diff-line diff-ctx"><span class="diff-num">12</span><span class="diff-code t-m">export const router = new Router()</span></div>
+      <div class="diff-line diff-rem"><span class="diff-num">13</span><span class="diff-code">- router.get('/users', async (ctx) => {'{'}</span></div>
+      <div class="diff-line diff-rem"><span class="diff-num">14</span><span class="diff-code">-   ctx.body = await db.users.findAll()</span></div>
+      <div class="diff-line diff-rem"><span class="diff-num">15</span><span class="diff-code">- })</span></div>
+      <div class="diff-line diff-add"><span class="diff-num">13</span><span class="diff-code">+ router.get('/users', auth(), async (ctx) => {'{'}</span></div>
+      <div class="diff-line diff-add"><span class="diff-num">14</span><span class="diff-code">+   const page = ctx.query.page ?? 1</span></div>
+      <div class="diff-line diff-add"><span class="diff-num">15</span><span class="diff-code">+   ctx.body = await db.users.paginate(page)</span></div>
+      <div class="diff-line diff-add"><span class="diff-num">16</span><span class="diff-code">+ })</span></div>
+      <div class="diff-line diff-add"><span class="diff-num">18</span><span class="diff-code">+ router.post('/users', auth('admin'), async (ctx) => {'{'}</span></div>
+      <div class="diff-line diff-add"><span class="diff-num">19</span><span class="diff-code">+   ctx.status = 201; ctx.body = await db.users.create(ctx.body)</span></div>
+      <div class="diff-line diff-add"><span class="diff-num">20</span><span class="diff-code">+ })</span></div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- F6 MEMORY -->
+<div class="feat-row flip">
+  <div class="feat-text">
+    <div class="sec-label">// memory</div>
+    <h3>Agents That<br>Remember.</h3>
+    <p>Four-tier memory system — LOCKED, PREFERRED, TEMPORARY, SESSION. Agents write memories each session. Stackbox injects them back on every spawn.</p>
+    <div class="feat-pills"><span class="feat-pill">LOCKED</span><span class="feat-pill">PREFERRED</span><span class="feat-pill">TEMPORARY</span><span class="feat-pill">SESSION</span><span class="feat-pill">auto-inject</span></div>
+  </div>
+  <div class="feat-visual">
+    <div class="mock-ui">
+      <div class="mock-bar"><div class="vdot r"></div><div class="vdot y"></div><div class="vdot g"></div><span class="vtitle">memory · claude-code</span></div>
+      <div class="mem-list">
+        <div class="mem-entry"><div class="mem-tier">LOCKED · always injected</div><div class="mem-text">Use `bun`, not npm. Always. No exceptions.</div></div>
+        <div class="mem-entry"><div class="mem-tier">LOCKED · always injected</div><div class="mem-text">Database is PostgreSQL via Drizzle ORM. Never raw SQL.</div></div>
+        <div class="mem-entry"><div class="mem-tier">PREFERRED · last 10 sessions</div><div class="mem-text">Auth middleware is in src/middleware/auth.ts. Apply to all protected routes.</div></div>
+        <div class="mem-entry"><div class="mem-tier">TEMPORARY · this session</div><div class="mem-text">Refactoring users API. Pagination done. Search next.</div></div>
+        <div class="mem-entry"><div class="mem-tier">SESSION · current only</div><div class="mem-text">Working branch: feat/user-pagination</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- INSTALL -->
+<section id="install">
+  <div class="sec-inner install-sec">
+    <div class="sec-label">// install</div>
+    <h2>One command.<br>All platforms.</h2>
+    <p class="sec-desc">macOS, Windows, Linux. Auto-updates built in. No app store. No account needed.</p>
+    <div class="install-box">
+      <div class="curl-line" onclick="navigator.clipboard.writeText('curl -fsSL https://stackbox.sh/install.sh | sh');this.querySelector('.copy-btn').textContent='copied!';setTimeout(()=>this.querySelector('.copy-btn').textContent='copy',2000)">
+        <span class="curl-dollar">$</span>
+        <span>curl -fsSL https://stackbox.sh/install.sh | sh</span>
+        <span class="copy-btn">copy</span>
+      </div>
+      <span class="install-note">auto-detects your OS and architecture</span>
+      <a id="install-gh" href="#" class="gh-star-big" target="_blank">
+        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Download from GitHub Releases
+        <span class="star-num" id="install-stars">★ —</span>
+      </a>
+      <span class="install-note">macOS · Windows · Linux · auto-updates on every launch</span>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <a href="#" class="footer-logo">Stackbox</a>
+  <ul class="footer-links">
+    <li><a id="f-gh" href="#">GitHub</a></li>
+    <li><a id="f-rel" href="#">Releases</a></li>
+    <li><a id="f-iss" href="#">Issues</a></li>
+    <li><a href="https://github.com/Agentbase" target="_blank">Agentbase</a></li>
+  </ul>
+  <span class="footer-copy">MIT · © 2025 Stackbox</span>
+</footer>
+
+<script>
+/* ── PARTICLES ── */
+!function(){
+  const c=document.getElementById('pts'),x=c.getContext('2d');
+  let W,H,P=[];
+  function rsz(){W=c.width=innerWidth;H=c.height=innerHeight;}
+  rsz(); addEventListener('resize',rsz);
+  for(let i=0;i<45;i++) P.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:Math.random()*.9+0.2,vx:(Math.random()-.5)*.13,vy:(Math.random()-.5)*.13,o:Math.random()*.18+.03});
+  function draw(){
+    x.clearRect(0,0,W,H);
+    P.forEach(p=>{
+      p.x+=p.vx; p.y+=p.vy;
+      if(p.x<0)p.x=W; if(p.x>W)p.x=0; if(p.y<0)p.y=H; if(p.y>H)p.y=0;
+      x.beginPath(); x.arc(p.x,p.y,p.r,0,Math.PI*2);
+      x.fillStyle=`rgba(0,190,255,${p.o})`; x.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+}();
+
+/* ── YOUTUBE EMBED ── */
+document.getElementById('yt-embed').src =
+  `https://www.youtube.com/embed/${YOUTUBE_ID}?rel=0&modestbranding=1&color=white`;
+
+/* ── GITHUB STARS + LINKS ── */
+const BASE = `https://github.com/${GITHUB_REPO}`;
+['nav-gh','hero-gh'].forEach(id=>{ const el=document.getElementById(id); if(el) el.href=BASE; });
+const ig=document.getElementById('install-gh'); if(ig) ig.href=BASE+'/releases/latest';
+['f-gh','f-rel','f-iss'].forEach((id,i)=>{
+  const el=document.getElementById(id); if(!el)return;
+  el.href=[BASE, BASE+'/releases', BASE+'/issues'][i];
+  el.target='_blank';
+});
+
+fetch(`https://api.github.com/repos/${GITHUB_REPO}`,{headers:{'Accept':'application/vnd.github.v3+json'}})
+  .then(r=>r.ok?r.json():null)
+  .then(d=>{
+    if(!d)return;
+    const s=d.stargazers_count;
+    const f=s>=1000?(s/1000).toFixed(1).replace(/\.0$/,'')+'k':String(s);
+    document.getElementById('nav-stars').textContent=`★ ${f}`;
+    document.getElementById('install-stars').textContent=`★ ${f} stars`;
+    ['nav-gh','hero-gh'].forEach(id=>{const el=document.getElementById(id);if(el)el.href=d.html_url;});
+    const ig2=document.getElementById('install-gh');if(ig2)ig2.href=d.html_url+'/releases/latest';
+    const fgh=document.getElementById('f-gh');if(fgh)fgh.href=d.html_url;
+    const frl=document.getElementById('f-rel');if(frl)frl.href=d.html_url+'/releases';
+    const fis=document.getElementById('f-iss');if(fis)fis.href=d.html_url+'/issues';
+  }).catch(()=>{});
+</script>
+</body>
+</html>

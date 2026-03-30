@@ -4,7 +4,8 @@
   "description": "The open-source control plane for coding agents",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "tauri": "tauri"
   },
   "keywords": [
     "ai",
@@ -21,6 +22,7 @@
     "highlight.js": "^11.11.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^20.11.5",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
