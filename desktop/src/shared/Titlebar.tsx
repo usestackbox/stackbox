@@ -5,7 +5,7 @@ const win = getCurrentWindow();
 const isMac = navigator.userAgent.toLowerCase().includes("mac");
 
 interface BtnProps {
-  label: string;
+  label:   string;
   hoverBg: string;
   onClick: () => void;
 }
@@ -49,6 +49,10 @@ function Controls() {
 }
 
 export function Titlebar() {
+  // On Mac, the OS traffic lights live inside the WorkspaceView tab bar's
+  // spacer row. This component would overlap them, so we render nothing.
+  if (isMac) return null;
+
   return (
     <div
       data-tauri-drag-region
@@ -64,8 +68,8 @@ export function Titlebar() {
         userSelect: "none",
       }}
     >
-      {/* Left slot — controls on Mac, empty on Windows */}
-      {isMac ? <Controls /> : <div style={{ width: 8 }} />}
+      {/* Left slot — controls on Windows */}
+      <Controls />
 
       {/* Center — app name */}
       <span
@@ -81,8 +85,8 @@ export function Titlebar() {
         Stackbox
       </span>
 
-      {/* Right slot — controls on Windows, empty on Mac */}
-      {!isMac ? <Controls /> : <div style={{ width: 8 }} />}
+      {/* Right slot */}
+      <Controls />
     </div>
   );
 }

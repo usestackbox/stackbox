@@ -14,6 +14,8 @@ import { IcoBrain, IcoFiles, IcoGit } from "../shared/icons";
 import { FileEditorPane } from "../panels/Workspacepanel";
 import { fileColor } from "../panels/Filestructurepanel";
 
+const isMac = navigator.userAgent.toLowerCase().includes("mac");
+
 const GAP   = 8;
 const MIN_W = 280;
 const MIN_H = 180;
@@ -263,6 +265,22 @@ export function WorkspaceView({
   const [dragTabId,  setDragTabId]  = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [pendingBrowserUrl, setPendingBrowserUrl] = useState<Record<string, string | null>>({});
+
+  // ── Mac fullscreen detection ──────────────────────────────────────────────
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    if (!isMac) return;
+    getCurrentWindow().isFullscreen().then(setIsFullscreen).catch(() => {});
+    const unsub = getCurrentWindow().onResized(async () => {
+      try { setIsFullscreen(await getCurrentWindow().isFullscreen()); } catch {}
+    });
+    return () => { unsub.then(f => f()).catch(() => {}); };
+  }, []);
+
+  const macOffset = isMac && !isFullscreen;
+  const TRAFFIC_H = 28;
+  const TAB_BAR_H = macOffset ? 42 + TRAFFIC_H : 42;
+
   const dragTabIdRef  = useRef<string | null>(null);
   const dragOverIdRef = useRef<string | null>(null);
   const initialized   = useRef(false);
@@ -457,13 +475,21 @@ export function WorkspaceView({
     e.preventDefault(); focusWin(id);
     const win = winsRef.current.find(w => w.id === id);
     if (!win || win.maximized) return;
-    const startX = e.clientX - win.x, startY = e.clientY - win.y;
-    const area = areaRef.current;
+    // Capture area rect once at drag-start so sidebar transitions don't shift mid-drag.
+    // All win.x/win.y values are area-relative, so we must convert clientX/Y → area-relative.
+    const areaRect = areaRef.current?.getBoundingClientRect();
+    if (!areaRect) return;
+    const offX = (e.clientX - areaRect.left) - win.x;
+    const offY = (e.clientY - areaRect.top)  - win.y;
     const onMove = (ev: MouseEvent) => {
+      const rect = areaRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const aw = rect.width, ah = rect.height;
       setWins(prev => {
         const cur = prev.find(w => w.id === id); if (!cur) return prev;
-        const aw = area?.offsetWidth ?? 9999, ah = area?.offsetHeight ?? 9999;
-        return prev.map(w => w.id === id ? { ...w, x: Math.max(0, Math.min(aw - cur.w, ev.clientX - startX)), y: Math.max(0, Math.min(ah - cur.h, ev.clientY - startY)) } : w);
+        const nx = Math.max(0, Math.min(aw - cur.w, (ev.clientX - rect.left) - offX));
+        const ny = Math.max(0, Math.min(ah - cur.h, (ev.clientY - rect.top)  - offY));
+        return prev.map(w => w.id === id ? { ...w, x: nx, y: ny } : w);
       });
     };
     const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
@@ -477,15 +503,41 @@ export function WorkspaceView({
     const startX = e.clientX, startY = e.clientY;
     const origX = win.x, origY = win.y, origW = win.w, origH = win.h;
     const onMove = (ev: MouseEvent) => {
+      const area = areaRef.current;
+      // getBoundingClientRect gives real rendered size — accounts for sidebar margin
+      const aw = area?.getBoundingClientRect().width  ?? 9999;
+      const ah = area?.getBoundingClientRect().height ?? 9999;
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
       let nx = origX, ny = origY, nw = origW, nh = origH;
-      if (dir.includes("r")) nw = Math.max(MIN_W, origW + dx);
-      if (dir.includes("l")) { nw = Math.max(MIN_W, origW - dx); nx = origX + (origW - nw); }
-      if (dir.includes("b")) nh = Math.max(MIN_H, origH + dy);
-      if (dir.includes("t")) { nh = Math.max(MIN_H, origH - dy); ny = origY + (origH - nh); }
+
+      if (dir.includes("r")) {
+        // right wall: origX + nw must not exceed aw
+        nw = Math.min(aw - origX, Math.max(MIN_W, origW + dx));
+      }
+      if (dir.includes("l")) {
+        // left wall: nx must not go below 0
+        nw = Math.max(MIN_W, origW - dx);
+        nx = origX + (origW - nw);
+        if (nx < 0) { nw += nx; nx = 0; }
+      }
+      if (dir.includes("b")) {
+        // bottom wall: origY + nh must not exceed ah
+        nh = Math.min(ah - origY, Math.max(MIN_H, origH + dy));
+      }
+      if (dir.includes("t")) {
+        // top wall: ny must not go above 0
+        nh = Math.max(MIN_H, origH - dy);
+        ny = origY + (origH - nh);
+        if (ny < 0) { nh += ny; ny = 0; }
+      }
+
       setWins(prev => prev.map(w => w.id === id ? { ...w, x: nx, y: ny, w: nw, h: nh } : w));
     };
-    const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    const onUp = () => {
+      window.dispatchEvent(new Event("resize"));
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
   }, [focusWin, dispatchResize]);
 
@@ -498,6 +550,8 @@ export function WorkspaceView({
 
   useEffect(() => {
     const area = areaRef.current; if (!area) return;
+    // Wait for the CSS transition of the sidebar (180ms) to finish before
+    // reading offsetWidth — otherwise we tile into the old (wrong) size.
     const t = setTimeout(() => {
       const aw = area.offsetWidth, ah = area.offsetHeight;
       if (!aw || !ah) return;
@@ -509,14 +563,14 @@ export function WorkspaceView({
         return prev.map(w => w.minimized || w.maximized ? w : { ...w, ...tiles[ti++] });
       });
       window.dispatchEvent(new Event("resize"));
-    }, 180);
+    }, 220);  // slightly longer than the sidebar transition (.18s)
     return () => clearTimeout(t);
-  }, [sidePanel]);
+  // Re-tile whenever the right side-panel OR the left sidebar width changes
+  }, [sidePanel, contentMarginLeft]);
 
   const handleToolbarSidebarToggle = useCallback(() => {
-    if (fileTreeOpen) onFileTreeToggle?.();
     onSidebarToggle?.();
-  }, [fileTreeOpen, onFileTreeToggle, onSidebarToggle]);
+  }, [onSidebarToggle]);
 
   const handleToolbarFileTreeToggle = useCallback(() => {
     onFileTreeToggle?.();
@@ -526,205 +580,233 @@ export function WorkspaceView({
   const activeFileTab = fileTabs.find(t => t.id === activeFileId) ?? null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
 
       {/* ── Tab bar — FULL WIDTH ── */}
       <div style={{
-        display: "flex", alignItems: "center", height: 42, flexShrink: 0,
-        background: C.bg1, borderBottom: `1px solid ${C.border}`,
-        padding: "0 6px", gap: 3,
+        display: "flex",
+        flexDirection: "column",
+        height: TAB_BAR_H,
+        flexShrink: 0,
+        background: C.bg1,
+        borderBottom: `1px solid ${C.border}`,
         position: "relative", zIndex: 300, userSelect: "none",
+        transition: "height .15s ease",
       }}>
 
-        {/* Left: brand + toggles */}
-        <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0, paddingRight: 8, borderRight: `1px solid rgba(255,255,255,.08)`, marginRight: 2 }}>
-          <span style={{ fontSize: 22, fontWeight: 400, color: "#ffffff", fontFamily: '"VT323", monospace', letterSpacing: "0.08em", userSelect: "none", paddingLeft: 2, lineHeight: "1" }}>
-            Stackbox
-          </span>
-          <StripIcon title="Toggle Runboxes" active={!sidebarCollapsed && !fileTreeOpen} onClick={handleToolbarSidebarToggle}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>
-            </svg>
-          </StripIcon>
-          <StripIcon title="Toggle File Tree" active={!sidebarCollapsed && fileTreeOpen} onClick={handleToolbarFileTreeToggle}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-            </svg>
-          </StripIcon>
-        </div>
-
-        {/* ── Terminal tabs ── */}
-        <div style={{ display: "flex", alignItems: "center", gap: 3, overflowX: "auto", minWidth: 0, maxWidth: "55%", scrollbarWidth: "none" }}>
-          {wins.map((w, idx) => {
-            const isActive   = activeWinId === w.id && !hasFiles;
-            const isDragOver = dragOverId === w.id && dragTabId !== w.id;
-            const iconColor  = isActive ? "#ffffff" : "rgba(255,255,255,0.65)";
-
-            return (
-              <div key={w.id}
-                onMouseDown={e => {
-                  if (e.button !== 0) return;
-                  e.preventDefault();
-                  const startX = e.clientX;
-                  let dragging = false;
-                  const onMove = (mv: MouseEvent) => {
-                    if (!dragging && Math.abs(mv.clientX - startX) > 6) { dragging = true; dragTabIdRef.current = w.id; setDragTabId(w.id); }
-                    if (dragging) {
-                      const els = document.querySelectorAll("[data-tab-id]");
-                      let found: string | null = null;
-                      els.forEach(el => { const rect = el.getBoundingClientRect(); if (mv.clientX >= rect.left && mv.clientX <= rect.right) found = (el as HTMLElement).dataset.tabId ?? null; });
-                      dragOverIdRef.current = found; setDragOverId(found);
-                    }
-                  };
-                  const onUp = () => {
-                    if (dragging && dragTabIdRef.current && dragOverIdRef.current) {
-                      const fromId = dragTabIdRef.current, toId = dragOverIdRef.current;
-                      setWins(prev => {
-                        const arr = [...prev];
-                        const fromIdx = arr.findIndex(x => x.id === fromId), toIdx = arr.findIndex(x => x.id === toId);
-                        if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) { const [moved] = arr.splice(fromIdx, 1); arr.splice(toIdx, 0, moved); }
-                        return arr;
-                      });
-                    } else if (!dragging) {
-                      setActiveFileId(null);
-                      w.minimized ? restoreWin(w.id) : focusWin(w.id);
-                    }
-                    dragTabIdRef.current = null; dragOverIdRef.current = null; setDragTabId(null); setDragOverId(null);
-                    window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp);
-                  };
-                  window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
-                }}
-                data-tab-id={w.id}
-                onContextMenu={e => { e.preventDefault(); setTabCtx({ x: e.clientX, y: e.clientY, win: w, idx }); }}
-                title={w.cwd}
-                style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  padding: "5px 6px 5px 10px", height: 30, borderRadius: 8,
-                  cursor: dragTabId ? "grabbing" : "default", flexShrink: 0,
-                  background: activeWinId === w.id && !activeFileId ? C.bg3 : isDragOver ? "rgba(0,229,255,.1)" : "transparent",
-                  border: `1px solid ${activeWinId === w.id && !activeFileId ? C.borderMd : isDragOver ? "rgba(0,229,255,.4)" : "transparent"}`,
-                  opacity: w.minimized ? 0.55 : dragTabId === w.id ? 0.4 : 1,
-                  transition: "all .1s", userSelect: "none",
-                }}
-                onMouseEnter={e => { if (!(activeWinId === w.id && !activeFileId) && !dragTabId) (e.currentTarget as HTMLElement).style.background = C.bg2; }}
-                onMouseLeave={e => { if (!(activeWinId === w.id && !activeFileId) && !isDragOver) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
-
-                {w.minimized && (
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: "#fbbf24", boxShadow: "0 0 5px rgba(251,191,36,.6)" }} />
-                )}
-
-                {!w.minimized && (w.kind === "browser" ? (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" style={{ flexShrink: 0 }}>
-                    <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                  </svg>
-                ) : (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
-                  </svg>
-                ))}
-
-                <span style={{
-                  fontSize: 12, fontFamily: MONO,
-                  color: activeWinId === w.id && !activeFileId ? "#ffffff" : w.minimized ? "#fbbf24" : "rgba(255,255,255,0.7)",
-                  fontWeight: activeWinId === w.id && !activeFileId ? 600 : 400,
-                  maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {winLabel(w)}
-                </span>
-
-                <TabCloseBtn onClose={() => closeWin(w.id)} />
-              </div>
-            );
-          })}
-
-          {/* New terminal button */}
-          <button onClick={addTerminal} title="New terminal"
-            style={{ ...tbtn, width: 30, height: 30, borderRadius: 8, fontSize: 18, fontWeight: 300, border: `1px solid transparent`, flexShrink: 0 }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t0; el.style.background = C.bg3; el.style.borderColor = C.border; }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t2; el.style.background = "transparent"; el.style.borderColor = "transparent"; }}>
-            +
-          </button>
-        </div>
-
-        {/* ── Separator + File tabs ── */}
-        {fileTabs.length > 0 && (
-          <>
-            <div style={{ width: 1, height: 20, background: "rgba(255,255,255,.1)", flexShrink: 0, margin: "0 4px" }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 3, overflowX: "auto", minWidth: 0, flex: 1, scrollbarWidth: "none" }}>
-              {fileTabs.map(tab => {
-                const isActive   = activeFileId === tab.id;
-                const fileName   = tab.filePath.split(/[/\\]/).pop() ?? tab.filePath;
-                const iconStroke = isActive ? "#00e5ff" : fileColor(fileName, false);
-
-                return (
-                  <div key={tab.id}
-                    onClick={() => setActiveFileId(tab.id)}
-                    title={tab.filePath}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 5,
-                      padding: "5px 6px 5px 10px", height: 30, borderRadius: 8,
-                      cursor: "pointer", flexShrink: 0,
-                      background: isActive ? "rgba(0,229,255,.12)" : "transparent",
-                      border: `1px solid ${isActive ? "rgba(0,229,255,.35)" : "transparent"}`,
-                      transition: "all .1s", userSelect: "none",
-                    }}
-                    onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = C.bg2; }}
-                    onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
-
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-                      stroke={iconStroke} strokeWidth="2" style={{ flexShrink: 0 }}>
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                      <polyline points="14 2 14 8 20 8"/>
-                    </svg>
-
-                    <span style={{
-                      fontSize: 12, fontFamily: MONO,
-                      color: isActive ? "#00e5ff" : "rgba(255,255,255,0.7)",
-                      fontWeight: isActive ? 600 : 400,
-                      maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>
-                      {fileName}
-                    </span>
-
-                    <TabCloseBtn onClose={() => closeFileTab(tab.id)} />
-                  </div>
-                );
-              })}
-            </div>
-          </>
+        {macOffset && (
+          <div
+            data-tauri-drag-region
+            style={{ height: TRAFFIC_H, flexShrink: 0 }}
+          />
         )}
 
-        {/* Drag zone */}
-        <div style={{ flex: fileTabs.length > 0 ? 0 : 1, minWidth: 20, height: "100%", cursor: "default" }}
-          onMouseDown={e => { if (e.button === 0) getCurrentWindow().startDragging().catch(() => {}); }} />
+        {/* ── The actual button row ── */}
+        <div style={{
+          display: "flex", alignItems: "center", flex: 1,
+          padding: "0 6px", gap: 3,
+        }}>
 
-        {/* Right: toolbar + window controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-          {toolbarSlot}
-          <div style={{ display: "flex", alignItems: "center", gap: 1, marginLeft: 4, paddingLeft: 6, borderLeft: `1px solid rgba(255,255,255,.08)` }}>
-            <WinBtn title="Minimize"         hoverBg="rgba(255,255,255,.1)"  hoverColor="#fff"    onClick={() => getCurrentWindow().minimize().catch(() => {})}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="4" y1="12" x2="20" y2="12"/></svg>
-            </WinBtn>
-            <WinBtn title="Maximize/Restore" hoverBg="rgba(255,255,255,.1)"  hoverColor="#fff"    onClick={() => getCurrentWindow().toggleMaximize().catch(() => {})}>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-            </WinBtn>
-            <WinBtn title="Close"            hoverBg="rgba(239,68,68,.25)" hoverColor="#f87171" onClick={() => getCurrentWindow().close().catch(() => {})}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg>
-            </WinBtn>
+          {/* Left: brand + toggles */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 5, flexShrink: 0,
+            paddingLeft: 6, paddingRight: 8,
+            borderRight: `1px solid rgba(255,255,255,.08)`, marginRight: 2,
+          }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#ffffff", fontFamily: SANS, letterSpacing: "0.04em", userSelect: "none", paddingLeft: 2, lineHeight: "1" }}>
+              Stackbox
+            </span>
+            <StripIcon title="Workspace" active={!sidebarCollapsed && !fileTreeOpen} onClick={handleToolbarSidebarToggle}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1"/>
+                <rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/>
+                <rect x="14" y="14" width="7" height="7" rx="1"/>
+              </svg>
+            </StripIcon>
+            <StripIcon title="Toggle File Tree" active={!sidebarCollapsed && fileTreeOpen} onClick={handleToolbarFileTreeToggle}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+            </StripIcon>
           </div>
-        </div>
-      </div>
+
+          {/* ── Terminal tabs ── */}
+          <div style={{ display: "flex", alignItems: "center", gap: 3, overflowX: "auto", minWidth: 0, maxWidth: "55%", scrollbarWidth: "none" }}>
+            {wins.map((w, idx) => {
+              const isActive   = activeWinId === w.id && !hasFiles;
+              const isDragOver = dragOverId === w.id && dragTabId !== w.id;
+              const iconColor  = isActive ? "#ffffff" : "rgba(255,255,255,0.65)";
+
+              return (
+                <div key={w.id}
+                  onMouseDown={e => {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    const startX = e.clientX;
+                    let dragging = false;
+                    const onMove = (mv: MouseEvent) => {
+                      if (!dragging && Math.abs(mv.clientX - startX) > 6) { dragging = true; dragTabIdRef.current = w.id; setDragTabId(w.id); }
+                      if (dragging) {
+                        const els = document.querySelectorAll("[data-tab-id]");
+                        let found: string | null = null;
+                        els.forEach(el => { const rect = el.getBoundingClientRect(); if (mv.clientX >= rect.left && mv.clientX <= rect.right) found = (el as HTMLElement).dataset.tabId ?? null; });
+                        dragOverIdRef.current = found; setDragOverId(found);
+                      }
+                    };
+                    const onUp = () => {
+                      if (dragging && dragTabIdRef.current && dragOverIdRef.current) {
+                        const fromId = dragTabIdRef.current, toId = dragOverIdRef.current;
+                        setWins(prev => {
+                          const arr = [...prev];
+                          const fromIdx = arr.findIndex(x => x.id === fromId), toIdx = arr.findIndex(x => x.id === toId);
+                          if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) { const [moved] = arr.splice(fromIdx, 1); arr.splice(toIdx, 0, moved); }
+                          return arr;
+                        });
+                      } else if (!dragging) {
+                        setActiveFileId(null);
+                        w.minimized ? restoreWin(w.id) : focusWin(w.id);
+                      }
+                      dragTabIdRef.current = null; dragOverIdRef.current = null; setDragTabId(null); setDragOverId(null);
+                      window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp);
+                    };
+                    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+                  }}
+                  data-tab-id={w.id}
+                  onContextMenu={e => { e.preventDefault(); setTabCtx({ x: e.clientX, y: e.clientY, win: w, idx }); }}
+                  title={w.cwd}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "5px 6px 5px 10px", height: 30, borderRadius: 8,
+                    cursor: dragTabId ? "grabbing" : "default", flexShrink: 0,
+                    background: activeWinId === w.id && !activeFileId ? C.bg3 : isDragOver ? "rgba(0,229,255,.1)" : "transparent",
+                    border: `1px solid ${activeWinId === w.id && !activeFileId ? C.borderMd : isDragOver ? "rgba(0,229,255,.4)" : "transparent"}`,
+                    opacity: w.minimized ? 0.55 : dragTabId === w.id ? 0.4 : 1,
+                    transition: "all .1s", userSelect: "none",
+                  }}
+                  onMouseEnter={e => { if (!(activeWinId === w.id && !activeFileId) && !dragTabId) (e.currentTarget as HTMLElement).style.background = C.bg2; }}
+                  onMouseLeave={e => { if (!(activeWinId === w.id && !activeFileId) && !isDragOver) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
+
+                  {w.minimized && (
+                    <span style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: "#fbbf24", boxShadow: "0 0 5px rgba(251,191,36,.6)" }} />
+                  )}
+
+                  {!w.minimized && (w.kind === "browser" ? (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" style={{ flexShrink: 0 }}>
+                      <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                  ) : (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+                    </svg>
+                  ))}
+
+                  <span style={{
+                    fontSize: 12, fontFamily: MONO,
+                    color: activeWinId === w.id && !activeFileId ? "#ffffff" : w.minimized ? "#fbbf24" : "rgba(255,255,255,0.7)",
+                    fontWeight: activeWinId === w.id && !activeFileId ? 600 : 400,
+                    maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {winLabel(w)}
+                  </span>
+
+                  <TabCloseBtn onClose={() => closeWin(w.id)} />
+                </div>
+              );
+            })}
+
+            {/* New terminal button */}
+            <button onClick={addTerminal} title="New terminal"
+              style={{ ...tbtn, width: 30, height: 30, borderRadius: 8, fontSize: 18, fontWeight: 300, border: `1px solid transparent`, flexShrink: 0 }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t0; el.style.background = C.bg3; el.style.borderColor = C.border; }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.color = C.t2; el.style.background = "transparent"; el.style.borderColor = "transparent"; }}>
+              +
+            </button>
+          </div>
+
+          {/* ── Separator + File tabs ── */}
+          {fileTabs.length > 0 && (
+            <>
+              <div style={{ width: 1, height: 20, background: "rgba(255,255,255,.1)", flexShrink: 0, margin: "0 4px" }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 3, overflowX: "auto", minWidth: 0, flex: 1, scrollbarWidth: "none" }}>
+                {fileTabs.map(tab => {
+                  const isActive   = activeFileId === tab.id;
+                  const fileName   = tab.filePath.split(/[/\\]/).pop() ?? tab.filePath;
+                  const iconStroke = isActive ? "#00e5ff" : fileColor(fileName, false);
+
+                  return (
+                    <div key={tab.id}
+                      onClick={() => setActiveFileId(tab.id)}
+                      title={tab.filePath}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        padding: "5px 6px 5px 10px", height: 30, borderRadius: 8,
+                        cursor: "pointer", flexShrink: 0,
+                        background: isActive ? "rgba(0,229,255,.12)" : "transparent",
+                        border: `1px solid ${isActive ? "rgba(0,229,255,.35)" : "transparent"}`,
+                        transition: "all .1s", userSelect: "none",
+                      }}
+                      onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = C.bg2; }}
+                      onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
+
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+                        stroke={iconStroke} strokeWidth="2" style={{ flexShrink: 0 }}>
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                      </svg>
+
+                      <span style={{
+                        fontSize: 12, fontFamily: MONO,
+                        color: isActive ? "#00e5ff" : "rgba(255,255,255,0.7)",
+                        fontWeight: isActive ? 600 : 400,
+                        maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {fileName}
+                      </span>
+
+                      <TabCloseBtn onClose={() => closeFileTab(tab.id)} />
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* Drag zone */}
+          <div style={{ flex: fileTabs.length > 0 ? 0 : 1, minWidth: 20, height: "100%", cursor: "default" }}
+            onMouseDown={e => { if (e.button === 0) getCurrentWindow().startDragging().catch(() => {}); }} />
+
+          {/* Right: toolbar + window controls */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+            {toolbarSlot}
+            {!isMac && (
+            <div style={{ display: "flex", alignItems: "center", gap: 1, marginLeft: 4, paddingLeft: 6, borderLeft: `1px solid rgba(255,255,255,.08)` }}>
+              <WinBtn title="Minimize"         hoverBg="rgba(255,255,255,.1)"  hoverColor="#fff"    onClick={() => getCurrentWindow().minimize().catch(() => {})}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="4" y1="12" x2="20" y2="12"/></svg>
+              </WinBtn>
+              <WinBtn title="Maximize/Restore" hoverBg="rgba(255,255,255,.1)"  hoverColor="#fff"    onClick={() => getCurrentWindow().toggleMaximize().catch(() => {})}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+              </WinBtn>
+              <WinBtn title="Close"            hoverBg="rgba(239,68,68,.25)" hoverColor="#f87171" onClick={() => getCurrentWindow().close().catch(() => {})}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg>
+              </WinBtn>
+            </div>
+            )}
+          </div>
+        </div>{/* end button row */}
+      </div>{/* end tab bar */}
 
       {/* ── Content area ── */}
       <div style={{
         flex: 1, minHeight: 0, display: "flex",
+        overflow: "hidden",                    // ← FIX: prevent content area itself from overflowing
         marginLeft: contentMarginLeft,
         transition: "margin-left .18s cubic-bezier(.4,0,.2,1)",
       }}>
 
         {/* Main content */}
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
 
           {activeFileTab && (
             <div style={{ position: "absolute", inset: 0, zIndex: 10, background: C.bg0, display: "flex", flexDirection: "column" }}>
@@ -736,23 +818,105 @@ export function WorkspaceView({
             ref={areaRef}
             style={{
               flex: 1, minWidth: 0, minHeight: 0,
-              position: "relative", background: C.bg0, overflow: "hidden",
+              position: "relative", background: C.bg0,
+              overflow: "hidden",              // ← KEEP: clips absolute children to this boundary
+              height: "100%",                  // ← FIX: ensure real pixel height for clipping context
               opacity: activeFileTab ? 0 : 1,
               pointerEvents: activeFileTab ? "none" : "auto",
               transition: "opacity .1s",
             }}>
+            {/* ── Empty state inside workspace ── */}
+            {wins.length === 0 && (
+              <div style={{
+                position: "absolute", inset: 0,
+                display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center",
+                gap: 16, userSelect: "none", pointerEvents: "none",
+              }}>
+                {/* Terminal icon */}
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
+                  stroke="rgba(255,255,255,.55)" strokeWidth="1.8"
+                  strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 17 10 11 4 5"/>
+                  <line x1="12" y1="19" x2="20" y2="19"/>
+                </svg>
+
+                {/* Wordmark */}
+                <span style={{
+                  fontSize: 18, letterSpacing: "0.06em",
+                  color: "rgba(255,255,255,.5)",
+                  fontFamily: SANS, fontWeight: 700,
+                }}>
+                  Stackbox
+                </span>
+
+                {/* Hints */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7, marginTop: 4 }}>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,.38)", fontFamily: SANS }}>
+                    Press{" "}
+                    <span style={{ fontFamily: MONO, fontSize: 11, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, padding: "1px 8px", color: "rgba(255,255,255,.6)" }}>+</span>
+                    {" "}to open a terminal
+                  </span>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,.25)", fontFamily: SANS }}>
+                    Split · resize · arrange freely
+                  </span>
+                </div>
+              </div>
+            )}
+
             {wins.map(win => (
               win.kind === "browser" ? (
-                <div key={win.id} style={{ position: "absolute", left: win.x, top: win.y, width: win.w, height: win.h, zIndex: win.zIndex, display: win.minimized ? "none" : "block", transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none" }}>
-                  <BrowsePane paneId={win.id} runboxId={runbox.id} isActive={activeWinId === win.id} onActivate={() => focusWin(win.id)} onClose={() => closeWin(win.id)} externalUrl={pendingBrowserUrl[win.id] ?? null} onExternalUrlConsumed={() => setPendingBrowserUrl(p => ({ ...p, [win.id]: null }))} />
+                // ── Browser window wrapper ──────────────────────────────────
+                <div key={win.id} style={{
+                  position: "absolute",
+                  left: win.x, top: win.y,
+                  width: win.w, height: win.h,
+                  zIndex: win.zIndex,
+                  display: win.minimized ? "none" : "flex", // ← FIX: flex instead of block
+                  flexDirection: "column",                   // ← FIX: contain children vertically
+                  overflow: "hidden",                        // ← FIX: clip content to boundary
+                  transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
+                }}>
+                  <BrowsePane
+                    paneId={win.id}
+                    runboxId={runbox.id}
+                    isActive={activeWinId === win.id}
+                    onActivate={() => focusWin(win.id)}
+                    onClose={() => closeWin(win.id)}
+                    externalUrl={pendingBrowserUrl[win.id] ?? null}
+                    onExternalUrlConsumed={() => setPendingBrowserUrl(p => ({ ...p, [win.id]: null }))}
+                  />
                 </div>
               ) : (
-                <div key={win.id} style={{ position: "absolute", left: win.x, top: win.y, width: win.w, height: win.h, zIndex: win.zIndex, display: win.minimized ? "none" : "block", transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none" }}>
-                  <RunPane runboxCwd={runbox.cwd} runboxId={runbox.id} runboxName={runbox.name} sessionId={`${runbox.id}-${win.id}`} label={win.label}
-                    onCwdChange={cwd => { setWins(prev => prev.map(w => w.id === win.id ? { ...w, cwd } : w)); if (activeWinId === win.id) onCwdChange(cwd); }}
-                    isActive={activeWinId === win.id && !activeFileTab} onActivate={() => { setActiveFileId(null); focusWin(win.id); }} onSessionChange={sid => onSessionChange?.(sid)}
-                    onClose={() => closeWin(win.id)} onMinimize={() => minimizeWin(win.id)} onMaximize={() => maximizeWin(win.id)}
-                    onDragStart={(e: React.MouseEvent) => handleDragStart(e, win.id)} onResizeStart={(e: React.MouseEvent, dir: string) => handleResizeStart(e, win.id, dir)}
+                // ── Terminal window wrapper ─────────────────────────────────
+                <div key={win.id} style={{
+                  position: "absolute",
+                  left: win.x, top: win.y,
+                  width: win.w, height: win.h,
+                  zIndex: win.zIndex,
+                  display: win.minimized ? "none" : "flex", // ← FIX: flex instead of block
+                  flexDirection: "column",                   // ← FIX: contain children vertically
+                  overflow: "hidden",                        // ← FIX: clip content to boundary
+                  transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
+                }}>
+                  <RunPane
+                    runboxCwd={runbox.cwd}
+                    runboxId={runbox.id}
+                    runboxName={runbox.name}
+                    sessionId={`${runbox.id}-${win.id}`}
+                    label={win.label}
+                    onCwdChange={cwd => {
+                      setWins(prev => prev.map(w => w.id === win.id ? { ...w, cwd } : w));
+                      if (activeWinId === win.id) onCwdChange(cwd);
+                    }}
+                    isActive={activeWinId === win.id && !activeFileTab}
+                    onActivate={() => { setActiveFileId(null); focusWin(win.id); }}
+                    onSessionChange={sid => onSessionChange?.(sid)}
+                    onClose={() => closeWin(win.id)}
+                    onMinimize={() => minimizeWin(win.id)}
+                    onMaximize={() => maximizeWin(win.id)}
+                    onDragStart={(e: React.MouseEvent) => handleDragStart(e, win.id)}
+                    onResizeStart={(e: React.MouseEvent, dir: string) => handleResizeStart(e, win.id, dir)}
                     onSplitDown={() => {
                       const area = areaRef.current; if (!area) return;
                       setWins(prev => {

@@ -22,5 +22,22 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    watch: {
+      // Only watch files inside desktop/src/ for HMR.
+      // Without this, Vite reloads the app whenever the file tree
+      // panel creates/deletes/renames files anywhere in the project.
+      ignored: [
+        "**/node_modules/**",
+        "**/src-tauri/**",
+        "**/dist/**",
+        // Ignore anything that isn't a source file
+        (path: string) => {
+          // Always watch desktop/src/** (our actual source)
+          if (path.includes("/desktop/src/")) return false;
+          // Ignore everything else (user project files, etc.)
+          return true;
+        },
+      ],
+    },
   },
 });

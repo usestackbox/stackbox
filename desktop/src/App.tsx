@@ -18,48 +18,6 @@ const SIDEBAR_TOTAL = SIDEBAR_W + SIDEBAR_LEFT + SIDEBAR_GAP; // 236
 
 type SidePanel = "files" | "git" | "memory" | null;
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
-  return (
-    <div style={{
-      flex: 1, display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
-      gap: 14, background: C.bg0,
-    }}>
-      <div style={{
-        width: 42, height: 42, borderRadius: 12,
-        border: `1px solid ${C.border}`,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: C.bg2,
-      }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.t2}
-          strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="4 17 10 11 4 5"/>
-          <line x1="12" y1="19" x2="20" y2="19"/>
-        </svg>
-      </div>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.t0, marginBottom: 6, fontFamily: SANS }}>
-          No runboxes
-        </div>
-        <div style={{ fontSize: 12, color: C.t1, marginBottom: 22, lineHeight: 1.8, fontFamily: SANS }}>
-          Create a runbox to open a terminal session.
-        </div>
-        <button
-          onClick={onCreate}
-          style={{
-            padding: "9px 24px", background: C.t0, border: "none", borderRadius: 9,
-            color: C.bg0, fontSize: 12, fontWeight: 700, cursor: "pointer",
-            fontFamily: SANS, transition: "opacity .15s",
-          }}
-          onMouseEnter={e => (e.currentTarget as HTMLElement).style.opacity = ".86"}
-          onMouseLeave={e => (e.currentTarget as HTMLElement).style.opacity = "1"}>
-          New Runbox
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const [runboxes,         setRunboxes]         = useState<Runbox[]>(() => loadRunboxes());
   useMemorySummaryBackfill();
@@ -72,24 +30,43 @@ export default function App() {
   const [branchMap,        setBranchMap]        = useState<Record<string, string>>({});
   const [fileTreeOpen,     setFileTreeOpen]     = useState<boolean>(false);
   const [sidePanel,        setSidePanel]        = useState<SidePanel>(null);
+
+  // Dynamic sidebar width — updated by Sidebar via onFileTreeWidth callback
+  const [sidebarTotal, setSidebarTotal] = useState(SIDEBAR_TOTAL);
+
   const diffOpenerRefs = useRef<Record<string, { open: (fc: any) => void }>>({});
   const fileOpenerRefs = useRef<Record<string, { open: (path: string) => void }>>({});
 
   const handleSidebarToggle = useCallback(() => {
-    if (sidebarCollapsed) { setSidebarCollapsed(false); setFileTreeOpen(false); return; }
-    if (fileTreeOpen)     { setFileTreeOpen(false); return; }
+    if (sidebarCollapsed) {
+      setSidebarCollapsed(false);
+      setFileTreeOpen(false);
+      return;
+    }
+    if (fileTreeOpen) {
+      setFileTreeOpen(false);
+      return;
+    }
     setSidebarCollapsed(true);
   }, [sidebarCollapsed, fileTreeOpen]);
 
   const handleFileTreeToggle = useCallback(() => {
     if (sidebarCollapsed) { setSidebarCollapsed(false); setFileTreeOpen(true); return; }
     if (!fileTreeOpen)    { setFileTreeOpen(true); return; }
-    setSidebarCollapsed(true); setFileTreeOpen(false);
+    setSidebarCollapsed(true);
+    setFileTreeOpen(false);
   }, [sidebarCollapsed, fileTreeOpen]);
 
   const toggleSide = useCallback((panel: "files" | "git" | "memory") => {
     setSidePanel(prev => prev === panel ? null : panel);
   }, []);
+
+  // When sidebar collapses/reopens, reset to the standard total
+  useEffect(() => {
+    if (sidebarCollapsed) setSidebarTotal(0);
+    else if (!fileTreeOpen) setSidebarTotal(SIDEBAR_TOTAL);
+    // When fileTreeOpen, Sidebar will call onFileTreeWidth to set the correct value
+  }, [sidebarCollapsed, fileTreeOpen]);
 
   useEffect(() => { saveRunboxes(runboxes); }, [runboxes]);
 
@@ -129,10 +106,10 @@ export default function App() {
   const safeId          = runboxes.find(r => r.id === activeId)?.id ?? runboxes[0]?.id ?? null;
   const runboxesSummary = runboxes.map(r => ({ id: r.id, name: r.name }));
 
-  const contentMarginLeft = sidebarCollapsed ? 0 : SIDEBAR_TOTAL;
+  const contentMarginLeft = sidebarCollapsed ? 0 : sidebarTotal;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", background: C.bg0, overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", background: C.bg0, overflow: "hidden", position: "relative" }}>
 
       {/* ── Floating Sidebar ── */}
       <Sidebar
@@ -148,6 +125,9 @@ export default function App() {
         fileTreeOpen={fileTreeOpen}
         onFileTreeToggle={handleFileTreeToggle}
         onOpenFile={(path) => fileOpenerRefs.current[safeId ?? ""]?.open(path)}
+        onFileTreeWidth={w => {
+          if (!sidebarCollapsed) setSidebarTotal(w);
+        }}
       />
 
       {/* ── Workspace rows ── */}
@@ -187,7 +167,46 @@ export default function App() {
         </div>
       ))}
 
-      {runboxes.length === 0 && <EmptyState onCreate={() => setShowModal(true)} />}
+      {/* ── Empty state — no runboxes, or none selected ── */}
+      {(runboxes.length === 0 || !safeId) && (
+        <div style={{
+          position: "absolute",
+          top: 42, left: contentMarginLeft, right: 0, bottom: 0,
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          gap: 28, background: C.bg0,
+          transition: "left .18s cubic-bezier(.4,0,.2,1)",
+          zIndex: 1,
+        }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+            <svg width="52" height="52" viewBox="0 0 24 24" fill="none"
+              stroke="rgba(255,255,255,.1)" strokeWidth="1.1"
+              strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2.5"/>
+              <polyline points="8 21 12 17 16 21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+            <span className="stackbox-brand" style={{
+              fontSize: 24, letterSpacing: "0.07em",
+              color: "rgba(255,255,255,.09)",
+            }}>
+              Stackbox
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+            <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,.18)", fontFamily: SANS, letterSpacing: ".02em" }}>
+              {runboxes.length === 0 ? "No runboxes yet" : "No runbox selected"}
+            </p>
+            <button
+              onClick={() => setShowModal(true)}
+              style={{ padding: "6px 18px", background: "transparent", border: "1px solid rgba(255,255,255,.09)", borderRadius: 8, color: "rgba(255,255,255,.25)", fontSize: 11, fontFamily: SANS, cursor: "pointer", transition: "all .15s" }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(255,255,255,.05)"; el.style.borderColor = "rgba(255,255,255,.18)"; el.style.color = "rgba(255,255,255,.55)"; }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.borderColor = "rgba(255,255,255,.09)"; el.style.color = "rgba(255,255,255,.25)"; }}>
+              + New Runbox
+            </button>
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <CreateRunboxModal

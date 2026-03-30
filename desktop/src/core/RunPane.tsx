@@ -31,20 +31,20 @@ const THEME = {
 const CSS = `
 .rp-win {
   width: 100%; height: 100%;
+  box-sizing: border-box;
   background: ${BG};
   display: flex; flex-direction: column;
   overflow: hidden;
+  position: relative;
   border-radius: 8px;
   border: 1px solid rgba(255,255,255,.06);
   transition: border-color .15s, background .15s;
-  box-sizing: border-box;
 }
 .rp-win.rp-active {
   border: 1px solid rgba(255,255,255,.18);
   background: ${BG_ACT};
 }
 
-/* ── Title bar ── */
 .rp-titlebar {
   height: 32px; flex-shrink: 0;
   display: flex; align-items: center;
@@ -54,6 +54,8 @@ const CSS = `
   cursor: grab; user-select: none;
   border-radius: 8px 8px 0 0;
   transition: background .15s;
+  box-sizing: border-box;
+  min-height: 32px; max-height: 32px;
 }
 .rp-win.rp-active .rp-titlebar {
   background: rgba(255,255,255,.035);
@@ -100,7 +102,6 @@ const CSS = `
   border-color: rgba(255,255,255,.12);
 }
 
-/* ── Titlebar action buttons ── */
 .rp-tbtn {
   width: 22px; height: 22px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -120,12 +121,12 @@ const CSS = `
   color: #f87171 !important;
 }
 
-/* ── Body ── */
 .rp-body {
   flex: 1; min-height: 0; min-width: 0;
   position: relative; overflow: hidden;
   border-radius: 0 0 7px 7px;
   background: ${BG};
+  display: block;
 }
 .rp-win.rp-active .rp-body { background: ${BG_ACT}; }
 .rp-win:not(.rp-active) .rp-body { opacity: 0.45; }
@@ -159,16 +160,15 @@ const CSS = `
 .rp-win.rp-active .rp-fade-t { background: linear-gradient(to bottom, ${BG_ACT}, transparent); }
 .rp-win.rp-active .rp-fade-b { background: linear-gradient(to top,    ${BG_ACT}, transparent); }
 
-/* ── Resize handles ── */
 .rp-resize { position: absolute; z-index: 100; }
-.rp-resize-r  { top: 8px; right: -3px;  width: 6px; height: calc(100% - 16px); cursor: ew-resize; }
-.rp-resize-l  { top: 8px; left: -3px;   width: 6px; height: calc(100% - 16px); cursor: ew-resize; }
-.rp-resize-b  { bottom: -3px; left: 8px; width: calc(100% - 16px); height: 6px; cursor: ns-resize; }
-.rp-resize-t  { top: -3px; left: 8px; width: calc(100% - 16px); height: 6px; cursor: ns-resize; }
-.rp-resize-br { bottom: -3px; right: -3px; width: 14px; height: 14px; cursor: nwse-resize; }
-.rp-resize-bl { bottom: -3px; left: -3px;  width: 14px; height: 14px; cursor: nesw-resize; }
-.rp-resize-tr { top: -3px; right: -3px;    width: 14px; height: 14px; cursor: nesw-resize; }
-.rp-resize-tl { top: -3px; left: -3px;     width: 14px; height: 14px; cursor: nwse-resize; }
+.rp-resize-r  { top: 8px;  right: 0;   width: 5px; height: calc(100% - 16px); cursor: ew-resize; }
+.rp-resize-l  { top: 8px;  left: 0;    width: 5px; height: calc(100% - 16px); cursor: ew-resize; }
+.rp-resize-b  { bottom: 0; left: 8px;  width: calc(100% - 16px); height: 5px; cursor: ns-resize; }
+.rp-resize-t  { top: 0;    left: 8px;  width: calc(100% - 16px); height: 5px; cursor: ns-resize; }
+.rp-resize-br { bottom: 0; right: 0;   width: 12px; height: 12px; cursor: nwse-resize; }
+.rp-resize-bl { bottom: 0; left: 0;    width: 12px; height: 12px; cursor: nesw-resize; }
+.rp-resize-tr { top: 0;    right: 0;   width: 12px; height: 12px; cursor: nesw-resize; }
+.rp-resize-tl { top: 0;    left: 0;    width: 12px; height: 12px; cursor: nwse-resize; }
 `;
 
 function parseOsc7(data: string): string | null {
@@ -185,103 +185,67 @@ function parseOsc7(data: string): string | null {
   } catch { return null; }
 }
 
-// ── Titlebar icon buttons ─────────────────────────────────────────────────────
-function TBtn({
-  title, onClick, danger, children,
-}: {
-  title: string;
-  onClick: (e: React.MouseEvent) => void;
-  danger?: boolean;
-  children: React.ReactNode;
+function TBtn({ title, onClick, danger, children }: {
+  title: string; onClick: (e: React.MouseEvent) => void;
+  danger?: boolean; children: React.ReactNode;
 }) {
   return (
-    <button
-      className={`rp-tbtn${danger ? " rp-close-btn" : ""}`}
-      title={title}
+    <button className={`rp-tbtn${danger ? " rp-close-btn" : ""}`} title={title}
       onMouseDown={e => e.stopPropagation()}
-      onClick={e => { e.stopPropagation(); onClick(e); }}
-    >
+      onClick={e => { e.stopPropagation(); onClick(e); }}>
       {children}
     </button>
   );
 }
 
-// ── Split-down icon ───────────────────────────────────────────────────────────
 function IcoSplitDown() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1.5" y="1.5" width="13" height="13" rx="2"/>
-      <line x1="1.5" y1="8.5" x2="14.5" y2="8.5"/>
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2"/><line x1="1.5" y1="8.5" x2="14.5" y2="8.5"/>
     </svg>
   );
 }
 
-// ── Split-left icon ───────────────────────────────────────────────────────────
 function IcoSplitLeft() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1.5" y="1.5" width="13" height="13" rx="2"/>
-      <line x1="8.5" y1="1.5" x2="8.5" y2="14.5"/>
+      <rect x="1.5" y="1.5" width="13" height="13" rx="2"/><line x1="8.5" y1="1.5" x2="8.5" y2="14.5"/>
     </svg>
   );
 }
 
-// ── Minimize icon — rounded square with pill bar at the bottom (matches design) ─
 function IcoMinimize() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-      {/* Outer rounded square — slightly thicker to match the bold outer ring in the icon */}
       <rect x="1" y="1" width="14" height="14" rx="3.5" strokeWidth="1.8"/>
-      {/* Inner pill / dash — thick, centred near the bottom third */}
       <line x1="4.5" y1="11.5" x2="11.5" y2="11.5" strokeWidth="2.2"/>
     </svg>
   );
 }
 
-// ── Close icon ────────────────────────────────────────────────────────────────
 function IcoClose() {
   return (
     <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-      <line x1="4" y1="4" x2="12" y2="12"/>
-      <line x1="12" y1="4" x2="4" y2="12"/>
+      <line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/>
     </svg>
   );
 }
 
 export default function RunPane({
-  runboxCwd    = "~/",
-  runboxId     = "default",
-  runboxName   = "runbox",
-  sessionId,
-  label        = "",
-  onCwdChange,
-  onSessionChange,
-  isActive,
-  onActivate,
-  onClose,
-  onMinimize,
-  onMaximize,
-  onSplitDown,
-  onSplitLeft,
-  onDragStart,
-  onResizeStart,
+  runboxCwd = "~/", runboxId = "default", runboxName = "runbox",
+  sessionId, label = "",
+  onCwdChange, onSessionChange, isActive, onActivate,
+  onClose, onMinimize, onMaximize, onSplitDown, onSplitLeft,
+  onDragStart, onResizeStart,
 }: {
-  runboxCwd?:       string;
-  runboxId?:        string;
-  runboxName?:      string;
-  sessionId?:       string;
-  label?:           string;
-  onCwdChange?:     (cwd: string) => void;
-  onSessionChange?: (sid: string) => void;
-  isActive?:        boolean;
-  onActivate?:      () => void;
-  onClose?:         () => void;
-  onMinimize?:      () => void;
-  onMaximize?:      () => void;
-  onSplitDown?:     () => void;
-  onSplitLeft?:     () => void;
-  onDragStart?:     (e: React.MouseEvent) => void;
-  onResizeStart?:   (e: React.MouseEvent, dir: string) => void;
+  runboxCwd?: string; runboxId?: string; runboxName?: string;
+  sessionId?: string; label?: string;
+  onCwdChange?: (cwd: string) => void; onSessionChange?: (sid: string) => void;
+  isActive?: boolean; onActivate?: () => void;
+  onClose?: () => void; onMinimize?: () => void; onMaximize?: () => void;
+  onSplitDown?: () => void; onSplitLeft?: () => void;
+  onDragStart?: (e: React.MouseEvent) => void;
+  onResizeStart?: (e: React.MouseEvent, dir: string) => void;
 }) {
   const termElRef = useRef<HTMLDivElement>(null);
   const termRef   = useRef<Terminal | null>(null);
@@ -297,10 +261,11 @@ export default function RunPane({
   useEffect(() => {
     ["sbx-css","sbx-css-v2","sbx-css-v3","sbx-css-v4","sbx-css-v5",
      "rp-css-v1","rp-css-v2","rp-css-v3","rp-css-v4","rp-css-v5",
-     "rp-css-v6","rp-css-v7","rp-css-v8","rp-css-v9","rp-css-v10"]
+     "rp-css-v6","rp-css-v7","rp-css-v8","rp-css-v9","rp-css-v10",
+     "rp-css-v11","rp-css-v12"]
       .forEach(id => document.getElementById(id)?.remove());
     const s = document.createElement("style");
-    s.id = "rp-css-v10"; s.textContent = CSS;
+    s.id = "rp-css-v12"; s.textContent = CSS;
     document.head.appendChild(s);
   }, []);
 
@@ -314,26 +279,17 @@ export default function RunPane({
 
   useEffect(() => {
     if (!termElRef.current) return;
-    gone.current    = false;
-    spawned.current = false;
+    gone.current = false; spawned.current = false;
 
     const term = new Terminal({
-      cursorBlink:     true,
-      cursorStyle:     "bar",
-      cursorWidth:     1.5,
-      fontSize:        13,
-      lineHeight:      1.5,
-      letterSpacing:   0,
-      fontWeight:      "normal",
-      fontWeightBold:  "bold",
-      fontFamily:      "ui-monospace, 'SF Mono', Menlo, Monaco, 'Cascadia Mono', 'Consolas', 'Courier New', monospace",
-      theme:           THEME,
-      convertEol:      true,
-      scrollback:      12000,
-      allowTransparency: true,
-      macOptionIsMeta: true,
-      rightClickSelectsWord: true,
-      disableStdin:    false,
+      cursorBlink: true, cursorStyle: "bar", cursorWidth: 1.5,
+      fontSize: 13,
+      lineHeight: 1.4,  // slightly tighter than 1.5 — fits more rows, less chance of last row being cut
+      letterSpacing: 0, fontWeight: "normal", fontWeightBold: "bold",
+      fontFamily: "ui-monospace, 'SF Mono', Menlo, Monaco, 'Cascadia Mono', 'Consolas', 'Courier New', monospace",
+      theme: THEME, convertEol: true, scrollback: 12000,
+      allowTransparency: true, macOptionIsMeta: true,
+      rightClickSelectsWord: true, disableStdin: false,
     });
 
     const fit = new FitAddon();
@@ -391,18 +347,14 @@ export default function RunPane({
           d.dispose();
           if (!gone.current && term.cols > 0) {
             spawned.current = true;
-            invoke("pty_spawn", {
-              sessionId: sid, runboxId, cwd: runboxCwd,
-              cols: term.cols, rows: term.rows,
-            }).catch(() => {});
+            invoke("pty_spawn", { sessionId: sid, runboxId, cwd: runboxCwd, cols: term.cols, rows: term.rows }).catch(() => {});
           }
         });
       }),
     ]).then(([a, b]) => { unO = a; unE = b; });
 
     const ro = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
+      const entry = entries[0]; if (!entry) return;
       const { width, height } = entry.contentRect;
       if (width <= 0 || height <= 0) return;
       try { fit.fit(); } catch { return; }
@@ -410,28 +362,20 @@ export default function RunPane({
       invoke("pty_resize", { sessionId: sid, cols: term.cols, rows: term.rows }).catch(() => {});
       if (!spawned.current && !gone.current) {
         spawned.current = true;
-        styleScrollbar();
-        applyScreenMargin();
-        term.focus();
-        invoke("pty_spawn", {
-          sessionId: sid, runboxId, cwd: runboxCwd,
-          cols: term.cols, rows: term.rows,
-        }).catch(err => {
-          if (!gone.current) term.write(`\r\n\x1b[38;5;196m[error: ${err}]\x1b[0m\r\n`);
-        });
+        styleScrollbar(); applyScreenMargin(); term.focus();
+        invoke("pty_spawn", { sessionId: sid, runboxId, cwd: runboxCwd, cols: term.cols, rows: term.rows })
+          .catch(err => { if (!gone.current) term.write(`\r\n\x1b[38;5;196m[error: ${err}]\x1b[0m\r\n`); });
       }
     });
     ro.observe(termElRef.current!);
 
     return () => {
       gone.current = true;
-      ro.disconnect();
-      sbObs.disconnect();
+      ro.disconnect(); sbObs.disconnect();
       unO?.(); unE?.();
       invoke("pty_kill", { sessionId: sid }).catch(() => {});
       term.dispose();
-      termRef.current = null;
-      fitRef.current  = null;
+      termRef.current = null; fitRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -444,54 +388,25 @@ export default function RunPane({
   const DIRS = ["r","l","b","t","br","bl","tr","tl"] as const;
 
   return (
-    <div
-      className={`rp-win${isActive ? " rp-active" : ""}`}
-      onMouseDown={() => onActivate?.()}
-      onPaste={handlePaste}
-    >
+    <div className={`rp-win${isActive ? " rp-active" : ""}`}
+      onMouseDown={() => onActivate?.()} onPaste={handlePaste}>
       {DIRS.map(dir => (
         <div key={dir} className={`rp-resize rp-resize-${dir}`}
           onMouseDown={e => { e.stopPropagation(); onResizeStart?.(e, dir); }} />
       ))}
-
-      {/* ── Title bar ── */}
-      <div
-        className="rp-titlebar"
-        onMouseDown={e => {
-          if ((e.target as HTMLElement).closest('.rp-tbtn')) return;
-          onDragStart?.(e);
-        }}
-      >
+      <div className="rp-titlebar"
+        onMouseDown={e => { if ((e.target as HTMLElement).closest('.rp-tbtn')) return; onDragStart?.(e); }}>
         <div className="rp-dot" />
         <div className="rp-vsep" />
         <span className="rp-cwd">{liveCwd || runboxCwd}</span>
         {label && <span className="rp-chip">{label}</span>}
-
-        {/* ── Action buttons — right side ── */}
         <div style={{ display: "flex", alignItems: "center", gap: 1, marginLeft: 2 }}>
-          {onSplitDown && (
-            <TBtn title="Split down" onClick={onSplitDown}>
-              <IcoSplitDown />
-            </TBtn>
-          )}
-          {onSplitLeft && (
-            <TBtn title="Split left" onClick={onSplitLeft}>
-              <IcoSplitLeft />
-            </TBtn>
-          )}
-          {onMinimize && (
-            <TBtn title="Minimize" onClick={onMinimize}>
-              <IcoMinimize />
-            </TBtn>
-          )}
-          {onClose && (
-            <TBtn title="Close" onClick={onClose} danger>
-              <IcoClose />
-            </TBtn>
-          )}
+          {onSplitDown && <TBtn title="Split down" onClick={onSplitDown}><IcoSplitDown /></TBtn>}
+          {onSplitLeft && <TBtn title="Split left" onClick={onSplitLeft}><IcoSplitLeft /></TBtn>}
+          {onMinimize  && <TBtn title="Minimize"   onClick={onMinimize} ><IcoMinimize  /></TBtn>}
+          {onClose     && <TBtn title="Close" onClick={onClose} danger  ><IcoClose     /></TBtn>}
         </div>
       </div>
-
       <div className="rp-body">
         <div className="rp-fade-t" />
         <div className="rp-xterm" ref={termElRef} />

@@ -50,7 +50,7 @@ pub fn handle(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
         Response::builder()
             .status(status)
             .header("Content-Type", ct)
-            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allown-Origin", "*")
             .body(final_body)
             .unwrap()
     })

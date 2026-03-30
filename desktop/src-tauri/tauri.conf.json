@@ -13,17 +13,18 @@
     "windows": [
       {
         "label": "main",
-        "title": "Stackbox",
         "width": 1280,
         "height": 800,
         "minWidth": 800,
         "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
-        "decorations": false,
+        "decorations": true,
         "transparent": false,
         "focus": true,
-        "visible": true
+        "visible": true,
+        "titleBarStyle": "Overlay",
+        "title": ""
       }
     ],
     "security": {
