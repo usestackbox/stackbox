@@ -13,33 +13,24 @@ jobs:
   create-release:
     runs-on: ubuntu-22.04
     outputs:
-      release_id: ${{ steps.create-release.outputs.releaseId }}
+      release_id: ${{ steps.create-release.outputs.result }}
     steps:
       - uses: actions/checkout@v4
       - name: Create Release
         id: create-release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/github-script@v7
         with:
-          projectPath: desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: Stackbox ${{ github.ref_name }}
-          releaseBody: |
-            ## What's new in ${{ github.ref_name }}
-
-            See [CHANGELOG.md](https://github.com/usestackbox/stackbox/blob/main/CHANGELOG.md) for details.
-
-            ## Install
-
-            Quick install (macOS/Linux):
-
-            curl -fsSL https://usestackbox.github.io/stackbox/install.sh | sh
-
-            Or download the installer for your platform below.
-          releaseDraft: true
-          prerelease: false
-          skipBuild: true
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: context.ref_name,
+              name: `Stackbox ${context.ref_name}`,
+              body: `## What's new in ${context.ref_name}\n\nSee [CHANGELOG.md](https://github.com/usestackbox/stackbox/blob/main/CHANGELOG.md) for details.\n\n## Install\n\nQuick install (macOS/Linux):\n\ncurl -fsSL https://usestackbox.github.io/stackbox/install.sh | sh\n\nOr download the installer for your platform below.`,
+              draft: true,
+              prerelease: false
+            });
+            return data.id;
 
   build:
     needs: create-release
