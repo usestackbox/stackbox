@@ -10,7 +10,40 @@ permissions:
   actions: write
 
 jobs:
-  release:
+  create-release:
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.create-release.outputs.releaseId }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Release
+        id: create-release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: Stackbox ${{ github.ref_name }}
+          releaseBody: |
+            ## What's new in ${{ github.ref_name }}
+
+            See [CHANGELOG.md](https://github.com/usestackbox/stackbox/blob/main/CHANGELOG.md) for details.
+
+            ## Install
+
+            Quick install (macOS/Linux):
+
+            curl -fsSL https://usestackbox.github.io/stackbox/install.sh | sh
+
+            Or download the installer for your platform below.
+          releaseDraft: true
+          prerelease: false
+
+  build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -66,7 +99,7 @@ jobs:
         working-directory: desktop
         run: bun install
 
-      - name: Build Tauri app
+      - name: Build & Upload
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -74,20 +107,5 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: Stackbox ${{ github.ref_name }}
-          releaseBody: |
-            ## What's new in ${{ github.ref_name }}
-
-            See [CHANGELOG.md](https://github.com/usestackbox/stackbox/blob/main/CHANGELOG.md) for details.
-
-            ## Install
-
-            Quick install (macOS/Linux):
-
-            curl -fsSL https://usestackbox.github.io/stackbox/install.sh | sh
-
-            Or download the installer for your platform below.
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: --target ${{ matrix.target }}
