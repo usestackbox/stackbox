@@ -32,7 +32,6 @@ fn registry_key(path: &str) -> String {
         .to_string()
 }
 
-// ── FileConflictState ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct OwnedLines {
@@ -309,13 +308,11 @@ pub fn build_conflict_trace(registry: &ConflictRegistry, file: &str) -> serde_js
     })
 }
 
-/// Clear conflict state for a file (user resolved manually).
 pub fn clear_conflict(registry: &ConflictRegistry, file: &str) {
     let key = registry_key(file);
     registry.lock().unwrap().remove(&key);
 }
 
-// ── Internal helpers ──────────────────────────────────────────────────────────
 
 fn capture_git_diff(cwd: &str, file: &str) -> String {
     if cwd.is_empty() { return String::new(); }
@@ -334,7 +331,6 @@ fn capture_git_diff(cwd: &str, file: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Parse unified diff hunks → Vec<(start_line, end_line)> for changed lines.
 fn parse_hunk_ranges(diff: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     for line in diff.lines() {
@@ -402,11 +398,9 @@ fn build_context_for_waiter(state: &FileConflictState) -> String {
     ctx
 }
 
-// ── Tauri commands ────────────────────────────────────────────────────────────
 
 use crate::state::AppState;
 
-/// MCP-exposed: request write lock on a file.
 #[tauri::command]
 pub fn conflict_request_lock(
     file:       String,
@@ -422,7 +416,6 @@ pub fn conflict_request_lock(
     serde_json::to_value(result).unwrap_or_default()
 }
 
-/// MCP-exposed: release write lock and capture diff.
 #[tauri::command]
 pub fn conflict_release_lock(
     file:       String,
@@ -446,7 +439,6 @@ pub fn conflict_release_lock(
     }
 }
 
-/// MCP-exposed: verify a write didn't overlap other agents' lines.
 #[tauri::command]
 pub fn conflict_verify_write(
     file:     String,
@@ -467,7 +459,6 @@ pub fn conflict_verify_write(
     serde_json::to_value(result).unwrap_or_default()
 }
 
-/// Frontend: get current conflict state for a file.
 #[tauri::command]
 pub fn conflict_get_state(
     file:  String,
@@ -476,7 +467,6 @@ pub fn conflict_get_state(
     build_conflict_trace(&state.conflict_registry, &file)
 }
 
-/// Frontend: clear conflict state (user resolved manually).
 #[tauri::command]
 pub fn conflict_clear(
     file:  String,
@@ -485,7 +475,6 @@ pub fn conflict_clear(
     clear_conflict(&state.conflict_registry, &file);
 }
 
-/// Called by PTY monitor on process exit — force releases all locks held by session.
 pub fn on_session_exit(registry: &ConflictRegistry, session_id: &str, cwd: &str) {
     let notifications = force_release_on_process_exit(registry, session_id, cwd);
     for (file, next_agent, next_session, context) in notifications {

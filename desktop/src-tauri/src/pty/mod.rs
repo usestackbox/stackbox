@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::{
     agent::{context::inject, injector, kind::AgentKind},
-    git::repo::{ensure_git_repo, ensure_worktree, remove_worktree},
+    git::repo::{ensure_git_repo, remove_worktree},
     memory,
     mcp::config::write_mcp_config,
     state::{AppState, PtySession},
@@ -57,6 +57,27 @@ fn clear_git_lock(cwd: &str) {
     }
 }
 
+/// Detect whether `cwd` is already an agent worktree.
+///
+/// `commands/pty.rs` calls `ensure_worktree` with the original workspace cwd
+/// and then passes the resulting worktree path as `cwd` to this function.
+/// So by the time we arrive here, `cwd` IS the worktree — we must not create
+/// another one on top of it.
+///
+/// A path is a Stackbox worktree if its folder name starts with "stackbox-wt-".
+fn detect_worktree(cwd: &str) -> Option<String> {
+    let folder = std::path::Path::new(cwd)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+
+    if folder.starts_with("stackbox-wt-") {
+        Some(cwd.to_string())
+    } else {
+        None
+    }
+}
+
 pub async fn spawn(
     app:        AppHandle,
     session_id: String,
@@ -88,14 +109,18 @@ pub async fn spawn(
 
     clear_git_lock(&resolved_cwd);
 
-    ensure_git_repo(&resolved_cwd, &runbox_id)
-        .unwrap_or_else(|e| { eprintln!("[pty] ensure_git_repo: {e}"); String::new() });
+    // Only call ensure_git_repo on the ORIGINAL workspace, not on a worktree.
+    // If cwd is already a worktree (starts with stackbox-wt-), git is already
+    // initialised — calling ensure_git_repo here would corrupt the worktree's
+    // .git file pointer.
+    let worktree_path = detect_worktree(&resolved_cwd);
+    if worktree_path.is_none() {
+        // Raw workspace cwd — still safe to ensure git
+        ensure_git_repo(&resolved_cwd, &runbox_id)
+            .unwrap_or_else(|e| { eprintln!("[pty] ensure_git_repo: {e}"); String::new() });
+    }
 
-    let worktree_path = if agent_kind != AgentKind::Shell {
-        ensure_worktree(&resolved_cwd, &session_id)
-    } else {
-        None
-    };
+    // effective_cwd is the worktree if one was detected, otherwise raw cwd
     let effective_cwd = worktree_path.as_deref().unwrap_or(&resolved_cwd).to_string();
 
     clear_git_lock(&effective_cwd);
@@ -173,7 +198,6 @@ pub async fn spawn(
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") { cmd.env("ANTHROPIC_API_KEY", key); }
 
     // ── Docker exec prefix ────────────────────────────────────────────────────
-    // If docker is enabled for this workspace, wrap the spawn inside the container.
     if docker {
         if let Ok(prefix) = crate::docker::exec_prefix(&runbox_id) {
             cmd.env("STACKBOX_DOCKER_EXEC", &prefix);
@@ -341,6 +365,9 @@ pub async fn spawn(
             snapshot_from_git(&db_arc, &rb_id, &sid, &cwd_thr);
         }
 
+        // Only remove the worktree if it was detected (i.e. owned by this session).
+        // pty_kill also calls remove_worktree — remove_worktree is idempotent so
+        // double-calling is safe, but we guard here to avoid log noise.
         if let Some(ref wt) = worktree_path_thr {
             remove_worktree(wt);
         }
