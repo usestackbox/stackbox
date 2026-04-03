@@ -3,3 +3,25 @@ dist/
 .env
 *.log
 .DS_Store
+# Enforce LF line endings on all text files (critical for Windows devs)
+* text=auto eol=lf
+
+# Rust diffs show function names in hunk headers
+*.rs diff=rust
+
+# Don't diff lock files — they're noise in PRs
+bun.lock  -diff
+Cargo.lock -diff
+
+# Treat compiled/binary files as binary
+*.ico  binary
+*.icns binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ttf  binary
+*.otf  binary
+*.woff binary
+*.woff2 binary

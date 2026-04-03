@@ -1,0 +1,27 @@
+/* index.css */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: #080808;
+  color: rgba(255,255,255,.93);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Global scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.22); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Global animations */
+@keyframes spin    { to { transform: rotate(360deg); } }
+@keyframes fadeUp  { from { opacity:0; transform:translateY(8px) scale(.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+@keyframes slideIn { from { opacity:0; transform:translateX(10px); }  to { opacity:1; transform:translateX(0); } }
+
+/* Brand font */
+.stackbox-brand { font-family: 'DM Sans', system-ui, sans-serif; letter-spacing: 0.07em; }
