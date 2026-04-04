@@ -2,28 +2,18 @@
 //
 // File Conflict Prevention — 4 layers
 //
-// Layer 1 — Section Ownership:  after any write, git diff is captured and
-//                                registered as "owned" lines for that agent.
-// Layer 2 — Write Locking:      MCP tool `file_write_request` serialises access.
-//                                Lock tied to PTY process — released on idle/exit.
-// Layer 3 — Diff Merge:         after lock release, waiting agents receive
-//                                context injection with full diff before they write.
-// Layer 4 — Orchestrator:       3 failed verifications → emit conflict-escalate
-//                                event for the frontend DiffViewer panel.
-//
-// No timeout. Lock lifecycle = PTY process lifecycle.
-// State created on collision. Destroyed after resolution.
+// FIX (conflict-name): `waiting` now stores (agent_id, session_id, agent_name)
+//   so that when a lock is transferred the new holder's display name is set
+//   correctly. Previously locked_by_name was overwritten with the agent_id
+//   string (e.g. a UUID) rather than the human-readable display name.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 pub type ConflictRegistry = Arc<Mutex<HashMap<String, FileConflictState>>>;
 
-/// Key into the registry. Canonical path string.
 fn registry_key(path: &str) -> String {
     PathBuf::from(path)
         .canonicalize()
@@ -32,45 +22,41 @@ fn registry_key(path: &str) -> String {
         .to_string()
 }
 
-
 #[derive(Debug, Clone)]
 pub struct OwnedLines {
     pub agent_id:   String,
     pub agent_name: String,
-    /// Raw unified diff lines (from `git diff HEAD <file>`)
     pub diff:       String,
-    /// Hunk line ranges extracted from the diff: Vec<(start, end)>
     pub ranges:     Vec<(usize, usize)>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FileConflictState {
     pub file:            String,
-    pub locked_by:       String,          // agent_id
-    pub locked_by_name:  String,          // display name
+    pub locked_by:       String,         // agent_id
+    pub locked_by_name:  String,         // display name
     pub locked_at:       Instant,
-    pub session_id:      String,          // session that holds the lock
-    pub waiting:         Vec<(String, String)>, // (agent_id, session_id)
-    pub ownership:       Vec<OwnedLines>, // grows as agents write
+    pub session_id:      String,
+    /// (agent_id, session_id, agent_name)
+    pub waiting:         Vec<(String, String, String)>,
+    pub ownership:       Vec<OwnedLines>,
     pub failed_attempts: u8,
 }
 
 impl FileConflictState {
     fn new(file: &str, agent_id: &str, agent_name: &str, session_id: &str) -> Self {
         Self {
-            file:           file.to_string(),
-            locked_by:      agent_id.to_string(),
-            locked_by_name: agent_name.to_string(),
-            locked_at:      Instant::now(),
-            session_id:     session_id.to_string(),
-            waiting:        Vec::new(),
-            ownership:      Vec::new(),
+            file:            file.to_string(),
+            locked_by:       agent_id.to_string(),
+            locked_by_name:  agent_name.to_string(),
+            locked_at:       Instant::now(),
+            session_id:      session_id.to_string(),
+            waiting:         Vec::new(),
+            ownership:       Vec::new(),
             failed_attempts: 0,
         }
     }
 }
-
-// ── Registry ──────────────────────────────────────────────────────────────────
 
 pub fn new_registry() -> ConflictRegistry {
     Arc::new(Mutex::new(HashMap::new()))
@@ -81,20 +67,16 @@ pub fn new_registry() -> ConflictRegistry {
 #[derive(Debug, serde::Serialize)]
 #[serde(tag = "status")]
 pub enum LockResult {
-    /// Caller now holds the lock. Proceed with write.
     #[serde(rename = "granted")]
     Granted,
-    /// File is locked by another agent. Caller is queued.
     #[serde(rename = "queued")]
     Queued {
-        locked_by:   String,
-        queue_pos:   usize,
-        context:     String,  // injected diff context for the waiter
+        locked_by: String,
+        queue_pos: usize,
+        context:   String,
     },
 }
 
-/// Called via MCP tool `file_write_request`.
-/// Returns Granted or Queued.
 pub fn request_lock(
     registry:   &ConflictRegistry,
     file:       &str,
@@ -106,13 +88,16 @@ pub fn request_lock(
     let mut reg = registry.lock().unwrap();
 
     if let Some(state) = reg.get_mut(&key) {
-        // Already locked by someone else
         if state.locked_by != agent_id {
-            let already_waiting = state.waiting.iter().any(|(id, _)| id == agent_id);
+            let already_waiting = state.waiting.iter().any(|(id, _, _)| id == agent_id);
             if !already_waiting {
-                state.waiting.push((agent_id.to_string(), session_id.to_string()));
+                state.waiting.push((
+                    agent_id.to_string(),
+                    session_id.to_string(),
+                    agent_name.to_string(),
+                ));
             }
-            let pos     = state.waiting.iter().position(|(id, _)| id == agent_id).unwrap_or(0) + 1;
+            let pos     = state.waiting.iter().position(|(id, _, _)| id == agent_id).unwrap_or(0) + 1;
             let context = build_context_for_waiter(state);
             return LockResult::Queued {
                 locked_by: state.locked_by_name.clone(),
@@ -120,24 +105,19 @@ pub fn request_lock(
                 context,
             };
         }
-        // Same agent re-requesting — idempotent grant
         return LockResult::Granted;
     }
 
-    // No conflict yet — create state and grant
     reg.insert(key, FileConflictState::new(file, agent_id, agent_name, session_id));
     LockResult::Granted
 }
 
-/// Called via MCP tool `file_write_release` after the agent finishes writing.
-/// Captures the git diff, updates ownership, notifies the next waiter.
-/// Returns the (agent_id, session_id) of the next agent to notify, if any.
 pub fn release_lock(
-    registry:   &ConflictRegistry,
-    file:       &str,
-    agent_id:   &str,
-    cwd:        &str,
-) -> Option<(String, String, String)> {  // (next_agent_id, next_session_id, context)
+    registry: &ConflictRegistry,
+    file:     &str,
+    agent_id: &str,
+    cwd:      &str,
+) -> Option<(String, String, String)> {
     let key = registry_key(file);
     let mut reg = registry.lock().unwrap();
 
@@ -146,7 +126,6 @@ pub fn release_lock(
         _ => return None,
     };
 
-    // Capture git diff for this file
     let diff = capture_git_diff(cwd, file);
     if !diff.is_empty() {
         let ranges = parse_hunk_ranges(&diff);
@@ -158,32 +137,28 @@ pub fn release_lock(
         });
     }
 
-    // Pop the next waiter
     if state.waiting.is_empty() {
-        // No one waiting — destroy state
         reg.remove(&key);
         return None;
     }
 
-    let (next_agent, next_session) = state.waiting.remove(0);
+    // FIX: destructure all three fields so locked_by_name gets the real display name
+    let (next_agent, next_session, next_name) = state.waiting.remove(0);
     let context = build_context_for_waiter(state);
 
-    // Transfer lock to next agent
-    state.locked_by     = next_agent.clone();
-    state.locked_by_name = next_agent.clone(); // display name updated by caller
-    state.session_id    = next_session.clone();
-    state.locked_at     = Instant::now();
+    state.locked_by      = next_agent.clone();
+    state.locked_by_name = next_name;           // ← was: next_agent.clone() (wrong!)
+    state.session_id     = next_session.clone();
+    state.locked_at      = Instant::now();
 
     Some((next_agent, next_session, context))
 }
 
-/// Called by the PTY monitor when a process exits or goes idle.
-/// Force-releases the lock for `session_id` without requiring MCP tool call.
 pub fn force_release_on_process_exit(
     registry:   &ConflictRegistry,
     session_id: &str,
     cwd:        &str,
-) -> Vec<(String, String, String, String)> {  // Vec<(file, next_agent, next_session, context)>
+) -> Vec<(String, String, String, String)> {
     let mut results = Vec::new();
     let mut reg = registry.lock().unwrap();
 
@@ -212,11 +187,12 @@ pub fn force_release_on_process_exit(
                 continue;
             }
 
-            let (next_agent, next_session) = state.waiting.remove(0);
+            let (next_agent, next_session, next_name) = state.waiting.remove(0);
             let context = build_context_for_waiter(state);
-            state.locked_by   = next_agent.clone();
-            state.session_id  = next_session.clone();
-            state.locked_at   = Instant::now();
+            state.locked_by      = next_agent.clone();
+            state.locked_by_name = next_name;
+            state.session_id     = next_session.clone();
+            state.locked_at      = Instant::now();
             results.push((file, next_agent, next_session, context));
         }
     }
@@ -231,8 +207,6 @@ pub enum VerifyResult {
     Fail { overlap: Vec<(usize, usize)>, owner: String },
 }
 
-/// After an agent writes, verify it didn't touch another agent's owned lines.
-/// Called via MCP tool `file_write_verify`.
 pub fn verify_write(
     registry: &ConflictRegistry,
     file:     &str,
@@ -244,7 +218,7 @@ pub fn verify_write(
 
     let state = match reg.get(&key) {
         Some(s) => s.clone(),
-        None    => return VerifyResult::Pass,  // no conflict state → pass
+        None    => return VerifyResult::Pass,
     };
 
     let new_diff   = capture_git_diff(cwd, file);
@@ -252,11 +226,10 @@ pub fn verify_write(
 
     for owned in &state.ownership {
         if owned.agent_id == agent_id { continue; }
-        let overlap = find_overlap(&new_ranges, &owned.ranges);
+        let overlap = find_overlap(&owned.ranges, &new_ranges);
         if !overlap.is_empty() {
-            // Increment failure counter
             if let Some(s) = reg.get_mut(&key) {
-                s.failed_attempts += 1;
+                s.failed_attempts = s.failed_attempts.saturating_add(1);
             }
             return VerifyResult::Fail {
                 overlap,
@@ -268,21 +241,15 @@ pub fn verify_write(
     VerifyResult::Pass
 }
 
-// ── Layer 4: Orchestrator escalation ─────────────────────────────────────────
-
-pub const MAX_FAILURES: u8 = 3;
-
-/// Returns true if this file has hit the escalation threshold.
-pub fn should_escalate(registry: &ConflictRegistry, file: &str) -> bool {
+fn should_escalate(registry: &ConflictRegistry, file: &str) -> bool {
     let key = registry_key(file);
     registry.lock().unwrap()
         .get(&key)
-        .map(|s| s.failed_attempts >= MAX_FAILURES)
+        .map(|s| s.failed_attempts >= 3)
         .unwrap_or(false)
 }
 
-/// Build the full conflict trace for the DiffViewer panel.
-pub fn build_conflict_trace(registry: &ConflictRegistry, file: &str) -> serde_json::Value {
+fn build_conflict_trace(registry: &ConflictRegistry, file: &str) -> serde_json::Value {
     let key = registry_key(file);
     let reg = registry.lock().unwrap();
     let state = match reg.get(&key) {
@@ -303,7 +270,7 @@ pub fn build_conflict_trace(registry: &ConflictRegistry, file: &str) -> serde_js
         "file":            &state.file,
         "locked_by":       &state.locked_by_name,
         "failed_attempts": state.failed_attempts,
-        "waiting":         state.waiting.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        "waiting":         state.waiting.iter().map(|(id, _, _)| id).collect::<Vec<_>>(),
         "ownership":       ownership,
     })
 }
@@ -312,7 +279,6 @@ pub fn clear_conflict(registry: &ConflictRegistry, file: &str) {
     let key = registry_key(file);
     registry.lock().unwrap().remove(&key);
 }
-
 
 fn capture_git_diff(cwd: &str, file: &str) -> String {
     if cwd.is_empty() { return String::new(); }
@@ -334,7 +300,6 @@ fn capture_git_diff(cwd: &str, file: &str) -> String {
 fn parse_hunk_ranges(diff: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     for line in diff.lines() {
-        // @@ -l,s +l,s @@ format
         if line.starts_with("@@") {
             if let Some(plus) = line.find('+') {
                 let rest = &line[plus + 1..];
@@ -398,7 +363,6 @@ fn build_context_for_waiter(state: &FileConflictState) -> String {
     ctx
 }
 
-
 use crate::state::AppState;
 
 #[tauri::command]
@@ -426,7 +390,6 @@ pub fn conflict_release_lock(
     let next = release_lock(&state.conflict_registry, &file, &agent_id, &cwd);
 
     if let Some((next_agent, next_session, context)) = next {
-        // Emit SSE event so the frontend knows to re-inject context for next agent
         crate::agent::globals::emit_event("conflict-next-writer", serde_json::json!({
             "file":         &file,
             "next_agent":   &next_agent,

@@ -9,6 +9,12 @@
 //                             contains: runbox_id, worktree instructions, MCP tools
 //
 // This means 3 Claude instances in the same workspace never conflict.
+//
+// FIX (Bug #5): Removed the duplicate write_mcp_config() that had its
+//               runbox_id and session_id parameters swapped. All MCP config
+//               writing now goes through mcp::config::write_mcp_config()
+//               (the canonical implementation with the correct param order).
+//               The broken copy in this file is gone.
 
 use std::{fs, path::Path};
 
@@ -68,10 +74,8 @@ fn shared_block() -> String {
         "{SHARED_MARKER_START}\n\
          ## Stackbox Agent Instructions\n\
          \n\
-         Your personal context is in: `.stackbox/agents/$STACKBOX_RUNBOX_ID.md`\n\
-         Read that file first before doing anything.\n\
-         \n\
-         **Always follow the git worktree and PR flow described in your personal context.**\n\
+         Your personal context: `.stackbox/agents/$STACKBOX_RUNBOX_ID.md`\n\
+         **Read this file once at session start. Already read it? Skip it — do not re-read.**\n\
          {SHARED_MARKER_END}\n"
     )
 }
@@ -103,96 +107,57 @@ fn per_agent_content(
     session_id: &str,
     agent_kind: &str,
 ) -> String {
+    let runbox_short = &runbox_id[..runbox_id.len().min(8)];
     format!(
         "# Stackbox Agent Context\n\
          \n\
          - **Runbox ID**: `{runbox_id}`\n\
          - **Session ID**: `{session_id}`\n\
-         - **Agent kind**: `{agent_kind}`\n\
+         - **Kind**: `{agent_kind}`\n\
          - **Workspace**: `{cwd}`\n\
+         - **Worktree**: `../stackbox-wt-{runbox_short}-{agent_kind}/`\n\
+         - **Branch**: `stackbox/{runbox_short}`\n\
          \n\
-         ## Git Worktree — Do This First\n\
+         ## Git Flow\n\
          \n\
-         Before starting any task:\n\
+         ```\n\
+         mcp__stackbox__git_ensure          → creates/gets your worktree\n\
+         cd ../stackbox-wt-{runbox_short}-{agent_kind}/\n\
+         ... do your work ...\n\
+         mcp__stackbox__git_commit          → stages + commits all changes\n\
+         mcp__stackbox__git_push_pr         → pushes branch + opens PR\n\
+         mcp__stackbox__git_worktree_delete → cleanup AFTER you receive PR MERGED notification\n\
+         ```\n\
          \n\
-         1. Call `mcp__stackbox__git_worktree_get` to check if your worktree exists.\n\
-         2. If it exists → `cd` into it and continue work there.\n\
-         3. If not → call `mcp__stackbox__git_ensure` to create it, then `cd` into it.\n\
-         4. **All file edits must happen inside your worktree only.**\n\
-         5. Never edit files in the main workspace directory `{cwd}`.\n\
+         All edits inside your worktree only — never in `{cwd}` directly.\n\
          \n\
-         Your worktree will be created at:\n\
-         `../stackbox-wt-{runbox_short}-{agent_kind}/`\n\
-         Your branch: `stackbox/{runbox_short}`\n\
+         ## ⚠️ IMPORTANT: Do NOT merge PRs\n\
          \n\
-         ## After Completing Work\n\
+         You must NEVER merge a PR yourself. Your job is:\n\
+         1. Push a branch and open a PR (`git_push_pr`)\n\
+         2. Wait for review feedback (it will arrive in this terminal)\n\
+         3. Fix issues if requested, commit, push again\n\
+         4. Wait for the 🎉 PR MERGED notification (a human merges it)\n\
+         5. Then run `git_worktree_delete` to clean up\n\
          \n\
-         1. Call `mcp__stackbox__git_commit` with a clear commit message.\n\
-         2. Call `mcp__stackbox__git_push_pr` to push and open a PR to main.\n\
-         3. Report the PR url to the user.\n\
-         4. Stay running — you will receive review comments automatically.\n\
+         ## Review Feedback\n\
          \n\
-         ## When You Receive Review Feedback\n\
+         🔴 CHANGES REQUESTED or ❌ CI FAILED → fix in worktree → git_commit → git_push_pr\n\
+         ✅ APPROVED → wait for human to merge, do NOT merge yourself\n\
+         🎉 PR MERGED → git_worktree_delete → report success\n\
          \n\
-         Feedback is delivered automatically into this terminal.\n\
-         When you see a message starting with 🔴 CHANGES REQUESTED or ❌ CI FAILED:\n\
-         \n\
-         1. Read all the comments carefully.\n\
-         2. Fix every issue in your worktree.\n\
-         3. Call `mcp__stackbox__git_commit` again.\n\
-         4. Call `mcp__stackbox__git_push_pr` to push — PR updates automatically.\n\
-         5. Report back to the user that you've addressed the feedback.\n\
-         \n\
-         ## When PR is Merged\n\
-         \n\
-         When you see 🎉 PR MERGED:\n\
-         1. Call `mcp__stackbox__git_worktree_delete` to clean up.\n\
-         2. Report success to the user.\n\
-         \n\
-         ## MCP Tools Available\n\
+         ## MCP Tools\n\
          \n\
          | Tool | Purpose |\n\
          |------|---------|\n\
          | `mcp__stackbox__git_ensure` | Create or get your worktree |\n\
          | `mcp__stackbox__git_commit` | Stage and commit all changes |\n\
          | `mcp__stackbox__git_push_pr` | Push branch and open PR |\n\
-         | `mcp__stackbox__git_worktree_delete` | Clean up after PR merged |\n\
+         | `mcp__stackbox__git_worktree_delete` | Clean up after PR MERGED notification |\n\
          | `mcp__stackbox__memory_remember` | Persist notes across sessions |\n\
+         \n\
+         Playbooks: `.stackbox/commands/` — read when needed, not before.\n\
          ",
-        runbox_short = &runbox_id[..runbox_id.len().min(8)],
+        runbox_short = runbox_short,
     )
-}
-
-// ── MCP config ────────────────────────────────────────────────────────────────
-
-pub fn write_mcp_config(
-    cwd:        &str,
-    worktree:   Option<&str>,
-    session_id: &str,
-    runbox_id:  &str,
-) -> Result<(), String> {
-    let target_dir = worktree.unwrap_or(cwd);
-    let claude_dir = Path::new(target_dir).join(".claude");
-    fs::create_dir_all(&claude_dir).map_err(|e| e.to_string())?;
-
-    let config_path = claude_dir.join("mcp.json");
-    let config = serde_json::json!({
-        "mcpServers": {
-            "stackbox": {
-                "command": "stackbox-mcp",
-                "args": [],
-                "env": {
-                    "STACKBOX_SESSION_ID": session_id,
-                    "STACKBOX_RUNBOX_ID":  runbox_id,
-                    "STACKBOX_CWD":        cwd,
-                }
-            }
-        }
-    });
-
-    fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap())
-        .map_err(|e| e.to_string())?;
-
-    eprintln!("[context] wrote mcp config: {}", config_path.display());
-    Ok(())
 }

@@ -1,8 +1,8 @@
 // src/lib.rs
 
-#![allow(dead_code, unused_imports, unused_variables, unused_assignments)]
 mod agent;
 mod browser;
+mod conflict;
 mod db;
 mod docker;
 mod git;
@@ -20,8 +20,6 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{Emitter, Manager};
 
-use crate::db::sessions;
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -33,8 +31,8 @@ pub fn run() {
             watchers:          Arc::new(Mutex::new(HashMap::new())),
             watched_runboxes:  Arc::new(Mutex::new(HashSet::new())),
             reinject_debounce: Arc::new(Mutex::new(HashMap::new())),
-            github_token:      std::env::var("GITHUB_TOKEN").unwrap_or_default(),  // ADD
-            pty_writer:        crate::pty::writer::PtyWriter::new(),               // ADD
+            pty_writer:        crate::pty::writer::PtyWriter::new(),
+            conflict_registry: conflict::new_registry(),
         })
         .setup(|app| {
             agent::globals::set_app_handle(app.handle().clone());
@@ -49,8 +47,8 @@ pub fn run() {
                 watchers:          state.watchers.clone(),
                 watched_runboxes:  state.watched_runboxes.clone(),
                 reinject_debounce: state.reinject_debounce.clone(),
-                github_token:      state.github_token.clone(),
                 pty_writer:        state.pty_writer.clone(),
+                conflict_registry: state.conflict_registry.clone(),
             });
 
             git::cleanup::prune_orphan_worktrees(&state.db);
@@ -70,6 +68,12 @@ pub fn run() {
                         app_handle.emit("memory-error", e).ok();
                     }
                 }
+
+                let webhook_state = app_state.clone();
+                tauri::async_runtime::spawn(async move {
+                    git::start_webhook_server(webhook_state).await;
+                });
+
                 server::start(app_handle, db_handle, sessions_handle, app_state).await;
             });
 
@@ -115,11 +119,17 @@ pub fn run() {
             // ── DB ───────────────────────────────────────────────────────────
             commands::db::db_sessions_for_runbox,
             commands::db::db_events_for_runbox,
+            commands::db::get_worktree_path,
+            commands::db::get_worktree_record,
+            commands::db::get_workspace_worktrees,
+            commands::db::set_worktree_path,
+            commands::db::set_pr_url,
+            commands::db::set_agent_status,
             // ── Git ──────────────────────────────────────────────────────────
             git::commands::git_ensure,
-            git::commands::git_agent_worktree,       // second terminal → same worktree
-            git::commands::git_push_pr,              // push branch + open PR via gh CLI
-            git::commands::git_pull_merged,          // pull after PR is merged on GitHub
+            git::commands::git_agent_worktree,
+            git::commands::git_push_pr,
+            git::commands::git_pull_merged,
             git::commands::git_log_for_runbox,
             git::commands::git_diff_for_commit,
             git::commands::git_diff_live,
@@ -138,6 +148,18 @@ pub fn run() {
             git::commands::git_branches,
             git::commands::git_checkout,
             git::commands::git_diff_between_worktrees,
+            git::commands::git_commit,
+            git::commands::git_worktree_delete,
+            git::commands::git_worktree_list_stackbox,
+            git::commands::git_discard_file,     // NEW
+            git::commands::git_pr_view,          // NEW
+            git::commands::git_pr_merge,         // NEW
+            // ── Conflict ─────────────────────────────────────────────────────
+            conflict::conflict_request_lock,
+            conflict::conflict_release_lock,
+            conflict::conflict_verify_write,
+            conflict::conflict_get_state,
+            conflict::conflict_clear,
             // ── FS ───────────────────────────────────────────────────────────
             commands::fs::open_directory_dialog,
             commands::fs::open_in_editor,

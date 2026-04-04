@@ -1,17 +1,19 @@
 import { useState } from "react";
 import { C, MONO, SANS } from "../../design";
-import { NoGitPane } from "./NoGitPane";
-import { ChangesTab } from "./ChangesTab";
-import { BranchesTab } from "./BranchesTab";
-import { HistoryTab } from "./HistoryTab";
+import { NoGitPane }    from "./NoGitPane";
+import { ChangesTab }   from "./ChangesTab";
+import { BranchesTab }  from "./BranchesTab";
+import { HistoryTab }   from "./HistoryTab";
 import { WorktreesTab } from "./WorktreesTab";
-import { useGitPanel } from "./useGitPanel";
+import GithubTab        from "./GithubTab";
+import { useGitPanel }  from "./useGitPanel";
 import type { GitPanelProps, GitTab } from "./types";
 
 export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileClick }: GitPanelProps) {
   const git = useGitPanel(workspaceCwd, workspaceId);
-  const [tab,      setTab]      = useState<GitTab>("changes");
-  const [message,  setMessage]  = useState("");
+
+  const [tab,        setTab]        = useState<GitTab>("changes");
+  const [message,    setMessage]    = useState("");
   const [committing, setCommitting] = useState(false);
   const [pushing,    setPushing]    = useState(false);
 
@@ -41,6 +43,7 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
     finally { setCommitting(false); setPushing(false); }
   };
 
+  // ── Loading state ──────────────────────────────────────────────────────────
   if (git.isGitRepo === null) {
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg1 }}>
@@ -62,11 +65,22 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
 
   const busy = committing || pushing;
 
-  const TABS: [GitTab, string][] = [
+  // PR status dot for GitHub tab
+  const prStatus = git.worktreeRecord?.status;
+  const prDot    = prStatus === "approved"          ? C.green
+                 : prStatus === "changes_requested" ? C.red
+                 : prStatus === "pr_open"           ? C.amber
+                 : prStatus === "merged"            ? C.blue
+                 : null;
+
+  const TABS: [GitTab, string, React.ReactNode?][] = [
     ["changes",   git.files.length > 0 ? `Changes (${git.files.length})` : "Changes"],
     ["branches",  "Branches"],
     ["history",   "History"],
     ["worktrees", `Trees (${git.worktrees.length})`],
+    ["github",    "GitHub", prDot
+      ? <span style={{ width: 6, height: 6, borderRadius: "50%", background: prDot, display: "inline-block", flexShrink: 0 }} />
+      : undefined],
   ];
 
   return (
@@ -88,7 +102,9 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
       <div style={{ padding: "8px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "6px 10px" }}>
           <span style={{ fontSize: 12, fontFamily: MONO, color: C.t1, fontWeight: 500, flex: 1 }}>{branch || "main"}</span>
-          <span style={{ fontSize: 10, fontFamily: MONO, color: C.t3 }}>{git.files.length > 0 ? `${git.files.length} change${git.files.length !== 1 ? "s" : ""}` : "clean"}</span>
+          <span style={{ fontSize: 10, fontFamily: MONO, color: C.t3 }}>
+            {git.files.length > 0 ? `${git.files.length} change${git.files.length !== 1 ? "s" : ""}` : "clean"}
+          </span>
         </div>
       </div>
 
@@ -99,33 +115,73 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tab bar */}
       <div style={{ padding: "8px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         <div style={{ display: "flex", background: C.bg0, borderRadius: 8, padding: 3 }}>
-          {TABS.map(([t, label]) => (
+          {TABS.map(([t, label, badge]) => (
             <button key={t} onClick={() => setTab(t)}
-              style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "none", background: tab === t ? C.bg4 : "transparent", color: tab === t ? C.t0 : C.t2, fontSize: 11, fontFamily: SANS, fontWeight: tab === t ? 600 : 400, cursor: "pointer", transition: "all .1s" }}>
+              style={{
+                flex: 1, padding: "5px 0", borderRadius: 6, border: "none",
+                background: tab === t ? C.bg4 : "transparent",
+                color: tab === t ? C.t0 : C.t2,
+                fontSize: 11, fontFamily: SANS, fontWeight: tab === t ? 600 : 400,
+                cursor: "pointer", transition: "all .1s",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+              }}>
               {label}
+              {badge}
             </button>
           ))}
         </div>
       </div>
 
+      {/* Tab content */}
       {tab === "changes" && (
-        <ChangesTab files={git.files} committing={committing} pushing={pushing}
-          message={message} onMessage={setMessage}
-          onCommit={handleCommit} onCommitPush={handleCommitPush}
-          onFileClick={fc => onFileClick?.(fc)} />
+        <ChangesTab
+          files={git.files}
+          agentSpans={git.agentSpans}
+          committing={committing}
+          pushing={pushing}
+          message={message}
+          onMessage={setMessage}
+          onCommit={handleCommit}
+          onCommitPush={handleCommitPush}
+          onFileClick={fc => onFileClick?.(fc)}
+          onStage={git.stageFile}
+          onUnstage={git.unstageFile}
+          onDiscard={git.discardFile}
+        />
       )}
       {tab === "branches" && (
-        <BranchesTab allBranches={git.allBranches} currentBranch={branch}
-          onSwitch={b => git.switchBranch(b).catch(e => git.showNotice(String(e), false))} />
+        <BranchesTab
+          allBranches={git.allBranches}
+          currentBranch={branch}
+          onSwitch={b => git.switchBranch(b).catch(e => git.showNotice(String(e), false))}
+          onCreate={b => git.createBranch(b).catch(e => { git.showNotice(String(e), false); throw e; })}
+        />
       )}
-      {tab === "history"  && <HistoryTab commits={git.commits} />}
+      {tab === "history" && (
+        <HistoryTab
+          commits={git.commits}
+          onDiff={git.commitDiff}
+        />
+      )}
       {tab === "worktrees" && (
-        <WorktreesTab worktrees={git.worktrees}
+        <WorktreesTab
+          worktrees={git.worktrees}
           onCreateWorktree={git.createWorktree}
-          onDiff={git.diffWorktrees} />
+          onDiff={git.diffWorktrees}
+        />
+      )}
+      {tab === "github" && (
+        <GithubTab
+          record={git.worktreeRecord}
+          branch={branch}
+          workspaceCwd={workspaceCwd}
+          busy={busy || git.creatingPr}
+          onCreatePr={git.createPr}
+          onRefreshRecord={git.loadWorktreeRecord}
+        />
       )}
 
       <style>{`@keyframes gitspin { to { transform: rotate(360deg); } }`}</style>

@@ -5,8 +5,7 @@
 
 pub mod detection;
 pub mod watcher;
-pub mod writer;  // ADD
-
+pub mod writer;
 
 use std::io::{Read, Write};
 use std::time::Instant;
@@ -18,7 +17,6 @@ use crate::{
     agent::{context::inject, injector, kind::AgentKind},
     git::repo::{ensure_git_repo, remove_worktree},
     memory,
-    mcp::config::write_mcp_config,
     state::{AppState, PtySession},
     workspace::{
         events::{record_agent_spawned, record_command_result},
@@ -60,13 +58,6 @@ fn clear_git_lock(cwd: &str) {
 }
 
 /// Detect whether `cwd` is already an agent worktree.
-///
-/// `commands/pty.rs` calls `ensure_worktree` with the original workspace cwd
-/// and then passes the resulting worktree path as `cwd` to this function.
-/// So by the time we arrive here, `cwd` IS the worktree — we must not create
-/// another one on top of it.
-///
-/// A path is a Stackbox worktree if its folder name starts with "stackbox-wt-".
 fn detect_worktree(cwd: &str) -> Option<String> {
     let folder = std::path::Path::new(cwd)
         .file_name()
@@ -78,6 +69,25 @@ fn detect_worktree(cwd: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Returns true if this URL is intentional (localhost / file://) and should
+/// open in the browser pane.  Filters out the noise that build tools print
+/// (cargo doc links, npm package URLs, log lines, etc.).
+///
+/// FIX (Bug #13): Previously every http/https/file URL in PTY output opened
+/// a browser tab — including cargo, npm, and logger output.
+fn is_intentional_url(url: &str) -> bool {
+    // file:// always intentional (local HTML preview)
+    if url.starts_with("file://") {
+        return true;
+    }
+    // localhost / 127.0.0.1 / 0.0.0.0 dev servers — intentional
+    if url.contains("localhost") || url.contains("127.0.0.1") || url.contains("0.0.0.0") {
+        return true;
+    }
+    // Everything else (https://docs.rs/..., https://npmjs.com/..., etc.) — skip
+    false
 }
 
 pub async fn spawn(
@@ -110,8 +120,6 @@ pub async fn spawn(
     let agent_str    = agent_cmd.as_deref().unwrap_or("shell");
     let agent_kind   = AgentKind::detect(agent_str);
 
-    // Workspace label shown in the shell prompt — falls back to the last path
-    // segment of the raw workspace cwd (not the worktree folder name).
     let ws_label: String = workspace_name
         .as_deref()
         .filter(|s| !s.trim().is_empty())
@@ -126,18 +134,12 @@ pub async fn spawn(
 
     clear_git_lock(&resolved_cwd);
 
-    // Only call ensure_git_repo on the ORIGINAL workspace, not on a worktree.
-    // If cwd is already a worktree (starts with stackbox-wt-), git is already
-    // initialised — calling ensure_git_repo here would corrupt the worktree's
-    // .git file pointer.
     let worktree_path = detect_worktree(&resolved_cwd);
     if worktree_path.is_none() {
-        // Raw workspace cwd — still safe to ensure git
         ensure_git_repo(&resolved_cwd, &runbox_id)
             .unwrap_or_else(|e| { eprintln!("[pty] ensure_git_repo: {e}"); String::new() });
     }
 
-    // effective_cwd is the worktree if one was detected, otherwise raw cwd
     let effective_cwd = worktree_path.as_deref().unwrap_or(&resolved_cwd).to_string();
 
     clear_git_lock(&effective_cwd);
@@ -168,19 +170,12 @@ pub async fn spawn(
     }
 
     // ── Shell command ─────────────────────────────────────────────────────────
-    //
-    // The prompt uses STACKBOX_WORKSPACE_NAME so it always shows the human
-    // workspace name (e.g. "Nodebook>") regardless of which worktree folder
-    // the terminal is actually running inside.
 
     #[cfg(windows)]
     let mut cmd = {
         let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
         let ps       = format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", sys_root);
         let mut c    = CommandBuilder::new(&ps);
-        // Prompt references $env:STACKBOX_WORKSPACE_NAME — set below alongside
-        // the other env vars so the workspace label is always correct even when
-        // the terminal cwd is a stackbox-wt-* worktree folder.
         c.args(&[
             "-NoLogo", "-NoProfile", "-NoExit", "-NonInteractive", "-Command",
             r#"function prompt { (Split-Path -Leaf (Get-Location)) + "> " }"#,
@@ -197,8 +192,6 @@ pub async fn spawn(
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         let stackbox_zsh_dir = "/tmp/stackbox-zsh";
         let _ = std::fs::create_dir_all(stackbox_zsh_dir);
-        // PROMPT uses double-quoted string so ${STACKBOX_WORKSPACE_NAME} is
-        // expanded from the environment when zsh reads this file at startup.
         let zshrc = r#"
 [ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc"
 PROMPT="%B%F{cyan}%1~%f%b %% "
@@ -213,12 +206,6 @@ chpwd
     };
 
     cmd.cwd(&effective_cwd);
-
-    // ── STACKBOX_WORKSPACE_NAME — must be set before cmd is spawned ───────────
-    //
-    // Both the Windows PS prompt and the Unix zshrc reference this variable.
-    // It is the human-readable workspace name (e.g. "Nodebook"), never the
-    // worktree folder name (e.g. "stackbox-wt-5304906b").
     cmd.env("STACKBOX_WORKSPACE_NAME", &ws_label);
 
     {
@@ -233,7 +220,6 @@ chpwd
 
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") { cmd.env("ANTHROPIC_API_KEY", key); }
 
-    // ── Docker exec prefix ────────────────────────────────────────────────────
     if docker {
         if let Ok(prefix) = crate::docker::exec_prefix(&runbox_id) {
             cmd.env("STACKBOX_DOCKER_EXEC", &prefix);
@@ -241,7 +227,6 @@ chpwd
         }
     }
 
-    // ── Per-pane stable port allocation ──────────────────────────────────────
     let pane_port = {
         let mut hash: u32 = 0x811c9dc5;
         for b in runbox_id.as_bytes() {
@@ -279,22 +264,68 @@ chpwd
 
     let child      = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer     = pair.master.take_writer().map_err(|e| e.to_string())?;
 
+    // FIX (Bug #2 + Bug #14): call take_writer() exactly once.
+    //
+    // Previously take_writer() was called twice:
+    //   1. to store in PtySession.writer
+    //   2. inside the agent launch_cmd block — always fails silently since (1)
+    //      already consumed it, so the agent's startup command was never sent.
+    //
+    // Now we own the writer in a channel-based forwarder.  All writes go
+    // through a tokio::sync::mpsc channel:
+    //   • The PTY session's `.writer` field sends through this channel.
+    //   • The webhook handler also sends through state.pty_writer (same channel).
+    //   • The agent launch command is sent through the same channel (no second
+    //     take_writer() needed).
+    //
+    // This is exactly the pattern documented in pty/writer.rs.
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+
+    // FIX (Bug #14): Register the channel so the webhook handler can inject
+    // feedback into this agent's PTY.
+    state.pty_writer.register(&runbox_id, tx.clone());
+
+    // Spawn the forwarder: reads bytes from the channel and writes to PTY stdin.
+    let raw_writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    {
+        let mut pty_w = raw_writer;
+        tauri::async_runtime::spawn(async move {
+            while let Some(bytes) = rx.recv().await {
+                let _ = pty_w.write_all(&bytes);
+                let _ = pty_w.flush();
+            }
+        });
+    }
+
+    // Send the agent's launch command through the channel (fixes the lost launch
+    // command from Bug #2 — no second take_writer() call needed).
     if let Some(launch) = agent_kind.launch_cmd(&ctx_file) {
-        if let Ok(mut w) = pair.master.take_writer() {
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                let _ = w.write_all(launch.as_bytes());
-                let _ = w.flush();
-            });
+        let tx2 = tx.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            let _ = tx2.send(launch.into_bytes());
+        });
+    }
+
+    // A thin Write wrapper around the channel sender so PtySession.writer still
+    // satisfies `Box<dyn Write + Send>` without any other code changes.
+    struct ChannelWriter(tokio::sync::mpsc::UnboundedSender<Vec<u8>>);
+    impl Write for ChannelWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.send(buf.to_vec()).map_err(|_| std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe, "PTY channel closed",
+            ))?;
+            Ok(buf.len())
         }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
     }
 
     let _ = session_start(&state.db, &session_id, &runbox_id, "", agent_str, &effective_cwd);
 
     state.sessions.lock().unwrap().insert(session_id.clone(), PtySession {
-        writer,
+        writer:        Box::new(ChannelWriter(tx)),
         _master:       pair.master,
         _child:        child,
         input_buf:     String::new(),
@@ -305,22 +336,18 @@ chpwd
         docker,
     });
 
-    {
-        let cwd_m = effective_cwd.clone();
-        let rb_m  = runbox_id.clone();
-        let sid_m = session_id.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = write_mcp_config(&cwd_m,None, &rb_m, &sid_m) {
-                eprintln!("[mcp] write_mcp_config: {e}");
-            }
-        });
-    }
+    // FIX (Bug #6): The redundant write_mcp_config call that was here (always
+    // with worktree: None, overwriting the correct config written by
+    // commands/pty.rs) has been removed. commands/pty.rs already writes the
+    // correct config — including the worktree path — before calling spawn().
 
     // ── PTY reader thread ─────────────────────────────────────────────────────
     let sid               = session_id.clone();
     let rb_id             = runbox_id.clone();
     let app_pty           = app.clone();
     let db_arc            = state.db.clone();
+    let pty_writer_arc    = state.pty_writer.clone();
+    let conflict_reg_thr  = state.conflict_registry.clone(); // Bug #10 fix
     let worktree_path_thr = worktree_path.clone();
     let cwd_thr           = effective_cwd.clone();
     let session_start_ts  = Instant::now();
@@ -343,7 +370,8 @@ chpwd
                 }
             }
 
-            // URL detection — file:// and localhost URLs open in built-in browser
+            // FIX (Bug #13): Only open localhost / file:// URLs automatically.
+            // External URLs printed by cargo, npm, loggers, etc. are ignored.
             let text_clean = strip_ansi(&text);
             for word in text_clean.split_whitespace() {
                 let clean = word.trim_matches(|c: char| {
@@ -351,19 +379,20 @@ chpwd
                         && c != '-' && c != '_' && c != '?' && c != '='
                         && c != '&' && c != '#' && c != '%'
                 });
-                let is_valid_url = (clean.starts_with("https://")
+                let looks_like_url = (clean.starts_with("https://")
                     || clean.starts_with("http://")
                     || clean.starts_with("file://"))
                     && clean.len() > 7
                     && !clean.contains(r"\x1b")
                     && !clean.contains(r"\u{")
                     && clean.chars().all(|c| c.is_ascii() && c >= ' ');
-                if is_valid_url {
+
+                if looks_like_url && is_intentional_url(clean) {
                     let _ = app_pty.emit("browser-open-url", clean.to_string());
                 }
             }
 
-            // start .\index.html intercept — relative file paths from PTY output
+            // start ./index.html intercept — relative file paths from PTY output
             for line in text_clean.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("start ") || trimmed.starts_with("Start-Process ") {
@@ -397,13 +426,19 @@ chpwd
         let _ = session_end(&db_arc, &sid, None, None);
         on_command_result(&db_arc, &rb_id, &sid, 0, duration_ms);
 
+        // FIX (Bug #10): Release all file conflict locks held by this session.
+        // Previously on_session_exit was declared but never called, so locks
+        // from dead agent processes stayed held permanently, blocking other agents.
+        crate::conflict::on_session_exit(&conflict_reg_thr, &sid, &cwd_thr);
+
+        // FIX (Bug #14 cleanup): Unregister the PTY from the writer map so the
+        // webhook handler stops trying to deliver events to a dead session.
+        pty_writer_arc.unregister(&rb_id);
+
         if agent_kind != AgentKind::Shell {
             snapshot_from_git(&db_arc, &rb_id, &sid, &cwd_thr);
         }
 
-        // Only remove the worktree if it was detected (i.e. owned by this session).
-        // pty_kill also calls remove_worktree — remove_worktree is idempotent so
-        // double-calling is safe, but we guard here to avoid log noise.
         if let Some(ref wt) = worktree_path_thr {
             remove_worktree(wt);
         }
@@ -438,5 +473,5 @@ chpwd
         let _ = app_pty.emit(&format!("pty://ended/{}", sid), ());
     });
 
-    Ok(())  
+    Ok(())
 }

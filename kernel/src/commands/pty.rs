@@ -41,7 +41,7 @@ pub async fn pty_spawn(
     // Worktree key = runbox_id + agent_kind so:
     //   • Different agents in the same workspace → separate worktrees
     //   • Two Claude sessions in the same workspace → same worktree (shared)
-    let worktree_path: Option<String> = if has_git(&real_cwd, &runbox_id) {
+    let _worktree_path: Option<String> = if has_git(&real_cwd, &runbox_id) {
         let _ = ensure_git_repo(&real_cwd, &runbox_id);
         let wt = ensure_worktree(&real_cwd, &runbox_id, agent_kind_str);
 
@@ -133,7 +133,7 @@ pub fn pty_write(
 
     if let Some((rb, cwd, kind)) = inject {
         let sid = session_id.clone();
-        let db  = state.db.clone();
+        let _db  = state.db.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = crate::agent::context::inject(&cwd, &rb, &sid, kind.kind_str()) {
                 eprintln!("[pty_write] re-inject: {e}");

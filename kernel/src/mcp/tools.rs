@@ -1,19 +1,14 @@
 // src-tauri/src/mcp/tools.rs
 //
 // MCP tool definitions exposed to agents.
-// Agents call these via their MCP client (built into Claude Code, Codex, etc).
 //
-// Tools the agent uses to self-manage its worktree lifecycle:
-//   git_ensure          → create or get worktree
-//   git_commit          → stage + commit
-//   git_push_pr         → push branch + open PR
-//   git_worktree_delete → clean up after merge
-//   git_worktree_get    → check if worktree exists (read-only)
+// FIX (mcp-agent): dispatch() now accepts agent_name so that future memory-
+//   writing tools can tag memories with the correct agent. Previously the
+//   resolved name was computed in the handler but discarded before reaching
+//   this function.
 
 use serde_json::{json, Value};
 use crate::{db, git, state::AppState};
-
-// ── tool registry ─────────────────────────────────────────────────────────────
 
 pub fn tool_definitions() -> Value {
     json!([
@@ -55,21 +50,21 @@ pub fn tool_definitions() -> Value {
         },
         {
             "name": "git_push_pr",
-            "description": "Push your branch and open a GitHub PR to main. Call after committing.",
+            "description": "Push your branch and open a GitHub PR to main. Call after committing. Do NOT merge the PR yourself — humans review and merge PRs.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "worktree_path": { "type": "string" },
-                    "runbox_id":     { "type": "string" },
-                    "title":         { "type": "string", "description": "PR title" },
-                    "body":          { "type": "string", "description": "PR description" }
+                    "cwd":       { "type": "string", "description": "Workspace root path from STACKBOX_CWD env var" },
+                    "runbox_id": { "type": "string" },
+                    "title":     { "type": "string", "description": "PR title" },
+                    "body":      { "type": "string", "description": "PR description" }
                 },
-                "required": ["worktree_path", "runbox_id"]
+                "required": ["cwd", "runbox_id"]
             }
         },
         {
             "name": "git_worktree_delete",
-            "description": "Delete your worktree and branch after PR is merged. Also call with force=true if task is cancelled.",
+            "description": "Delete your worktree and branch after PR is merged. Only call this after you receive the PR MERGED notification — do NOT merge the PR yourself. Call with force=true only if the task is cancelled.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -99,10 +94,11 @@ pub fn tool_definitions() -> Value {
 // ── tool dispatcher ───────────────────────────────────────────────────────────
 
 pub async fn dispatch(
-    tool_name: &str,
-    input:     &Value,
-    state:     &AppState,
-    db:        &crate::db::Db,
+    tool_name:  &str,
+    input:      &Value,
+    state:      &AppState,
+    db:         &crate::db::Db,
+    _agent_name: &str,   // FIX: was discarded in handler; now threaded through
 ) -> Result<Value, String> {
     match tool_name {
         "git_ensure" => {
@@ -145,13 +141,13 @@ pub async fn dispatch(
         }
 
         "git_push_pr" => {
-            let worktree_path = str_field(input, "worktree_path")?;
-            let runbox_id     = str_field(input, "runbox_id")?;
-            let title         = input["title"].as_str().map(str::to_string);
-            let body          = input["body"].as_str().map(str::to_string);
+            let cwd       = str_field(input, "cwd")?;
+            let runbox_id = str_field(input, "runbox_id")?;
+            let title     = input["title"].as_str().map(str::to_string);
+            let body      = input["body"].as_str().map(str::to_string);
 
             let result = git::commands::push_pr_direct(
-                &worktree_path, &runbox_id, title, body, None, db,
+                &cwd, &runbox_id, title, body, None, db,
             ).await?;
 
             Ok(json!({
@@ -185,9 +181,7 @@ pub async fn dispatch(
     }
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-fn str_field<'a>(v: &'a Value, key: &str) -> Result<String, String> {
+fn str_field(v: &Value, key: &str) -> Result<String, String> {
     v[key]
         .as_str()
         .map(str::to_string)

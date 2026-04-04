@@ -11,7 +11,7 @@ use super::{
     repo::{
         delete_worktree, ensure_git_repo, ensure_worktree, git, git_dir_opt,
         has_git, init_real_repo, list_worktrees, remove_worktree,
-        WorktreeEntry, WorktreeInfo,
+        WorktreeEntry,
     },
 };
 use crate::{db, state::AppState};
@@ -767,4 +767,135 @@ pub async fn git_diff_between_worktrees(
     }
 
     Ok(format!("{stat_str}\n\n{capped}"))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW COMMANDS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Discard working-tree changes for a single file ───────────────────────────
+
+/// Discards unstaged changes for a single file.
+/// Tries `git restore --worktree` (Git ≥ 2.23) then falls back to `git checkout --`.
+#[tauri::command]
+pub async fn git_discard_file(
+    cwd: String, runbox_id: String, path: String,
+) -> Result<(), String> {
+    let gdo_owned = git_dir_opt(&cwd, &runbox_id);
+    let gdo: Option<&str> = gdo_owned.as_deref();
+    // First try restore (Git ≥ 2.23)
+    if git(&["restore", "--worktree", "--", &path], &cwd, gdo).is_ok() {
+        return Ok(());
+    }
+    // Fallback for older Git
+    git(&["checkout", "--", &path], &cwd, gdo)?;
+    Ok(())
+}
+
+// ── PR detail types ───────────────────────────────────────────────────────────
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+pub struct PrDetails {
+    pub title:      String,
+    pub body:       String,
+    pub number:     u64,
+    pub state:      String,      // OPEN | MERGED | CLOSED
+    pub url:        String,
+    pub mergeable:  String,      // MERGEABLE | CONFLICTING | UNKNOWN
+    pub author:     String,
+    pub created_at: String,
+    pub reviews:    Vec<PrReview>,
+    pub checks:     Vec<PrCheck>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PrReview {
+    pub author: String,
+    pub state:  String,   // APPROVED | CHANGES_REQUESTED | COMMENTED
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PrCheck {
+    pub name:       String,
+    pub status:     String,   // SUCCESS | FAILURE | PENDING | IN_PROGRESS | SKIPPED
+    pub conclusion: String,
+}
+
+// ── git_pr_view — fetch PR details via gh CLI ─────────────────────────────────
+
+/// Fetches full PR details for the current branch via `gh pr view --json ...`.
+/// Returns an error string if no PR exists or gh CLI is not installed.
+#[tauri::command]
+pub async fn git_pr_view(cwd: String) -> Result<PrDetails, String> {
+    let fields = "title,body,number,state,url,mergeable,author,createdAt,reviews,statusCheckRollup";
+    let out = std::process::Command::new("gh")
+        .args(["pr", "view", "--json", fields])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh not found: {e}"))?;
+
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    let raw: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .map_err(|e| e.to_string())?;
+
+    let reviews = raw["reviews"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|r| PrReview {
+            author: r["author"]["login"].as_str().unwrap_or("").to_string(),
+            state:  r["state"].as_str().unwrap_or("").to_string(),
+        })
+        .collect();
+
+    let checks = raw["statusCheckRollup"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|c| PrCheck {
+            name:       c["name"].as_str()
+                            .or_else(|| c["context"].as_str())
+                            .unwrap_or("check")
+                            .to_string(),
+            status:     c["status"].as_str().unwrap_or("UNKNOWN").to_string(),
+            conclusion: c["conclusion"].as_str()
+                            .or_else(|| c["state"].as_str())
+                            .unwrap_or("")
+                            .to_string(),
+        })
+        .collect();
+
+    Ok(PrDetails {
+        title:      raw["title"].as_str().unwrap_or("").to_string(),
+        body:       raw["body"].as_str().unwrap_or("").to_string(),
+        number:     raw["number"].as_u64().unwrap_or(0),
+        state:      raw["state"].as_str().unwrap_or("").to_string(),
+        url:        raw["url"].as_str().unwrap_or("").to_string(),
+        mergeable:  raw["mergeable"].as_str().unwrap_or("UNKNOWN").to_string(),
+        author:     raw["author"]["login"].as_str().unwrap_or("").to_string(),
+        created_at: raw["createdAt"].as_str().unwrap_or("").to_string(),
+        reviews,
+        checks,
+    })
+}
+
+// ── git_pr_merge — merge the open PR via gh CLI ───────────────────────────────
+
+/// Squash-merges the current branch PR and deletes the remote branch.
+#[tauri::command]
+pub async fn git_pr_merge(cwd: String) -> Result<String, String> {
+    let out = std::process::Command::new("gh")
+        .args(["pr", "merge", "--squash", "--delete-branch"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh not found: {e}"))?;
+
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    Ok("Merged and branch deleted.".to_string())
 }

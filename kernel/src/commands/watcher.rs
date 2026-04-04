@@ -3,7 +3,6 @@
 use tauri::AppHandle;
 
 use crate::{
-    db::Db,
     pty::{expand_cwd, watcher},
     state::AppState,
 };

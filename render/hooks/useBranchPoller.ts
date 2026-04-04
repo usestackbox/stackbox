@@ -12,7 +12,7 @@ interface Options {
   cwdMap:    Record<string, string>;
   onBranch:  (id: string, branch: string) => void;
 }
-
+  
 export function useBranchPoller({ runboxes, activeId, cwdMap, onBranch }: Options) {
   const refresh = useCallback(() => {
     if (!activeId) return;

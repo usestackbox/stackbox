@@ -6,7 +6,7 @@ import { C, SANS, MONO } from "./design";
 import { useRunboxes }     from "./features/runbox";
 import { useBranchPoller } from "./hooks";
 import { StripIcon }       from "./ui";
-import { IcoBrain, IcoFiles, IcoGit } from "./ui/icons";
+import { IcoBrain, IcoGit } from "./ui/icons";
 
 import { WorkspaceView }  from "./features/workspace";
 import type { WinState, FileTab, SidePanel as WsSidePanel } from "./features/workspace/types";
@@ -19,14 +19,16 @@ import { BrowsePane }     from "./features/browser/BrowsePane";
 import { FileEditorPane } from "./features/editor/FileEditorPane";
 import { GitPanel }       from "./features/git/GitPanel";
 import { MemoryPanel }    from "./features/memory/MemoryPanel";
-import { FileChangeList } from "./features/changes/FileChangeList";
-import type { LiveDiffFile } from "./features/changes/useFileChanges";
-
-
+// REMOVED: FileChangeList (duplicate of GitPanel ChangesTab)
+// REMOVED: LiveDiffFile import from changes — now sourced from git/types
+import type { LiveDiffFile } from "./features/git/types";
 
 const SIDEBAR_TOTAL = 260; // match WORKSPACE_W in Sidebar.tsx
 
-type SidePanel = "files" | "git" | "memory" | null;
+// "files" kept in the type union so the signature matches WorkspaceView's onSidePanelToggle.
+// The panel itself is no longer rendered (file changes live inside Git → Changes tab),
+// but the type must stay compatible with WorkspaceView's prop type.
+type SidePanel = "git" | "memory" | "files" | null;
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
@@ -95,7 +97,6 @@ export default function App() {
         agentCmd={rb?.agentCmd}
         onWorktreeReady={path => {
           setWorktreeMap(p => ({ ...p, [rb?.id ?? ""]: path }));
-          // Propagate worktree path as the new cwd so the tab label updates
           callbacks.onCwdChange(path);
         }}
         sessionId={activeSessionId ?? undefined}
@@ -140,6 +141,8 @@ export default function App() {
     );
   }, []);
 
+  // FIX: was missing `worktreeMap` in deps — caused stale closure where GitPanel
+  //      received the wrong cwd when worktree path changed after mount.
   const renderSidePanel = useCallback((
     panel: WsSidePanel,
     runbox: typeof runboxes[number],
@@ -166,17 +169,8 @@ export default function App() {
         />
       );
     }
-    if (panel === "files") {
-      return (
-        <FileChangeList
-          runboxId={runbox.id}
-          runboxCwd={worktreeMap[runbox.id] || cwdMap[runbox.id] || runbox.cwd}
-          onFileClick={(fc: LiveDiffFile) => diffOpenerRefs.current[runbox.id]?.open(fc)}
-        />
-      );
-    }
     return null;
-  }, [cwdMap]);
+  }, [cwdMap, worktreeMap]); // ← worktreeMap added to deps (was missing)
 
   return (
     <div style={{
@@ -225,9 +219,9 @@ export default function App() {
             onFileTreeToggle={handleFileTreeToggle}
             toolbarSlot={
               <div style={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <StripIcon title="Memory"        active={sidePanel === "memory"} onClick={() => toggleSide("memory")}><IcoBrain on /></StripIcon>
-                <StripIcon title="Changed Files" active={sidePanel === "files"}  onClick={() => toggleSide("files")} ><IcoFiles on /></StripIcon>
-                <StripIcon title="Git"           active={sidePanel === "git"}    onClick={() => toggleSide("git")}   ><IcoGit   on /></StripIcon>
+                <StripIcon title="Memory" active={sidePanel === "memory"} onClick={() => toggleSide("memory")}><IcoBrain on /></StripIcon>
+                {/* REMOVED: "Changed Files" strip icon — now inside Git → Changes tab */}
+                <StripIcon title="Git" active={sidePanel === "git"} onClick={() => toggleSide("git")}><IcoGit on /></StripIcon>
               </div>
             }
             onCwdChange={cwd => setCwdMap(p => ({ ...p, [rb.id]: cwd }))}

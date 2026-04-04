@@ -20,7 +20,7 @@
 use crate::memory::{
     self, Memory,
     MT_GOAL, MT_FAILURE, MT_BLOCKER, MT_ENVIRONMENT, MT_SESSION, MT_GENERAL,
-    DECAY_NEVER, now_ms,
+    now_ms,
 };
 
 // ── Composite injection score ─────────────────────────────────────────────────

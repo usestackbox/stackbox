@@ -2,6 +2,11 @@
 //
 // All DDL lives here. Single source of truth for the database schema.
 // Migrations are additive — never drop columns on existing installs.
+//
+// MIGRATION ORDER RULE: always run ALTER TABLE column additions BEFORE any
+// CREATE INDEX that references those columns. SQLite's CREATE TABLE IF NOT
+// EXISTS is a no-op on existing databases, so the index would reference a
+// non-existent column and panic at startup.
 
 use rusqlite::{Connection, Result};
 
@@ -43,20 +48,39 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // Additive migrations — safe on existing databases
     conn.execute("ALTER TABLE runboxes ADD COLUMN worktree_path TEXT", []).ok();
 
-    // ── Per-agent worktree table ───────────────────────────────────────────────
+    // ── Per-agent worktree table (V2 schema) ─────────────────────────────────
     //
-    // Key = "{runbox_id}:{agent_kind}"  e.g. "abc123:claude-code"
+    // PRIMARY KEY = runbox_id (one row per runbox, not per agent-kind).
+    // Tracks worktree path, branch, PR url, and lifecycle status.
     //
-    // This replaces the single worktree_path column on runboxes:
-    //   - Each agent type gets its own row / worktree path
-    //   - Two Claude sessions share the same row (same agent_kind) → same worktree
-    //   - Kept separate from runboxes so runboxes stays clean
+    // CRITICAL: all ALTER TABLE column additions for this table MUST come
+    // before the CREATE INDEX on pr_url. On existing installs the CREATE TABLE
+    // is a no-op, so the index would reference a missing column and crash.
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS agent_worktrees (
-            key            TEXT PRIMARY KEY,
+            runbox_id      TEXT PRIMARY KEY,
+            agent_kind     TEXT NOT NULL DEFAULT '',
             worktree_path  TEXT,
-            updated_at     INTEGER NOT NULL
+            branch         TEXT,
+            pr_url         TEXT,
+            status         TEXT NOT NULL DEFAULT 'working',
+            created_at     INTEGER NOT NULL DEFAULT 0,
+            updated_at     INTEGER NOT NULL DEFAULT 0
         );
+    ")?;
+
+    // Additive column migrations — run BEFORE any index that touches these columns.
+    // Each uses .ok() so they silently no-op on new installs (column already exists).
+    conn.execute("ALTER TABLE agent_worktrees ADD COLUMN agent_kind TEXT NOT NULL DEFAULT ''", []).ok();
+    conn.execute("ALTER TABLE agent_worktrees ADD COLUMN branch TEXT", []).ok();
+    conn.execute("ALTER TABLE agent_worktrees ADD COLUMN pr_url TEXT", []).ok();
+    conn.execute("ALTER TABLE agent_worktrees ADD COLUMN status TEXT NOT NULL DEFAULT 'working'", []).ok();
+    conn.execute("ALTER TABLE agent_worktrees ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0", []).ok();
+    conn.execute("ALTER TABLE agent_worktrees ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0", []).ok();
+
+    // NOW safe to create the index — pr_url is guaranteed to exist.
+    conn.execute_batch("
+        CREATE INDEX IF NOT EXISTS idx_awt_pr_url ON agent_worktrees(pr_url);
     ")?;
 
     // ── Workspace events — the core append-only event log ─────────────────────

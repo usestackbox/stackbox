@@ -17,7 +17,7 @@ use tokio::sync::OnceCell;
 
 use super::schema::{
     memory_schema, null_vector, Memory, EMBEDDING_DIM,
-    MT_BLOCKER, MT_FAILURE, MT_GOAL, SCOPE_LOCAL, SCOPE_MACHINE,
+    MT_BLOCKER, MT_FAILURE, MT_ENVIRONMENT, SCOPE_LOCAL, SCOPE_MACHINE,
     LEVEL_LOCKED, LEVEL_PREFERRED, LEVEL_TEMPORARY, LEVEL_SESSION,
     DECAY_NEVER, DECAY_SESSION,
     decay_for_type, importance_for_type, agent_type_from_name,
@@ -252,14 +252,13 @@ async fn migrate_v2_to_v3(conn: &Connection, backup: &str) -> Result<(), String>
     Ok(())
 }
 
-async fn migrate_v1_to_v3(conn: &Connection, backup: &str) -> Result<(), String> {
+async fn migrate_v1_to_v3(_conn: &Connection, backup: &str) -> Result<(), String> {
     // Simplified: just recreate empty — V1 data loss acceptable at this point
     eprintln!("[memory] V1 backup at {backup} — starting fresh (V1 data incompatible with V3)");
     Ok(())
 }
 
 fn null_vector_n(n: usize) -> Result<Arc<FixedSizeListArray>, String> {
-    use arrow_array::Array;
     // Build n null-ish vectors (all zeros)
     let flat: Vec<f32> = vec![0f32; n * EMBEDDING_DIM as usize];
     let values = Arc::new(Float32Array::from(flat));
@@ -801,9 +800,9 @@ pub async fn memory_add_full(
     } else {
         SCOPE_LOCAL.to_string()
     };
-    let level = super::schema::level_from_memory_type(&memory_type).to_string();
-    let key   = extract_key(content);
-    let agent_id = make_agent_id(&agent_type, session_id);
+    let _level = super::schema::level_from_memory_type(&memory_type).to_string();
+    let _key   = extract_key(content);
+    let _agent_id = make_agent_id(&agent_type, session_id);
 
     memory_add_typed(
         runbox_id, session_id, content, branch, commit_type, tags,
@@ -932,7 +931,11 @@ pub async fn memory_add_with_embedding(
         Arc::new(StringArray::from(vec![""])),
         Arc::new(StringArray::from(vec![""])),
         Arc::new(StringArray::from(vec![""])),
-        Arc::new(StringArray::from(vec![LEVEL_PREFERRED])),
+        // FIX (store-embed): memory_type column must be a semantic type string
+        // ("environment"), not the level constant ("preferred"). Using the level
+        // as the type broke effective_type() lookups, dedup threshold
+        // calculation, and tag inference for all embeddings added via this path.
+        Arc::new(StringArray::from(vec![MT_ENVIRONMENT])),
         Arc::new(Int32Array::from(vec![90i32])),
         Arc::new(BooleanArray::from(vec![false])),
         Arc::new(Int64Array::from(vec![decay_for_level(LEVEL_PREFERRED)])),
@@ -950,7 +953,7 @@ pub async fn memory_add_with_embedding(
         content: content.into(), pinned: false, timestamp: ts,
         branch: "main".into(), commit_type: "memory".into(),
         tags: "".into(), parent_id: "".into(), agent_name: "".into(),
-        memory_type: LEVEL_PREFERRED.into(), importance: 90, resolved: false,
+        memory_type: MT_ENVIRONMENT.into(), importance: 90, resolved: false,
         decay_at: decay_for_level(LEVEL_PREFERRED),
         scope: SCOPE_LOCAL.into(), agent_type: "".into(),
         level: LEVEL_PREFERRED.into(), agent_id: "".into(), key: "".into(),
@@ -1213,14 +1216,26 @@ pub async fn tags_for_runbox(runbox_id: &str) -> Result<Vec<String>, String> {
 // ── Mutate ─────────────────────────────────────────────────────────────────────
 
 pub async fn memory_delete(id: &str) -> Result<(), String> {
+    // FIX (Bug #11): Guard against deleting LOCKED memories.
+    let mem = fetch_one(id).await?.ok_or("not found")?;
+    crate::memory::decision::assert_not_locked(&mem)?;
     get_table().await?
         .delete(&format!("id = '{}'", id.replace('\'', "''")))
         .await.map(|_| ()).map_err(|e| e.to_string())
 }
 
 pub async fn memories_delete_for_runbox(runbox_id: &str) -> Result<(), String> {
+    // FIX (Bug #11): Scan first; skip LOCKED memories rather than nuking everything.
+    // Previously this deleted the entire runbox including LOCKED rules.
+    let all = memories_for_runbox(runbox_id).await?;
+    let ids_to_delete: Vec<String> = all.iter()
+        .filter(|m| crate::memory::decision::assert_not_locked(m).is_ok())
+        .map(|m| format!("'{}'", m.id.replace('\'', "''")))
+        .collect();
+    if ids_to_delete.is_empty() { return Ok(()); }
+    let filter = format!("id IN ({})", ids_to_delete.join(", "));
     get_table().await?
-        .delete(&format!("runbox_id = '{}'", runbox_id.replace('\'', "''")))
+        .delete(&filter)
         .await.map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -1232,18 +1247,24 @@ pub async fn memory_pin(id: &str, pinned: bool) -> Result<(), String> {
 
 pub async fn memory_update(id: &str, content: &str) -> Result<(), String> {
     let mem = fetch_one(id).await?.ok_or("not found")?;
+    // FIX (Bug #11): Refuse to mutate LOCKED memories.
+    crate::memory::decision::assert_not_locked(&mem)?;
     let mut updated = mem.clone(); updated.content = content.to_string();
     delete_and_reinsert(&mem.id, updated).await
 }
 
 pub async fn memory_update_tags(id: &str, tags: &str) -> Result<(), String> {
     let mem = fetch_one(id).await?.ok_or("not found")?;
+    // FIX (Bug #11): Refuse to mutate LOCKED memories.
+    crate::memory::decision::assert_not_locked(&mem)?;
     let mut updated = mem.clone(); updated.tags = tags.to_string();
     delete_and_reinsert(&mem.id, updated).await
 }
 
 pub async fn memory_move_branch(id: &str, branch: &str) -> Result<(), String> {
     let mem = fetch_one(id).await?.ok_or("not found")?;
+    // FIX (Bug #11): Refuse to mutate LOCKED memories.
+    crate::memory::decision::assert_not_locked(&mem)?;
     let mut updated = mem.clone(); updated.branch = branch.to_string();
     delete_and_reinsert(&mem.id, updated).await
 }

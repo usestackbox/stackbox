@@ -2,13 +2,9 @@
 //
 // Git repository and worktree management.
 //
-// Worktree naming convention:
-//   stackbox-wt-{runbox_short}-{agent_slug}
-//
-// Key design:
-//   - runbox_id is ALWAYS the unique key (one per terminal)
-//   - agent_kind is cosmetic only (readable folder names)
-//   - 3 Claude instances = 3 different runbox_ids = 3 different worktrees, no collision
+// FIX (repo-dotgit): ensure_git_repo no longer unconditionally deletes .git
+//   when it is a file (worktree pointer). It now verifies the pointer is stale
+//   (points to a non-existent gitdir) before removing it.
 
 use std::path::Path;
 
@@ -16,9 +12,6 @@ use std::path::Path;
 // Git directory helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Returns the git dir for a runbox.
-/// If .git exists in cwd → use it.
-/// Otherwise → shadow repo in ~/.local/share/stackbox/git/{runbox_id}
 pub fn git_dir_for(cwd: &str, runbox_id: &str) -> String {
     let dot_git = Path::new(cwd).join(".git");
     if dot_git.exists() {
@@ -33,7 +26,6 @@ pub fn git_dir_for(cwd: &str, runbox_id: &str) -> String {
         .to_string()
 }
 
-/// Returns Some(shadow_dir) if this cwd uses a shadow repo, None if it has a real .git
 pub fn git_dir_opt(cwd: &str, runbox_id: &str) -> Option<String> {
     let dot_git = Path::new(cwd).join(".git");
     if dot_git.is_dir()  { return None; }
@@ -87,7 +79,6 @@ pub fn init_real_repo(cwd: &str) -> Result<(), String> {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
 
-    // Set local identity if no global identity configured
     let has_global_email = std::process::Command::new("git")
         .args(["config", "--global", "user.email"])
         .output()
@@ -103,7 +94,6 @@ pub fn init_real_repo(cwd: &str) -> Result<(), String> {
             .current_dir(cwd).output();
     }
 
-    // Initial empty commit so worktrees can branch off HEAD
     let _ = std::process::Command::new("git")
         .args(["commit", "--allow-empty", "-m", "stackbox: init"])
         .current_dir(cwd)
@@ -113,19 +103,33 @@ pub fn init_real_repo(cwd: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Ensure a git repo exists at cwd.
-/// - If real .git exists → return as-is
-/// - If shadow repo exists → return shadow path
-/// - Otherwise → create shadow bare repo
+/// Returns true if the `.git` file at `path` is a stale worktree pointer
+/// (i.e. the gitdir it references no longer exists on disk).
+fn is_stale_worktree_pointer(dot_git: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(dot_git) else { return false };
+    // Worktree pointer files look like: "gitdir: /abs/path/to/real/git/dir\n"
+    let Some(gitdir) = content.trim().strip_prefix("gitdir:") else { return false };
+    !Path::new(gitdir.trim()).exists()
+}
+
 pub fn ensure_git_repo(cwd: &str, runbox_id: &str) -> Result<String, String> {
     let dot_git = Path::new(cwd).join(".git");
 
     if dot_git.is_dir() {
         return Ok(dot_git.to_string_lossy().to_string());
     }
+
     if dot_git.is_file() {
-        // worktree pointer — remove stale file if it points nowhere
-        let _ = std::fs::remove_file(&dot_git);
+        // FIX: Only remove if it's a stale worktree pointer — never remove
+        // an active worktree link. Calling ensure_git_repo inside a worktree
+        // previously destroyed the link unconditionally.
+        if is_stale_worktree_pointer(&dot_git) {
+            eprintln!("[git] removing stale worktree pointer at {}", dot_git.display());
+            let _ = std::fs::remove_file(&dot_git);
+        } else {
+            // Active worktree link — treat as having git, return the gitdir it points to.
+            return Ok(dot_git.to_string_lossy().to_string());
+        }
     }
 
     let shadow      = git_dir_for(cwd, runbox_id);
@@ -159,7 +163,6 @@ pub fn ensure_git_repo(cwd: &str, runbox_id: &str) -> Result<String, String> {
 // Worktree management
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Slugify agent kind for use in folder/branch names.
 fn agent_slug(agent_kind: &str) -> String {
     agent_kind
         .to_lowercase()
@@ -167,22 +170,13 @@ fn agent_slug(agent_kind: &str) -> String {
         .replace('_', "-")
 }
 
-/// Worktree info returned to callers.
 #[derive(Debug, Clone)]
 pub struct WorktreeInfo {
-    /// Absolute path to the worktree directory
     pub path:   String,
-    /// Branch name, e.g. "stackbox/a1b2c3d4"
     pub branch: String,
-    /// Whether it was freshly created (false = already existed)
     pub is_new: bool,
 }
 
-/// Create (or return existing) an isolated git worktree for one agent session.
-///
-/// Naming: `stackbox-wt-{runbox_short}-{agent_slug}` / `stackbox/{runbox_short}`
-/// Idempotent — safe to call multiple times.
-/// Returns None when cwd has no real .git directory.
 pub fn ensure_worktree(cwd: &str, runbox_id: &str, agent_kind: &str) -> Option<WorktreeInfo> {
     if !Path::new(cwd).join(".git").is_dir() {
         eprintln!("[git] no real .git at {cwd} — skipping worktree creation");
@@ -197,13 +191,11 @@ pub fn ensure_worktree(cwd: &str, runbox_id: &str, agent_kind: &str) -> Option<W
     let wt_path = parent.join(&name);
     let wt_str  = wt_path.to_str()?.to_string();
 
-    // Already exists — return immediately
     if wt_path.exists() {
         eprintln!("[git] worktree exists: {wt_str}");
         return Some(WorktreeInfo { path: wt_str, branch, is_new: false });
     }
 
-    // Attempt 1: create new branch + worktree
     let out = std::process::Command::new("git")
         .args(["worktree", "add", "-b", &branch, &wt_str, "HEAD"])
         .current_dir(cwd)
@@ -215,7 +207,6 @@ pub fn ensure_worktree(cwd: &str, runbox_id: &str, agent_kind: &str) -> Option<W
         return Some(WorktreeInfo { path: wt_str, branch, is_new: true });
     }
 
-    // Attempt 2: branch already exists (agent restarted) — reattach without -b
     let out2 = std::process::Command::new("git")
         .args(["worktree", "add", &wt_str, &branch])
         .current_dir(cwd)
@@ -234,7 +225,6 @@ pub fn ensure_worktree(cwd: &str, runbox_id: &str, agent_kind: &str) -> Option<W
     None
 }
 
-/// Get worktree path if it already exists on disk (no creation).
 pub fn get_worktree_if_exists(cwd: &str, runbox_id: &str, agent_kind: &str) -> Option<String> {
     let short   = &runbox_id[..runbox_id.len().min(8)];
     let slug    = agent_slug(agent_kind);
@@ -248,25 +238,53 @@ pub fn get_worktree_if_exists(cwd: &str, runbox_id: &str, agent_kind: &str) -> O
     }
 }
 
-/// Remove a worktree — idempotent, safe if already removed.
+/// Find the main git repository root from inside a worktree.
+/// Worktree .git files contain: "gitdir: /main/.git/worktrees/name"
+/// Strip /worktrees/name/.git → main repo root.
+fn main_repo_for_worktree(wt_path: &str) -> std::path::PathBuf {
+    let dot_git = Path::new(wt_path).join(".git");
+    if let Ok(content) = std::fs::read_to_string(&dot_git) {
+        if let Some(gitdir_line) = content.trim().strip_prefix("gitdir:") {
+            let gitdir = Path::new(gitdir_line.trim());
+            // gitdir is like /main/.git/worktrees/branch-name
+            // parent() × 2 → /main/.git ; parent() × 1 more → /main
+            if let Some(main_git) = gitdir.parent().and_then(|p| p.parent()) {
+                if let Some(main_root) = main_git.parent() {
+                    if main_root.is_dir() {
+                        return main_root.to_path_buf();
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: parent of worktree directory (sibling layout)
+    Path::new(wt_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
 pub fn remove_worktree(wt_path: &str) {
     if !Path::new(wt_path).exists() { return; }
 
+    // FIX: run git commands from the MAIN repo, not the worktree parent dir.
+    // The parent of the worktree is not a git repo; the main repo is found
+    // by parsing the "gitdir:" pointer inside the worktree's .git file.
+    let repo_root = main_repo_for_worktree(wt_path);
+
     let _ = std::process::Command::new("git")
         .args(["worktree", "remove", "--force", wt_path])
+        .current_dir(&repo_root)
         .output();
 
     let _ = std::process::Command::new("git")
         .args(["worktree", "prune"])
+        .current_dir(&repo_root)
         .output();
 
     eprintln!("[git] worktree removed: {wt_path}");
 }
 
-/// Delete worktree folder + branch after a PR is merged or task cancelled.
-///
-/// `safe_delete = true`  → `git branch -d` (fails if branch not merged — safe)
-/// `safe_delete = false` → `git branch -D` (force delete — for cancelled tasks)
 pub fn delete_worktree(
     cwd:         &str,
     runbox_id:   &str,
@@ -280,7 +298,6 @@ pub fn delete_worktree(
     let parent  = Path::new(cwd).parent().ok_or("no parent directory")?;
     let wt_str  = parent.join(&name).to_string_lossy().to_string();
 
-    // 1. Remove worktree (detaches from git's tracking list)
     let rm_out = std::process::Command::new("git")
         .args(["worktree", "remove", "--force", &wt_str])
         .current_dir(cwd)
@@ -288,14 +305,12 @@ pub fn delete_worktree(
         .map_err(|e| e.to_string())?;
 
     if !rm_out.status.success() {
-        // Folder may already be gone — prune stale entries and continue
         let _ = std::process::Command::new("git")
             .args(["worktree", "prune"])
             .current_dir(cwd)
             .output();
     }
 
-    // 2. Delete the branch
     let flag = if safe_delete { "-d" } else { "-D" };
     let br_out = std::process::Command::new("git")
         .args(["branch", flag, &branch])
@@ -314,8 +329,6 @@ pub fn delete_worktree(
     Ok(())
 }
 
-/// List all stackbox worktrees for a given workspace (cwd).
-/// Returns only worktrees whose folder name starts with "stackbox-wt-".
 pub fn list_worktrees(cwd: &str) -> Vec<WorktreeEntry> {
     let out = std::process::Command::new("git")
         .args(["worktree", "list", "--porcelain"])
@@ -352,7 +365,6 @@ pub fn list_worktrees(cwd: &str) -> Vec<WorktreeEntry> {
           else if let Some(v) = line.strip_prefix("branch refs/heads/") { branch = v.to_string(); }
     }
 
-    // flush last entry
     if !path.is_empty() {
         let folder = Path::new(&path)
             .file_name()

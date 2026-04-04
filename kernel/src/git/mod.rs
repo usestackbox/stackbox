@@ -1,4 +1,4 @@
-// src-tauri/src/github/mod.rs
+// src-tauri/src/git/mod.rs
 //
 // GitHub module: webhook HTTP handler + API client.
 //
@@ -11,12 +11,12 @@
 //   Events: Pull request reviews, Issue comments, Check runs, Workflow runs, Pull requests
 
 pub mod api;
-pub mod cleanup;   // ADD
-pub mod commands;  // ADD
-pub mod diff;      // ADD
-pub mod log;       // ADD
-pub mod repo;      // ADD
-pub mod watcher;   // ADD
+pub mod cleanup;
+pub mod commands;
+pub mod diff;
+pub mod log;
+pub mod repo;
+pub mod watcher;
 pub mod webhook;
 
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use axum::{
     Router,
     routing::post,
     http::{HeaderMap, StatusCode},
-    extract::{State, Json},
+    extract::State,
     body::Bytes,
 };
 use crate::state::AppState;
@@ -51,7 +51,7 @@ async fn handle_webhook_request(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    // verify signature if GITHUB_WEBHOOK_SECRET is set
+    // Verify signature if GITHUB_WEBHOOK_SECRET is set
     if let Ok(secret) = std::env::var("GITHUB_WEBHOOK_SECRET") {
         if !verify_signature(&secret, &headers, &body) {
             eprintln!("[webhook] signature verification failed");
@@ -81,6 +81,12 @@ async fn handle_webhook_request(
 }
 
 /// HMAC-SHA256 signature verification for GitHub webhooks.
+///
+/// FIX (Bug #7): Replaced plain string == comparison with constant-time byte
+/// comparison. The old `computed == sig_header` short-circuits on the first
+/// differing byte, leaking timing information that could be used to brute-force
+/// the webhook secret. We now use hmac's built-in verify() which is
+/// guaranteed constant-time.
 fn verify_signature(secret: &str, headers: &HeaderMap, body: &Bytes) -> bool {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
@@ -91,12 +97,17 @@ fn verify_signature(secret: &str, headers: &HeaderMap, body: &Bytes) -> bool {
         .and_then(|s| s.strip_prefix("sha256="))
         .unwrap_or("");
 
+    // Decode the hex signature from the header into raw bytes.
+    // If decoding fails, reject immediately.
+    let sig_bytes = match hex::decode(sig_header) {
+        Ok(b)  => b,
+        Err(_) => return false,
+    };
+
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
         .expect("HMAC can take key of any size");
     mac.update(body);
-    let result = mac.finalize().into_bytes();
-    let computed = hex::encode(result);
 
-    // constant-time comparison
-    computed == sig_header
+    // verify_slice() does a constant-time comparison internally.
+    mac.verify_slice(&sig_bytes).is_ok()
 }
