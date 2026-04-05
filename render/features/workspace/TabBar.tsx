@@ -111,27 +111,20 @@ export function TabBar({
             userSelect: "none", paddingLeft: 2, lineHeight: "1",
           }}>Stackbox</span>
 
-          <StripIcon title="Workspace" active={!sidebarCollapsed && !fileTreeOpen} onClick={onSidebarToggle} size={32}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+          <StripIcon title="Workspace" active={!sidebarCollapsed && !fileTreeOpen} onClick={onSidebarToggle} size={28}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              {/* outer rect */}
-              <rect x="3" y="3" width="18" height="18" rx="2"
-                stroke="rgba(255,255,255,.4)"/>
-              {/* left panel — filled white when open */}
+              <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" opacity="0.5"/>
               <path d="M3 5a2 2 0 0 1 2-2h4v18H5a2 2 0 0 1-2-2V5z"
-                fill={sidebarCollapsed ? "rgba(255,255,255,.15)" : "#ffffff"}
-                stroke="none"/>
-              {/* divider line */}
-              <line x1="9" y1="3" x2="9" y2="21"
-                stroke="rgba(255,255,255,.4)"/>
+                fill="currentColor" stroke="none"/>
+              <line x1="9" y1="3" x2="9" y2="21" stroke="currentColor" opacity="0.5"/>
             </svg>
           </StripIcon>
 
-          <StripIcon title="Code" active={!sidebarCollapsed && fileTreeOpen} onClick={onFileTreeToggle} size={32}>
+          <StripIcon title="Code" active={!sidebarCollapsed && fileTreeOpen} onClick={onFileTreeToggle} size={28}>
             <span style={{
-              fontSize: 13, fontWeight: 700, letterSpacing: "-0.03em",
+              fontSize: 12, fontWeight: 700, letterSpacing: "-0.03em",
               fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
-              opacity: !sidebarCollapsed && fileTreeOpen ? 1 : 0.4,
               lineHeight: 1, userSelect: "none",
               color: "currentColor",
             }}>&lt;/&gt;</span>
@@ -165,7 +158,7 @@ export function TabBar({
           <button
             onClick={onAddTerminal}
             title="New terminal"
-            style={{ ...tbtn, width: 30, alignSelf: "stretch", borderRadius: 0, fontSize: 18, fontWeight: 300, border: "1px solid transparent" }}
+            style={{ ...tbtn, width: 26, alignSelf: "stretch", borderRadius: 0, fontSize: 16, fontWeight: 300, border: "1px solid transparent", marginRight: 6 }}
             onMouseEnter={e => {
               const el = e.currentTarget as HTMLElement;
               el.style.color = C.t0; el.style.background = "rgba(255,255,255,.09)";

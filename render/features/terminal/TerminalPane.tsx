@@ -12,8 +12,8 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 
 // ── Theme & constants ─────────────────────────────────────────────────────────
-const BG     = "#0b0e10";
-const BG_ACT = "#0e1214";
+const BG     = "#111111";
+const BG_ACT = "#161616";
 
 const TERM_THEME = {
   background: BG, foreground: "#d4d4d4",
@@ -50,7 +50,7 @@ const TERM_CSS = `
 .rp-win.rp-active .rp-cwd{color:rgba(255,255,255,.55)}
 .rp-chip{font-size:9px;font-family:ui-monospace,monospace;letter-spacing:.05em;
   flex-shrink:0;color:rgba(255,255,255,.18);background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,255,255,.07);border-radius:0;padding:1px 6px;
+  border:1px solid rgba(255,255,255,.07);border-radius:3px;padding:1px 6px;
   transition:all .15s}
 .rp-win.rp-active .rp-chip{color:rgba(255,255,255,.4);background:rgba(255,255,255,.07);
   border-color:rgba(255,255,255,.12)}
@@ -325,7 +325,7 @@ export function TerminalPane({
       >
         <span className="rp-cwd">{liveCwd || runboxCwd}</span>
         {label && <span className="rp-chip">{label}</span>}
-        <div style={{ display: "flex", alignItems: "center", gap: 1, marginLeft: 2 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 3, marginLeft: 4 }}>
           {onMinimize && (
             <TBtn title="Minimize pane" onClick={onMinimize}>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"
