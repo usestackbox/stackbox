@@ -1,4 +1,4 @@
-// src-tauri/src/pty/mod.rs
+// kernel/src/pty/mod.rs
 // Supercontext V3 — OutputClassifier + ResponseCapture removed.
 // Agents write memory intentionally via remember()/session_log()/session_summary().
 // Session end: expire TEMPORARY for agent, run auto_session_summary fallback.
@@ -74,19 +74,44 @@ fn detect_worktree(cwd: &str) -> Option<String> {
 /// Returns true if this URL is intentional (localhost / file://) and should
 /// open in the browser pane.  Filters out the noise that build tools print
 /// (cargo doc links, npm package URLs, log lines, etc.).
-///
-/// FIX (Bug #13): Previously every http/https/file URL in PTY output opened
-/// a browser tab — including cargo, npm, and logger output.
 fn is_intentional_url(url: &str) -> bool {
-    // file:// always intentional (local HTML preview)
     if url.starts_with("file://") {
         return true;
     }
-    // localhost / 127.0.0.1 / 0.0.0.0 dev servers — intentional
     if url.contains("localhost") || url.contains("127.0.0.1") || url.contains("0.0.0.0") {
         return true;
     }
-    // Everything else (https://docs.rs/..., https://npmjs.com/..., etc.) — skip
+    false
+}
+
+/// On Windows, try to find PowerShell Core (pwsh.exe) first for a better
+/// terminal experience, falling back to Windows PowerShell.
+#[cfg(windows)]
+fn find_powershell() -> String {
+    // Try PowerShell Core locations
+    let candidates = [
+        "pwsh.exe", // in PATH
+        r"C:\Program Files\PowerShell\7\pwsh.exe",
+        r"C:\Program Files\PowerShell\6\pwsh.exe",
+    ];
+    for c in &candidates {
+        if std::path::Path::new(c).exists() || which_exe(c) {
+            return c.to_string();
+        }
+    }
+    // Fallback: Windows PowerShell
+    let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", sys_root)
+}
+
+#[cfg(windows)]
+fn which_exe(name: &str) -> bool {
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in path_var.split(';') {
+            let candidate = std::path::Path::new(dir).join(name);
+            if candidate.exists() { return true; }
+        }
+    }
     false
 }
 
@@ -104,8 +129,8 @@ pub async fn spawn(
 ) -> Result<(), String> {
     let pty_system = native_pty_system();
 
-    let init_cols = cols.unwrap_or(80);
-    let init_rows = rows.unwrap_or(24);
+    let init_cols = cols.unwrap_or(220).max(40);
+    let init_rows = rows.unwrap_or(50).max(10);
 
     let pair = pty_system
         .openpty(PtySize {
@@ -171,43 +196,123 @@ pub async fn spawn(
 
     // ── Shell command ─────────────────────────────────────────────────────────
 
+    // WINDOWS: Launch PowerShell (Core preferred, Windows PowerShell fallback).
+    //
+    // CRITICAL FIX: The previous code passed -NonInteractive which caused the
+    // shell to exit immediately even with -NoExit, because -NonInteractive tells
+    // PowerShell not to read from stdin at all. Removed entirely.
+    //
+    // Flag explanation:
+    //   -NoLogo    — suppress copyright banner
+    //   -NoProfile — skip $PROFILE (faster startup; we inject our own prompt)
+    //   -NoExit    — stay running after -Command executes
+    //   -Command   — set a compact prompt function then hand off to the REPL
+    //
+    // Without -NonInteractive the shell reads from the PTY's stdin normally.
     #[cfg(windows)]
     let mut cmd = {
-        let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-        let ps       = format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", sys_root);
-        let mut c    = CommandBuilder::new(&ps);
+        let ps = find_powershell();
+        let mut c = CommandBuilder::new(&ps);
         c.args(&[
-            "-NoLogo", "-NoProfile", "-NoExit", "-NonInteractive", "-Command",
-            r#"function prompt { (Split-Path -Leaf (Get-Location)) + "> " }"#,
+            "-NoLogo",
+            "-NoProfile",
+            "-NoExit",
+            "-Command",
+            // Set a compact prompt: "FolderName> "
+            // Single quotes inside the raw string to avoid escaping issues.
+            r#"function prompt { (Split-Path -Leaf (Get-Location)) + '> ' }"#,
         ]);
-        for var in &["USERPROFILE","APPDATA","LOCALAPPDATA","TEMP","TMP","PATH","SystemRoot"] {
-            c.env(var, std::env::var(var).unwrap_or_default());
+        // Pass through essential Windows environment variables
+        for var in &[
+            "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
+            "PATH", "SystemRoot", "COMSPEC", "USERNAME", "USERDOMAIN",
+            "HOMEDRIVE", "HOMEPATH",
+        ] {
+            if let Ok(val) = std::env::var(var) {
+                c.env(var, val);
+            }
         }
-        c.env("SystemRoot", &sys_root);
         c
     };
 
+    // UNIX: Use the user's preferred shell (from $SHELL), falling back through
+    // zsh → bash → sh. Inject a minimal .zshrc / .bashrc that sources the
+    // real one and sets a Stackbox-themed prompt.
     #[cfg(not(windows))]
     let mut cmd = {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        let stackbox_zsh_dir = "/tmp/stackbox-zsh";
-        let _ = std::fs::create_dir_all(stackbox_zsh_dir);
-        let zshrc = r#"
-[ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc"
+        let preferred_shell = std::env::var("SHELL").unwrap_or_default();
+        let shell = if !preferred_shell.is_empty() && std::path::Path::new(&preferred_shell).exists() {
+            preferred_shell
+        } else {
+            // Probe common shells in order of preference
+            let candidates = ["/bin/zsh", "/usr/bin/zsh", "/bin/bash", "/usr/bin/bash", "/bin/sh"];
+            candidates.iter()
+                .find(|p| std::path::Path::new(*p).exists())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "/bin/sh".to_string())
+        };
+
+        let shell_name = std::path::Path::new(&shell)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("sh");
+
+        let mut c = CommandBuilder::new(&shell);
+
+        if shell_name == "zsh" {
+            // Write a minimal ZDOTDIR/.zshrc that sources the real .zshrc
+            // and sets a clean Stackbox prompt.
+            let stackbox_zsh_dir = format!("/tmp/stackbox-zsh-{}", std::process::id());
+            let _ = std::fs::create_dir_all(&stackbox_zsh_dir);
+            let zshrc = r#"
+# Source the user's real .zshrc if it exists
+[ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc" 2>/dev/null
+
+# Stackbox prompt: cyan folder + grey prompt char
+autoload -U colors && colors 2>/dev/null
 PROMPT="%B%F{cyan}%1~%f%b %% "
-zle_highlight=( region:bg=blue isearch:underline paste:standout suffix:bold default:fg=yellow )
+
+# OSC 7: report CWD so the titlebar stays in sync
 chpwd() { printf '\e]7;file://%s%s\a' "$HOST" "$PWD" }
 chpwd
 "#;
-        let _ = std::fs::write(format!("{stackbox_zsh_dir}/.zshrc"), zshrc);
-        let mut c = CommandBuilder::new(&shell);
-        c.env("ZDOTDIR", stackbox_zsh_dir);
+            let _ = std::fs::write(format!("{stackbox_zsh_dir}/.zshrc"), zshrc);
+            c.env("ZDOTDIR", &stackbox_zsh_dir);
+
+        } else if shell_name == "bash" {
+            // Write a minimal bashrc
+            let stackbox_bash_dir = format!("/tmp/stackbox-bash-{}", std::process::id());
+            let _ = std::fs::create_dir_all(&stackbox_bash_dir);
+            let bashrc = r#"
+# Source the user's real .bashrc if it exists
+[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc" 2>/dev/null
+
+# Stackbox prompt: cyan folder + grey $
+PS1='\[\033[01;36m\]\W\[\033[00m\] \$ '
+
+# OSC 7: report CWD so the titlebar stays in sync
+_stackbox_osc7() { printf '\e]7;file://%s%s\a' "$HOSTNAME" "$PWD"; }
+PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+"#;
+            let bashrc_path = format!("{stackbox_bash_dir}/.bashrc");
+            let _ = std::fs::write(&bashrc_path, bashrc);
+            // bash --rcfile <file> loads the file as interactive rc
+            c = CommandBuilder::new(&shell);
+            c.args(&["--rcfile", &bashrc_path]);
+        }
+
         c
     };
 
     cmd.cwd(&effective_cwd);
-    cmd.env("STACKBOX_WORKSPACE_NAME", &ws_label);
 
+    // ── Universal environment ─────────────────────────────────────────────────
+    cmd.env("STACKBOX_WORKSPACE_NAME", &ws_label);
+    cmd.env("TERM",      "xterm-256color"); // full 256-colour + OSC sequences
+    cmd.env("COLORTERM", "truecolor");      // enable 24-bit RGB in colour-aware apps
+    cmd.env("LANG",      "en_US.UTF-8");    // UTF-8 for emoji, box-drawing, etc.
+
+    // BROWSER shim: routes `start index.html` → Stackbox browser panel
     {
         let shim = if cfg!(windows) { "stackbox-open.exe" } else { "stackbox-open" };
         if let Some(path) = std::env::current_exe().ok()
@@ -219,6 +324,8 @@ chpwd
     }
 
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") { cmd.env("ANTHROPIC_API_KEY", key); }
+    if let Ok(key) = std::env::var("OPENAI_API_KEY")    { cmd.env("OPENAI_API_KEY",    key); }
+    if let Ok(key) = std::env::var("GEMINI_API_KEY")    { cmd.env("GEMINI_API_KEY",    key); }
 
     if docker {
         if let Ok(prefix) = crate::docker::exec_prefix(&runbox_id) {
@@ -227,6 +334,7 @@ chpwd
         }
     }
 
+    // Deterministic per-workspace port (3100–3999) so parallel agents don't collide
     let pane_port = {
         let mut hash: u32 = 0x811c9dc5;
         for b in runbox_id.as_bytes() {
@@ -246,18 +354,18 @@ chpwd
 
     let port     = crate::workspace::context::MEMORY_PORT;
     let ctx_file = format!("{effective_cwd}/.stackbox-context.md");
-    cmd.env("STACKBOX_CONTEXT_FILE",  &ctx_file);
-    cmd.env("STACKBOX_MEMORY_URL",    format!("http://localhost:{port}/memory"));
-    cmd.env("STACKBOX_RUNBOX_ID",     &runbox_id);
-    cmd.env("STACKBOX_SESSION_ID",    &session_id);
-    cmd.env("STACKBOX_WORKTREE",      worktree_path.as_deref().unwrap_or(""));
-    cmd.env("STACKBOX_EVENTS_URL",    format!("http://localhost:{port}/events?runbox_id={runbox_id}"));
+    cmd.env("STACKBOX_CONTEXT_FILE", &ctx_file);
+    cmd.env("STACKBOX_MEMORY_URL",   format!("http://localhost:{port}/memory"));
+    cmd.env("STACKBOX_RUNBOX_ID",    &runbox_id);
+    cmd.env("STACKBOX_SESSION_ID",   &session_id);
+    cmd.env("STACKBOX_WORKTREE",     worktree_path.as_deref().unwrap_or(""));
+    cmd.env("STACKBOX_EVENTS_URL",   format!("http://localhost:{port}/events?runbox_id={runbox_id}"));
 
     match &agent_kind {
         AgentKind::ClaudeCode    => { cmd.env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"); }
-        AgentKind::Codex         => { cmd.env("CODEX_CONTEXT_FILE", &ctx_file); }
-        AgentKind::CursorAgent   => { cmd.env("CURSOR_CONTEXT_FILE", &ctx_file); }
-        AgentKind::GeminiCli     => { cmd.env("GEMINI_SYSTEM_MD", &ctx_file); }
+        AgentKind::Codex         => { cmd.env("CODEX_CONTEXT_FILE",   &ctx_file); }
+        AgentKind::CursorAgent   => { cmd.env("CURSOR_CONTEXT_FILE",  &ctx_file); }
+        AgentKind::GeminiCli     => { cmd.env("GEMINI_SYSTEM_MD",     &ctx_file); }
         AgentKind::GitHubCopilot => { cmd.env("COPILOT_CONTEXT_FILE", &ctx_file); }
         AgentKind::Shell         => {}
     }
@@ -265,29 +373,15 @@ chpwd
     let child      = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
 
-    // FIX (Bug #2 + Bug #14): call take_writer() exactly once.
-    //
-    // Previously take_writer() was called twice:
-    //   1. to store in PtySession.writer
-    //   2. inside the agent launch_cmd block — always fails silently since (1)
-    //      already consumed it, so the agent's startup command was never sent.
-    //
-    // Now we own the writer in a channel-based forwarder.  All writes go
-    // through a tokio::sync::mpsc channel:
-    //   • The PTY session's `.writer` field sends through this channel.
-    //   • The webhook handler also sends through state.pty_writer (same channel).
-    //   • The agent launch command is sent through the same channel (no second
-    //     take_writer() needed).
-    //
-    // This is exactly the pattern documented in pty/writer.rs.
+    // ── Writer channel ────────────────────────────────────────────────────────
+    // take_writer() must be called exactly once (portable-pty limitation).
+    // We own the writer behind an mpsc channel; every caller (pty_write command,
+    // webhook handler, agent launch cmd) sends through the channel.
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
-    // FIX (Bug #14): Register the channel so the webhook handler can inject
-    // feedback into this agent's PTY.
     state.pty_writer.register(&runbox_id, tx.clone());
 
-    // Spawn the forwarder: reads bytes from the channel and writes to PTY stdin.
     let raw_writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     {
         let mut pty_w = raw_writer;
@@ -299,18 +393,15 @@ chpwd
         });
     }
 
-    // Send the agent's launch command through the channel (fixes the lost launch
-    // command from Bug #2 — no second take_writer() call needed).
+    // Send the agent's launch command after the shell has had time to start
     if let Some(launch) = agent_kind.launch_cmd(&ctx_file) {
         let tx2 = tx.clone();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let _ = tx2.send(launch.into_bytes());
         });
     }
 
-    // A thin Write wrapper around the channel sender so PtySession.writer still
-    // satisfies `Box<dyn Write + Send>` without any other code changes.
     struct ChannelWriter(tokio::sync::mpsc::UnboundedSender<Vec<u8>>);
     impl Write for ChannelWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -336,24 +427,19 @@ chpwd
         docker,
     });
 
-    // FIX (Bug #6): The redundant write_mcp_config call that was here (always
-    // with worktree: None, overwriting the correct config written by
-    // commands/pty.rs) has been removed. commands/pty.rs already writes the
-    // correct config — including the worktree path — before calling spawn().
-
     // ── PTY reader thread ─────────────────────────────────────────────────────
     let sid               = session_id.clone();
     let rb_id             = runbox_id.clone();
     let app_pty           = app.clone();
     let db_arc            = state.db.clone();
     let pty_writer_arc    = state.pty_writer.clone();
-    let conflict_reg_thr  = state.conflict_registry.clone(); // Bug #10 fix
+    let conflict_reg_thr  = state.conflict_registry.clone();
     let worktree_path_thr = worktree_path.clone();
     let cwd_thr           = effective_cwd.clone();
     let session_start_ts  = Instant::now();
 
     std::thread::spawn(move || {
-        let mut buf           = [0u8; 4096];
+        let mut buf           = [0u8; 8192]; // larger buffer → fewer round-trips
         let mut detected_kind = agent_kind.clone();
 
         while let Ok(n) = reader.read(&mut buf) {
@@ -370,8 +456,7 @@ chpwd
                 }
             }
 
-            // FIX (Bug #13): Only open localhost / file:// URLs automatically.
-            // External URLs printed by cargo, npm, loggers, etc. are ignored.
+            // URL detection: only localhost / file:// open in browser pane
             let text_clean = strip_ansi(&text);
             for word in text_clean.split_whitespace() {
                 let clean = word.trim_matches(|c: char| {
@@ -392,7 +477,7 @@ chpwd
                 }
             }
 
-            // start ./index.html intercept — relative file paths from PTY output
+            // `start ./index.html` intercept
             for line in text_clean.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("start ") || trimmed.starts_with("Start-Process ") {
@@ -426,13 +511,7 @@ chpwd
         let _ = session_end(&db_arc, &sid, None, None);
         on_command_result(&db_arc, &rb_id, &sid, 0, duration_ms);
 
-        // FIX (Bug #10): Release all file conflict locks held by this session.
-        // Previously on_session_exit was declared but never called, so locks
-        // from dead agent processes stayed held permanently, blocking other agents.
         crate::conflict::on_session_exit(&conflict_reg_thr, &sid, &cwd_thr);
-
-        // FIX (Bug #14 cleanup): Unregister the PTY from the writer map so the
-        // webhook handler stops trying to deliver events to a dead session.
         pty_writer_arc.unregister(&rb_id);
 
         if agent_kind != AgentKind::Shell {
@@ -443,7 +522,7 @@ chpwd
             remove_worktree(wt);
         }
 
-        // ── V3 session cleanup + GCC+Letta sleep-time jobs ────────────────────
+        // V3 session cleanup + GCC+Letta sleep-time jobs
         if agent_kind != AgentKind::Shell {
             let rb2  = rb_id.clone();
             let sid2 = sid.clone();
