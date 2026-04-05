@@ -12,8 +12,8 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 
 // ── Theme & constants ─────────────────────────────────────────────────────────
-const BG     = "#1a1a1a";
-const BG_ACT = "#222222";
+const BG     = "#1e1e1e";
+const BG_ACT = "#242424";
 
 const TERM_THEME = {
   background: BG, foreground: "#d4d4d4",
