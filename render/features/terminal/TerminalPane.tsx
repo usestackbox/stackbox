@@ -386,3 +386,4 @@ export function TerminalPane({
     </div>
   );
 }
+
