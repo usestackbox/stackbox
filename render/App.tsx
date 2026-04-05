@@ -106,6 +106,8 @@ export default function App() {
         onCwdChange={callbacks.onCwdChange}
         onSessionChange={callbacks.onSessionChange}
         onClose={callbacks.onClose}
+        onMinimize={callbacks.onMinimize}
+        onMaximize={callbacks.onMaximize}
         onSplitDown={callbacks.onSplitDown}
         onSplitLeft={callbacks.onSplitLeft}
       />

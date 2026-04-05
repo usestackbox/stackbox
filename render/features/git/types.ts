@@ -48,7 +48,7 @@ export interface AgentSpan {
   startedAt: number;
 }
 
-export type GitTab = "changes" | "branches" | "history" | "worktrees" | "github";
+export type GitTab = "changes" | "source" | "github";
 
 export interface GitPanelProps {
   workspaceCwd: string;

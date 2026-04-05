@@ -98,11 +98,11 @@ export function TabBar({
         <div data-tauri-drag-region style={{ height: TRAFFIC_H, flexShrink: 0 }} />
       )}
 
-      <div style={{ display: "flex", alignItems: "center", flex: 1, padding: "0 6px", gap: 3 }}>
+      <div style={{ display: "flex", alignItems: "stretch", flex: 1, padding: "0 6px", gap: 3 }}>
         {/* Brand + view toggles */}
         <div style={{
           display: "flex", alignItems: "center", gap: 5, flexShrink: 0,
-          paddingLeft: 6, paddingRight: 8,
+          paddingLeft: 6, paddingRight: 8, alignSelf: "center",
           borderRight: `1px solid rgba(255,255,255,.08)`, marginRight: 2,
         }}>
           <span style={{
@@ -112,7 +112,7 @@ export function TabBar({
           }}>Stackbox</span>
 
           <StripIcon title="Workspace" active={!sidebarCollapsed && !fileTreeOpen} onClick={onSidebarToggle}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               {/* outer rect */}
               <rect x="3" y="3" width="18" height="18" rx="2"
@@ -128,7 +128,7 @@ export function TabBar({
           </StripIcon>
 
           <StripIcon title="Code" active={!sidebarCollapsed && fileTreeOpen} onClick={onFileTreeToggle}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
               stroke={!sidebarCollapsed && fileTreeOpen ? "#ffffff" : "rgba(255,255,255,.4)"}
               strokeWidth="2.5"
               strokeLinecap="round" strokeLinejoin="round">
@@ -140,7 +140,7 @@ export function TabBar({
 
         {/* Terminal tabs */}
         <div style={{
-          display: "flex", alignItems: "center", gap: 3,
+          display: "flex", alignItems: "stretch", gap: 0,
           overflowX: "auto", minWidth: 0, maxWidth: "55%",
           scrollbarWidth: "none",
         }}>
@@ -165,7 +165,7 @@ export function TabBar({
           <button
             onClick={onAddTerminal}
             title="New terminal"
-            style={{ ...tbtn, width: 30, height: 30, borderRadius: 8, fontSize: 18, fontWeight: 300, border: "1px solid transparent" }}
+            style={{ ...tbtn, width: 30, alignSelf: "stretch", borderRadius: 0, fontSize: 18, fontWeight: 300, border: "1px solid transparent" }}
             onMouseEnter={e => {
               const el = e.currentTarget as HTMLElement;
               el.style.color = C.t0; el.style.background = C.bg3;
@@ -183,7 +183,7 @@ export function TabBar({
         {fileTabs.length > 0 && (
           <>
             <div style={{ width: 1, height: 20, background: "rgba(255,255,255,.1)", flexShrink: 0, margin: "0 4px" }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 3, overflowX: "auto", minWidth: 0, flex: 1, scrollbarWidth: "none" }}>
+            <div style={{ display: "flex", alignItems: "stretch", gap: 0, overflowX: "auto", minWidth: 0, flex: 1, scrollbarWidth: "none" }}>
               {fileTabs.map(tab => (
                 <FileTab
                   key={tab.id}

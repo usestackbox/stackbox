@@ -22,7 +22,7 @@ export function DiffViewer({ tab, allTabs, onClose, onSelectTab }: Props) {
   const fileName = tab.path.split(/[/\\]/).pop() ?? tab.path;
   const dirPart  = tab.path.slice(0, tab.path.length - fileName.length);
   const ec       = extColor(tab.path);
-  const badgeColor = tab.changeType === "deleted" ? "#cc5555" : tab.changeType === "created" ? "#4a9955" : "#666666";
+  const badgeColor = tab.changeType === "deleted" ? "rgba(248,113,113,0.8)" : tab.changeType === "created" ? "rgba(74,222,128,0.7)" : "#666666";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg0 }}>
@@ -64,8 +64,8 @@ export function DiffViewer({ tab, allTabs, onClose, onSelectTab }: Props) {
         <span style={{ fontFamily: MONO, fontSize: 11, color: C.t2, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tab.path}</span>
         {(tab.insertions > 0 || tab.deletions > 0) && (
           <span style={{ display: "flex", gap: 6, flexShrink: 0, fontSize: 10, fontFamily: MONO }}>
-            {tab.insertions > 0 && <span style={{ color: "#4a9955" }}>+{tab.insertions}</span>}
-            {tab.deletions  > 0 && <span style={{ color: "#e05555" }}>-{tab.deletions}</span>}
+            {tab.insertions > 0 && <span style={{ color: "rgba(74,222,128,0.7)" }}>+{tab.insertions}</span>}
+            {tab.deletions  > 0 && <span style={{ color: "rgba(248,113,113,0.7)" }}>-{tab.deletions}</span>}
           </span>
         )}
       </div>

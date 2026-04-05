@@ -2,20 +2,30 @@
 import { useState, useRef, useEffect } from "react";
 import { C, FS, MONO } from "../design";
 import type { Runbox } from "../types";
-import type { GitStats } from "./useWorkspaceGitStats";
 
 interface Props {
   workspace:     Runbox;
   isActive:      boolean;
-  gitStats?:     GitStats;
-  customIcon?:   string;
+  lastUsed?:     number;
   onSelect:      () => void;
   onRename:      (name: string) => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }
 
+function formatRelativeTime(ts?: number): string {
+  if (!ts) return "";
+  const diff = Date.now() - ts;
+  const mins  = Math.floor(diff / 60_000);
+  const hours = Math.floor(diff / 3_600_000);
+  const days  = Math.floor(diff / 86_400_000);
+  if (mins  <  1) return "just now";
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+}
+
 export function WorkspaceItem({
-  workspace, isActive, gitStats,
+  workspace, isActive, lastUsed,
   onSelect, onRename, onContextMenu,
 }: Props) {
   const [renaming,  setRenaming]  = useState(false);
@@ -33,8 +43,8 @@ export function WorkspaceItem({
     setRenaming(false);
   };
 
-  const hasGit  = !!gitStats && (gitStats.insertions + gitStats.deletions) > 0;
-  const dirName = workspace.cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? workspace.cwd;
+  const rawDir = workspace.cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? workspace.cwd;
+  const dirName = `~/${rawDir}`;
 
   const bg = isActive
     ? "rgba(255,255,255,.07)"
@@ -80,7 +90,7 @@ export function WorkspaceItem({
           />
         ) : (
           <span style={{
-            fontSize: FS.md, fontFamily: MONO, fontWeight: 500,
+            fontSize: 14, fontFamily: MONO, fontWeight: 500,
             color: isActive ? C.t0 : C.t1,
             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             flex: 1, minWidth: 0,
@@ -88,39 +98,26 @@ export function WorkspaceItem({
             {workspace.name}
           </span>
         )}
-
-        {!renaming && hasGit && (
-          <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0, marginLeft: 6 }}>
-            {gitStats!.insertions > 0 && (
-              <span style={{ fontSize: FS.xs, fontFamily: MONO, color: C.green }}>
-                +{gitStats!.insertions}
-              </span>
-            )}
-            {gitStats!.deletions > 0 && (
-              <span style={{ fontSize: FS.xs, fontFamily: MONO, color: C.red }}>
-                -{gitStats!.deletions}
-              </span>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* Meta row */}
+      {/* Meta row: folder path + time */}
       {!renaming && (
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={C.t3}
-            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-            <line x1="6" y1="3" x2="6" y2="15"/>
-            <circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
-            <path d="M18 9a9 9 0 0 1-9 9"/>
-          </svg>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{
-            fontSize: FS.xs, fontFamily: MONO, color: C.t3,
+            fontSize: 12, fontFamily: MONO, color: C.t3,
             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             flex: 1, minWidth: 0,
           }}>
             {dirName}
           </span>
+          {lastUsed !== undefined && (
+            <span style={{
+              fontSize: 11, fontFamily: MONO, color: C.t3,
+              flexShrink: 0, marginLeft: 8, opacity: 0.7,
+            }}>
+              {formatRelativeTime(lastUsed)}
+            </span>
+          )}
         </div>
       )}
     </div>

@@ -2,13 +2,11 @@
 import { C, FS, MONO, SANS } from "../design";
 import { WorkspaceItem } from "./WorkspaceItem";
 import type { Runbox } from "../types";
-import type { GitStats } from "./useWorkspaceGitStats";
 
 interface Props {
   workspaces:    Runbox[];
   activeId:      string | null;
-  gitStats:      Record<string, GitStats>;
-  icons:         Record<string, string>;
+  lastUsedMap:   Record<string, number>;
   wsName:        string;
   wsEditing:     boolean;
   wsVal:         string;
@@ -24,7 +22,7 @@ interface Props {
 }
 
 export function WorkspaceList({
-  workspaces, activeId, gitStats, icons,
+  workspaces, activeId, lastUsedMap,
   wsName, wsEditing, wsVal, wsInputRef,
   onWsClick, onWsChange, onWsKeyDown, onWsBlur,
   onSelect, onRename, onContextMenu, onNew,
@@ -70,8 +68,7 @@ export function WorkspaceList({
             key={ws.id}
             workspace={ws}
             isActive={activeId === ws.id}
-            gitStats={gitStats[ws.id]}
-            customIcon={icons[ws.id]}
+            lastUsed={lastUsedMap[ws.id]}
             onSelect={() => onSelect(ws.id)}
             onRename={name => onRename(ws.id, name)}
             onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, ws.id); }}

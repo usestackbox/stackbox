@@ -54,10 +54,11 @@ export function TermTab({
       title={win.cwd}
       style={{
         display: "flex", alignItems: "center", gap: 5,
-        padding: "5px 6px 5px 10px", height: 30, borderRadius: 8,
+        padding: "0 6px 0 10px", height: "100%", borderRadius: 0,
         cursor: dragTabId ? "grabbing" : "default", flexShrink: 0,
         background: isActive && !hasFile ? "rgba(255,255,255,.07)" : isDragOver ? "rgba(255,255,255,.05)" : "transparent",
-        border: "1px solid transparent",
+        borderRight: "1px solid rgba(255,255,255,.06)",
+        borderTop: "none", borderBottom: "none", borderLeft: "none",
         opacity: win.minimized ? 0.55 : isDragging ? 0.4 : 1,
         transition: "background .1s", userSelect: "none",
       }}

@@ -1,12 +1,10 @@
 // sidebar/Sidebar.tsx
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { C } from "../design";
 import { FilePanel } from "../features/files";
-import { useWorkspaceGitStats } from "./useWorkspaceGitStats";
 import { WorkspaceList }        from "./WorkspaceList";
 import { WorkspaceContextMenu } from "./WorkspaceContextMenu";
-import { IconPicker }           from "./IconPicker";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import type { Runbox } from "../types";
 
@@ -48,35 +46,34 @@ function useMacFullscreen() {
 export function Sidebar({
   runboxes, activeId, cwdMap, collapsed,
   onSelect, onCreate, onRename, onDelete,
-  fileTreeOpen, onFileTreeToggle, onOpenFile, onFileTreeWidth, worktreeMap = {},
+  fileTreeOpen, onFileTreeToggle, onOpenFile, onFileTreeWidth,
 }: SidebarProps) {
   const isFullscreen = useMacFullscreen();
   const TOOLBAR_H    = IS_MAC && !isFullscreen ? BASE_TOOLBAR_H + TRAFFIC_H : BASE_TOOLBAR_H;
+  const panelW       = WORKSPACE_W;
 
-  // always fixed width — file panel and workspace list are same
-  const panelW = WORKSPACE_W;
-
-  useEffect(() => {
-    onFileTreeWidth?.(WORKSPACE_W);
-  }, [fileTreeOpen]); // eslint-disable-line
+  useEffect(() => { onFileTreeWidth?.(WORKSPACE_W); }, [fileTreeOpen]); // eslint-disable-line
 
   // ── Local state ───────────────────────────────────────────────────────────
-  const [showModal,  setShowModal]  = useState(false);
-  const [icons,      setIcons]      = useState<Record<string, string>>({});
-  const [ctxMenu,    setCtxMenu]    = useState<{ x: number; y: number; id: string } | null>(null);
-  const [iconPicker, setIconPicker] = useState<{ x: number; y: number; id: string } | null>(null);
-  const [wsName,     setWsName]     = useState("WORKSPACE");
-  const [wsEditing,  setWsEditing]  = useState(false);
-  const [wsVal,      setWsVal]      = useState("WORKSPACE");
+  const [showModal,   setShowModal]   = useState(false);
+  const [lastUsedMap, setLastUsedMap] = useState<Record<string, number>>({});
+  const [ctxMenu,     setCtxMenu]     = useState<{ x: number; y: number; id: string } | null>(null);
+  const [wsName,      setWsName]      = useState("WORKSPACE");
+  const [wsEditing,   setWsEditing]   = useState(false);
+  const [wsVal,       setWsVal]       = useState("WORKSPACE");
   const wsInputRef = useRef<HTMLInputElement>(null);
-
-  const gitStats = useWorkspaceGitStats(runboxes, cwdMap, worktreeMap);
 
   useEffect(() => { if (wsEditing) setTimeout(() => wsInputRef.current?.select(), 20); }, [wsEditing]);
 
   const submitWsRename = () => {
     if (wsVal.trim()) setWsName(wsVal.trim().toUpperCase()); else setWsVal(wsName);
     setWsEditing(false);
+  };
+
+  // Record timestamp whenever a workspace is activated
+  const handleSelect = (id: string) => {
+    setLastUsedMap(prev => ({ ...prev, [id]: Date.now() }));
+    onSelect(id);
   };
 
   return (
@@ -96,16 +93,8 @@ export function Sidebar({
             const ws = runboxes.find(r => r.id === ctxMenu.id);
             if (ws && confirm(`Delete "${ws.name}"?`)) onDelete(ctxMenu.id);
           }}
-          onChangeIcon={() => setIconPicker({ x: ctxMenu.x, y: ctxMenu.y, id: ctxMenu.id })}
+          onChangeIcon={() => {}}
           onClose={() => setCtxMenu(null)}
-        />
-      )}
-
-      {iconPicker && (
-        <IconPicker
-          anchorX={iconPicker.x} anchorY={iconPicker.y}
-          onSelect={icon => setIcons(prev => ({ ...prev, [iconPicker.id]: icon }))}
-          onClose={() => setIconPicker(null)}
         />
       )}
 
@@ -113,20 +102,16 @@ export function Sidebar({
         data-sidebar-panel
         style={{
           position: "fixed",
-          left: 0,
-          top: TOOLBAR_H,
-          bottom: 0,
+          left: 0, top: TOOLBAR_H, bottom: 0,
           width: panelW,
           background: C.bg1,
           borderRight: `1px solid ${C.border}`,
-          display: "flex",
-          flexDirection: "column",
-          transform:  collapsed ? `translateX(-${panelW}px)` : "translateX(0)",
-          opacity:    collapsed ? 0 : 1,
-          transition: "transform .18s cubic-bezier(.4,0,.2,1), opacity .15s ease",
+          display: "flex", flexDirection: "column",
+          transform:     collapsed ? `translateX(-${panelW}px)` : "translateX(0)",
+          opacity:       collapsed ? 0 : 1,
+          transition:    "transform .18s cubic-bezier(.4,0,.2,1), opacity .15s ease",
           pointerEvents: collapsed ? "none" : "all",
-          overflow: "hidden",
-          zIndex: 200,
+          overflow: "hidden", zIndex: 200,
         }}
       >
         {fileTreeOpen ? (
@@ -139,8 +124,7 @@ export function Sidebar({
           <WorkspaceList
             workspaces={runboxes}
             activeId={activeId}
-            gitStats={gitStats}
-            icons={icons}
+            lastUsedMap={lastUsedMap}
             wsName={wsName}
             wsEditing={wsEditing}
             wsVal={wsVal}
@@ -152,7 +136,7 @@ export function Sidebar({
               if (e.key === "Escape") { setWsEditing(false); setWsVal(wsName); }
             }}
             onWsBlur={submitWsRename}
-            onSelect={onSelect}
+            onSelect={handleSelect}
             onRename={onRename}
             onContextMenu={(e, id) => setCtxMenu({ x: e.clientX, y: e.clientY, id })}
             onNew={() => setShowModal(true)}

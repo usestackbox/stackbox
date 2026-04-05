@@ -30,9 +30,9 @@ export function UnifiedDiff({ lines, lang }: Props) {
             const isMeta = row.kind === "meta" || row.kind === "hunk";
             const isAdd  = row.kind === "add";
             const isRem  = row.kind === "remove";
-            const rowBg  = isAdd ? "rgba(40,160,80,.10)" : isRem ? "rgba(200,60,60,.16)" : row.kind === "hunk" ? "rgba(255,255,255,.018)" : "transparent";
-            const gutBg  = isAdd ? "rgba(40,160,80,.18)" : isRem ? "rgba(200,60,60,.28)" : "rgba(255,255,255,.018)";
-            const textColor = isAdd ? "#b8ddb8" : isRem ? "#ddb8b8" : row.kind === "hunk" ? "#505050" : row.kind === "meta" ? "#3a3a3a" : "#707070";
+            const rowBg  = isAdd ? "rgba(74,222,128,.07)" : isRem ? "rgba(248,113,113,.07)" : row.kind === "hunk" ? "rgba(255,255,255,.015)" : "transparent";
+            const gutBg  = isAdd ? "rgba(74,222,128,.12)" : isRem ? "rgba(248,113,113,.12)" : "rgba(255,255,255,.015)";
+            const textColor = isAdd ? "rgba(180,230,180,0.85)" : isRem ? "rgba(230,170,170,0.85)" : row.kind === "hunk" ? "rgba(100,130,160,0.6)" : row.kind === "meta" ? "rgba(100,100,100,0.5)" : "rgba(190,190,190,0.65)";
 
             const inlinePair = inlineDiffs.get(i);
             let content: React.ReactNode;
@@ -49,7 +49,7 @@ export function UnifiedDiff({ lines, lang }: Props) {
                 <td style={{ padding: "0 6px", textAlign: "right", fontSize: 10, fontFamily: MONO, color: "#6f6565", userSelect: "none", background: gutBg, borderRight: `1px solid ${C.border}`, lineHeight: "20px" }}>
                   {isMeta ? "" : (row.newNum ?? "")}
                 </td>
-                <td style={{ textAlign: "center", fontFamily: MONO, fontSize: 11, color: isAdd ? "#4db864" : isRem ? "#e05555" : "transparent", userSelect: "none", background: gutBg, borderRight: `1px solid ${C.border}`, lineHeight: "20px" }}>
+                <td style={{ textAlign: "center", fontFamily: MONO, fontSize: 11, color: isAdd ? "rgba(74,222,128,0.6)" : isRem ? "rgba(248,113,113,0.6)" : "transparent", userSelect: "none", background: gutBg, borderRight: `1px solid ${C.border}`, lineHeight: "20px" }}>
                   {isAdd ? "+" : isRem ? "−" : ""}
                 </td>
                 <td style={{ paddingLeft: 10, paddingRight: 8, lineHeight: "20px", verticalAlign: "top" }}>

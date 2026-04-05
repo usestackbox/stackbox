@@ -250,11 +250,22 @@ export function WorkspaceView({
 
   const maximizeWin = useCallback((id: string) => {
     const area = areaRef.current; if (!area) return;
-    setWins(prev => prev.map(w => {
-      if (w.id !== id) return w;
-      if (w.maximized) return { ...w, maximized: false, x: w.preMaxX ?? GAP, y: w.preMaxY ?? GAP, w: w.preMaxW ?? 400, h: w.preMaxH ?? 300 };
-      return { ...w, maximized: true, preMaxX: w.x, preMaxY: w.y, preMaxW: w.w, preMaxH: w.h, x: 0, y: 0, w: area.offsetWidth, h: area.offsetHeight, zIndex: nextZ() };
-    }));
+    const aw = area.offsetWidth, ah = area.offsetHeight;
+    setWins(prev => {
+      const win = prev.find(w => w.id === id);
+      if (!win) return prev;
+      // If already the only visible window and maximized, restore to normal
+      const visibleOthers = prev.filter(w => w.id !== id && !w.minimized);
+      if (win.maximized && visibleOthers.length === 0) {
+        return prev.map(w => w.id === id
+          ? { ...w, maximized: false, x: w.preMaxX ?? GAP, y: w.preMaxY ?? GAP, w: w.preMaxW ?? 400, h: w.preMaxH ?? 300 }
+          : w
+        );
+      }
+      // Close all other non-minimized windows and go full-size
+      return [{ ...win, maximized: true, preMaxX: win.x, preMaxY: win.y, preMaxW: win.w, preMaxH: win.h, x: 0, y: 0, w: aw, h: ah, zIndex: nextZ() },
+        ...prev.filter(w => w.id !== id && w.minimized)];
+    });
     setActiveWinId(id);
     setTimeout(() => window.dispatchEvent(new Event("resize")), 200);
   }, []);

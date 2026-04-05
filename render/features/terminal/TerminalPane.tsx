@@ -33,20 +33,16 @@ const TERM_THEME = {
 const TERM_CSS = `
 .rp-win{width:100%;height:100%;box-sizing:border-box;background:${BG};
   display:flex;flex-direction:column;overflow:hidden;position:relative;
-  border-radius:8px;border:1px solid rgba(255,255,255,.06);
-  transition:border-color .15s,background .15s}
-.rp-win.rp-active{border:1px solid rgba(255,255,255,.18);background:${BG_ACT}}
+  border-radius:0;border:none;
+  transition:background .15s}
+.rp-win.rp-active{border:none;background:${BG_ACT}}
 .rp-titlebar{height:32px;flex-shrink:0;display:flex;align-items:center;
   padding:0 6px 0 10px;gap:6px;background:rgba(255,255,255,.02);
   border-bottom:1px solid rgba(255,255,255,.05);cursor:grab;user-select:none;
-  border-radius:8px 8px 0 0;transition:background .15s;box-sizing:border-box;
+  border-radius:0;transition:background .15s;box-sizing:border-box;
   min-height:32px;max-height:32px}
 .rp-win.rp-active .rp-titlebar{background:rgba(255,255,255,.035);
   border-bottom-color:rgba(255,255,255,.08)}
-.rp-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;
-  background:rgba(255,255,255,.12);transition:background .15s}
-.rp-win.rp-active .rp-dot{background:#00e5ff;box-shadow:0 0 6px rgba(0,229,255,.5)}
-.rp-vsep{width:1px;height:10px;background:rgba(255,255,255,.07);flex-shrink:0}
 .rp-cwd{flex:1;min-width:0;font-size:11px;
   font-family:ui-monospace,'SF Mono',Menlo,Monaco,'Cascadia Mono',Consolas,monospace;
   color:rgba(255,255,255,.2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -54,19 +50,19 @@ const TERM_CSS = `
 .rp-win.rp-active .rp-cwd{color:rgba(255,255,255,.55)}
 .rp-chip{font-size:9px;font-family:ui-monospace,monospace;letter-spacing:.05em;
   flex-shrink:0;color:rgba(255,255,255,.18);background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,255,255,.07);border-radius:3px;padding:1px 6px;
+  border:1px solid rgba(255,255,255,.07);border-radius:0;padding:1px 6px;
   transition:all .15s}
 .rp-win.rp-active .rp-chip{color:rgba(255,255,255,.4);background:rgba(255,255,255,.07);
   border-color:rgba(255,255,255,.12)}
-.rp-tbtn{width:22px;height:22px;flex-shrink:0;display:flex;align-items:center;
-  justify-content:center;border-radius:5px;cursor:pointer;
-  color:rgba(255,255,255,.18);border:none;background:transparent;
+.rp-tbtn{width:24px;height:24px;flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;border-radius:3px;cursor:pointer;
+  color:rgba(255,255,255,.55);border:none;background:transparent;
   transition:background .12s,color .12s;padding:0}
-.rp-win.rp-active .rp-tbtn{color:rgba(255,255,255,.3)}
-.rp-win.rp-active .rp-tbtn:hover{background:rgba(255,255,255,.09);color:rgba(255,255,255,.75)}
-.rp-tbtn.rp-close-btn:hover{background:rgba(239,68,68,.2)!important;color:#f87171!important}
+.rp-win.rp-active .rp-tbtn{color:rgba(255,255,255,.7)}
+.rp-win.rp-active .rp-tbtn:hover{background:rgba(255,255,255,.12);color:#ffffff}
+.rp-tbtn.rp-close-btn:hover{background:rgba(239,68,68,.25)!important;color:#f87171!important}
 .rp-body{flex:1;min-height:0;min-width:0;position:relative;overflow:hidden;
-  border-radius:0 0 7px 7px;background:${BG};display:block}
+  border-radius:0;background:${BG};display:block}
 .rp-win.rp-active .rp-body{background:${BG_ACT}}
 .rp-win:not(.rp-active) .rp-body{opacity:.45}
 .rp-xterm{position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden}
@@ -81,6 +77,7 @@ const TERM_CSS = `
   background:linear-gradient(to top,${BG},transparent);pointer-events:none;z-index:4}
 .rp-win.rp-active .rp-fade-t{background:linear-gradient(to bottom,${BG_ACT},transparent)}
 .rp-win.rp-active .rp-fade-b{background:linear-gradient(to top,${BG_ACT},transparent)}
+.rp-maximize-btn{position:relative}
 `;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -132,6 +129,8 @@ interface TerminalPaneProps {
   onSessionChange?:  (sid: string) => void;
   /** Called once after PTY spawns with the resolved worktree path (if any). */
   onWorktreeReady?:  (path: string) => void;
+  onMaximize?:       () => void;
+  onMinimize?:       () => void;
 }
 
 export function TerminalPane({
@@ -139,7 +138,7 @@ export function TerminalPane({
   agentCmd,
   sessionId, label = "",
   isActive, onActivate, onClose, onSplitDown, onSplitLeft,
-  onCwdChange, onSessionChange, onWorktreeReady,
+  onCwdChange, onSessionChange, onWorktreeReady, onMaximize, onMinimize,
 }: TerminalPaneProps) {
   const termElRef = useRef<HTMLDivElement>(null);
   const termRef   = useRef<Terminal | null>(null);
@@ -324,11 +323,31 @@ export function TerminalPane({
         className="rp-titlebar"
         onMouseDown={e => { if ((e.target as HTMLElement).closest(".rp-tbtn")) return; }}
       >
-        <div className="rp-dot" />
-        <div className="rp-vsep" />
         <span className="rp-cwd">{liveCwd || runboxCwd}</span>
         {label && <span className="rp-chip">{label}</span>}
         <div style={{ display: "flex", alignItems: "center", gap: 1, marginLeft: 2 }}>
+          {onMinimize && (
+            <TBtn title="Minimize pane" onClick={onMinimize}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="2,6 6,6 6,2"/>
+                <line x1="6" y1="6" x2="2" y2="2"/>
+                <polyline points="14,10 10,10 10,14"/>
+                <line x1="10" y1="10" x2="14" y2="14"/>
+              </svg>
+            </TBtn>
+          )}
+          {onMaximize && (
+            <TBtn title="Maximize — single panel" onClick={onMaximize}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="10,2 14,2 14,6"/>
+                <line x1="14" y1="2" x2="9" y2="7"/>
+                <polyline points="6,14 2,14 2,10"/>
+                <line x1="2" y1="14" x2="7" y2="9"/>
+              </svg>
+            </TBtn>
+          )}
           {onSplitDown && (
             <TBtn title="Split down" onClick={onSplitDown}>
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"

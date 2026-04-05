@@ -29,7 +29,7 @@ export interface FileTab {
 export type SidePanel = "files" | "git" | "memory" | null;
 export type FilesView = "list" | "diff";
 
-export const GAP   = 8;
+export const GAP   = 0;
 export const MIN_W = 280;
 export const MIN_H = 180;
 
