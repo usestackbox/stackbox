@@ -40,7 +40,7 @@ export function FileTab({ tab, isActive, onSelect, onClose }: FileTabProps) {
         transition: "background .1s", userSelect: "none",
       }}
       onMouseEnter={e => {
-        if (!isActive) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,.05)";
+        if (!isActive) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,.09)";
       }}
       onMouseLeave={e => {
         if (!isActive) (e.currentTarget as HTMLElement).style.background = "transparent";

@@ -64,7 +64,7 @@ export function TermTab({
       }}
       onMouseEnter={e => {
         if (!(isActive && !hasFile) && !dragTabId)
-          (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,.05)";
+          (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,.09)";
       }}
       onMouseLeave={e => {
         if (!(isActive && !hasFile) && !isDragOver)

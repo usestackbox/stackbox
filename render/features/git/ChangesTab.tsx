@@ -11,6 +11,7 @@ interface Props {
   onMessage:    (m: string) => void;
   onCommit:     () => void;
   onCommitPush: () => void;
+  onPush:       () => void;
   onFileClick:  (fc: LiveDiffFile) => void;
   onStage?:     (path: string) => Promise<void>;
   onUnstage?:   (path: string) => Promise<void>;
@@ -138,7 +139,7 @@ export function ChangesTab({
   files, agentSpans,
   committing, pushing,
   message, onMessage,
-  onCommit, onCommitPush, onFileClick,
+  onCommit, onCommitPush, onPush, onFileClick,
   onDiscard,
 }: Props) {
   const busy    = committing || pushing;
@@ -195,20 +196,40 @@ export function ChangesTab({
           onBlur={e  => e.currentTarget.style.borderColor = C.border}
         />
 
-        {/* Commit button — always present */}
+        {/* Commit + Push buttons */}
         {!justCommitted && (
-          <button onClick={handleCommitLocal} disabled={busy || !message.trim()}
-            style={{
-              width: "100%", height: 34, borderRadius: 7,
-              border: `1px solid ${message.trim() && !busy ? C.borderMd : C.border}`,
-              background: message.trim() && !busy ? "rgba(255,255,255,.07)" : "transparent",
-              color: message.trim() && !busy ? C.t0 : C.t3,
-              fontSize: 13, fontFamily: SANS, fontWeight: 500,
-              cursor: message.trim() && !busy ? "pointer" : "default",
-              transition: "all .1s",
-            }}>
-            {committing ? "Committing…" : "Commit"}
-          </button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={handleCommitLocal} disabled={busy || !message.trim()}
+              style={{
+                flex: 1, height: 34, borderRadius: 7,
+                border: `1px solid ${message.trim() && !busy ? C.borderMd : C.border}`,
+                background: message.trim() && !busy ? "rgba(255,255,255,.07)" : "transparent",
+                color: message.trim() && !busy ? C.t0 : C.t3,
+                fontSize: 13, fontFamily: SANS, fontWeight: 500,
+                cursor: message.trim() && !busy ? "pointer" : "default",
+                transition: "all .1s",
+              }}>
+              {committing ? "Committing…" : "Commit"}
+            </button>
+            <button onClick={onPush} disabled={pushing}
+              style={{
+                height: 34, padding: "0 14px", borderRadius: 7,
+                border: `1px solid ${!pushing ? C.border : C.border}`,
+                background: "transparent",
+                color: pushing ? C.t3 : C.t2,
+                fontSize: 13, fontFamily: SANS, fontWeight: 500,
+                cursor: pushing ? "default" : "pointer",
+                display: "flex", alignItems: "center", gap: 5,
+                transition: "all .1s", flexShrink: 0,
+              }}
+              onMouseEnter={e => { if (!pushing) { const el = e.currentTarget as HTMLElement; el.style.borderColor = C.borderMd; el.style.color = C.t0; el.style.background = "rgba(255,255,255,.04)"; } }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = C.border; el.style.color = pushing ? C.t3 : C.t2; el.style.background = "transparent"; }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
+              </svg>
+              {pushing ? "Pushing…" : "Push"}
+            </button>
+          </div>
         )}
 
         {/* Post-commit: push prompt */}

@@ -157,12 +157,21 @@ export function HistoryTab({ commits, onDiff }: Props) {
               {/* Expand toggle */}
               {onDiff && (
                 <div style={{
-                  fontSize: 11, color: isExpanded ? C.t1 : C.t3, flexShrink: 0,
-                  paddingTop: 2, transition: "color .1s",
+                  width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: isExpanded ? "rgba(255,255,255,.12)" : "transparent",
+                  transition: "background .1s",
                 }}>
                   {loading ? (
-                    <div style={{ width: 10, height: 10, border: `1.5px solid ${C.border}`, borderTopColor: C.t1, borderRadius: "50%", animation: "htspin .7s linear infinite" }} />
-                  ) : (isExpanded ? "▾" : "▸")}
+                    <div style={{ width: 11, height: 11, border: `1.5px solid ${C.border}`, borderTopColor: C.t1, borderRadius: "50%", animation: "htspin .7s linear infinite" }} />
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke={isExpanded ? C.t0 : C.t2} strokeWidth="2.5"
+                      strokeLinecap="round" strokeLinejoin="round"
+                      style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s" }}>
+                      <polyline points="9 6 15 12 9 18"/>
+                    </svg>
+                  )}
                 </div>
               )}
             </div>

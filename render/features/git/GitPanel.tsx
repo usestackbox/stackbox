@@ -4,7 +4,6 @@ import { NoGitPane }    from "./NoGitPane";
 import { ChangesTab }   from "./ChangesTab";
 import { BranchesTab }  from "./BranchesTab";
 import { HistoryTab }   from "./HistoryTab";
-import GithubTab        from "./GithubTab";
 import { useGitPanel }  from "./useGitPanel";
 import type { GitPanelProps, GitTab } from "./types";
 
@@ -60,8 +59,6 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
   }
 
   const busy = committing || pushing;
-  const prStatus = git.worktreeRecord?.status;
-  const prDot = prStatus === "approved" ? C.green : prStatus === "changes_requested" ? C.red : prStatus === "pr_open" ? C.amber : prStatus === "merged" ? C.blue : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg1 }}>
@@ -75,9 +72,14 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
 
         {/* Branch label */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
-          </svg>
+          <span style={{
+            fontSize: 16,
+            color: C.t2,
+            userSelect: "none", flexShrink: 0,
+            lineHeight: 1,
+          }}>
+            ⎇
+          </span>
           <span style={{ fontSize: 14, fontFamily: MONO, color: C.t1, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {branch || "main"}
           </span>
@@ -100,10 +102,10 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
             title="Branches & History"
             onClick={() => setTab(tab === "source" ? "changes" : "source")}
             style={{
-              width: 32, height: 32, borderRadius: 7, border: "none",
+              width: 32, height: 32, borderRadius: tab === "source" ? 9999 : 7, border: "none",
               background: tab === "source" ? C.bg4 : "transparent",
               color: tab === "source" ? C.t0 : C.t3,
-              cursor: "pointer", transition: "all .1s",
+              cursor: "pointer", transition: "all .15s",
               display: "flex", alignItems: "center", justifyContent: "center",
             }}
             onMouseEnter={e => { if (tab !== "source") (e.currentTarget as HTMLElement).style.color = C.t1; }}
@@ -111,23 +113,6 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
             <SourceIcon />
           </button>
 
-          {/* GitHub tab */}
-          <button
-            title="GitHub"
-            onClick={() => setTab(tab === "github" ? "changes" : "github")}
-            style={{
-              width: 32, height: 32, borderRadius: 7, border: "none",
-              background: tab === "github" ? C.bg4 : "transparent",
-              color: tab === "github" ? C.t0 : C.t3,
-              cursor: "pointer", transition: "all .1s",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              position: "relative",
-            }}
-            onMouseEnter={e => { if (tab !== "github") (e.currentTarget as HTMLElement).style.color = C.t1; }}
-            onMouseLeave={e => { if (tab !== "github") (e.currentTarget as HTMLElement).style.color = C.t3; }}>
-            <GithubIcon />
-            {prDot && <span style={{ position: "absolute", top: 5, right: 5, width: 5, height: 5, borderRadius: "50%", background: prDot }} />}
-          </button>
         </div>
 
         <button onClick={onClose}
@@ -161,6 +146,7 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
           onMessage={setMessage}
           onCommit={handleCommit}
           onCommitPush={handleCommitPush}
+          onPush={handlePush}
           onFileClick={fc => onFileClick?.(fc)}
           onStage={git.stageFile}
           onUnstage={git.unstageFile}
@@ -209,16 +195,6 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
         </div>
       )}
 
-      {tab === "github" && (
-        <GithubTab
-          record={git.worktreeRecord}
-          branch={branch}
-          workspaceCwd={workspaceCwd}
-          busy={busy || git.creatingPr}
-          onCreatePr={git.createPr}
-          onRefreshRecord={git.loadWorktreeRecord}
-        />
-      )}
 
       <style>{`@keyframes gitspin{to{transform:rotate(360deg)}}`}</style>
     </div>
@@ -248,14 +224,6 @@ function SourceIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
-    </svg>
-  );
-}
-
-function GithubIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/>
     </svg>
   );
 }

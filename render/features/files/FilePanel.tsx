@@ -37,9 +37,10 @@ function TBtn({ title, onClick, active, children }: {
 
 interface CtxMenuState { x: number; y: number; entry: FsEntry; }
 
-function CtxMenu({ menu, onClose, onCopyPath, onRename, onDelete }: {
+function CtxMenu({ menu, onClose, onCopyPath, onRename, onDelete, onNewFile, onNewFolder }: {
   menu: CtxMenuState; onClose: () => void;
   onCopyPath: () => void; onRename: () => void; onDelete: () => void;
+  onNewFile: () => void; onNewFolder: () => void;
 }) {
   const x = Math.min(menu.x, window.innerWidth  - 180);
   const y = Math.min(menu.y, window.innerHeight - 180);
@@ -56,6 +57,18 @@ function CtxMenu({ menu, onClose, onCopyPath, onRename, onDelete }: {
           {menu.entry.name.toUpperCase()}
         </div>
         <div style={{ height: 1, background: "rgba(255,255,255,.07)", marginBottom: 3 }} />
+        {[
+          { label: "New File",   icon: "📄", action: () => { onNewFile();   onClose(); } },
+          { label: "New Folder", icon: "📁", action: () => { onNewFolder(); onClose(); } },
+        ].map(item => (
+          <div key={item.label} onClick={item.action}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 10px", height: 28, borderRadius: 6, cursor: "pointer", color: "rgba(255,255,255,.78)", fontSize: 13, fontFamily: SANS, fontWeight: 400, transition: "background .08s" }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,.08)"}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}>
+            <span style={{ fontSize: 11, opacity: 0.6 }}>{item.icon}</span>{item.label}
+          </div>
+        ))}
+        <div style={{ height: 1, background: "rgba(255,255,255,.07)", margin: "3px 0" }} />
         {[
           { label: "Copy Path", action: () => { onCopyPath(); onClose(); } },
           { label: "Rename",    action: () => { onRename();  onClose(); } },
@@ -121,6 +134,12 @@ export function FilePanel({ cwd, onClose, onOpenFile }: Props) {
     setCtxMenu({ x: e.clientX, y: e.clientY, entry });
   }, []);
 
+  const handleEmptyCtxMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    const dirEntry: FsEntry = { name: cwd.split(/[/\\]/).pop() ?? "root", path: cwd, is_dir: true };
+    setCtxMenu({ x: e.clientX, y: e.clientY, entry: dirEntry });
+  }, [cwd]);
+
   const handleDelete = async () => {
     if (!deleting) return;
     const entry = deleting; setDeleting(null);
@@ -165,18 +184,6 @@ export function FilePanel({ cwd, onClose, onOpenFile }: Props) {
         }}>
           FILES
         </span>
-        <TBtn title="New File" onClick={() => { const dir = getActiveDir(); setCreating({ type: "file", parentPath: dir }); setSelected(dir); setSelectedIsDir(true); }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h7"/><polyline points="12 2 12 8 18 8"/>
-            <line x1="18" y1="14" x2="18" y2="20" strokeWidth="2"/><line x1="15" y1="17" x2="21" y2="17" strokeWidth="2"/>
-          </svg>
-        </TBtn>
-        <TBtn title="New Folder" onClick={() => { const dir = getActiveDir(); setCreating({ type: "folder", parentPath: dir }); setSelected(dir); setSelectedIsDir(true); }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v2"/><path d="M3 7v11a2 2 0 0 0 2 2h7"/>
-            <line x1="18" y1="14" x2="18" y2="20" strokeWidth="2"/><line x1="15" y1="17" x2="21" y2="17" strokeWidth="2"/>
-          </svg>
-        </TBtn>
         <TBtn title="Search in files" onClick={() => setSearching(true)}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -195,7 +202,8 @@ export function FilePanel({ cwd, onClose, onOpenFile }: Props) {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 0 12px" }}
-        onClick={() => { setSelected(null); setSelectedIsDir(false); }}>
+        onClick={() => { setSelected(null); setSelectedIsDir(false); }}
+        onContextMenu={handleEmptyCtxMenu}>
         <FileTree
           cwd={cwd}
           selectedPath={selected}
@@ -210,15 +218,22 @@ export function FilePanel({ cwd, onClose, onOpenFile }: Props) {
         />
       </div>
 
-      {ctxMenu && (
-        <CtxMenu
-          menu={ctxMenu}
-          onClose={() => setCtxMenu(null)}
-          onCopyPath={() => navigator.clipboard.writeText(ctxMenu.entry.path)}
-          onRename={() => setRenaming(ctxMenu.entry)}
-          onDelete={() => setDeleting(ctxMenu.entry)}
-        />
-      )}
+      {ctxMenu && (() => {
+        const targetDir = ctxMenu.entry.is_dir ? ctxMenu.entry.path : (() => {
+          const parts = ctxMenu.entry.path.replace(/\\/g, "/").split("/"); parts.pop(); return parts.join("/") || cwd;
+        })();
+        return (
+          <CtxMenu
+            menu={ctxMenu}
+            onClose={() => setCtxMenu(null)}
+            onCopyPath={() => navigator.clipboard.writeText(ctxMenu.entry.path)}
+            onRename={() => setRenaming(ctxMenu.entry)}
+            onDelete={() => setDeleting(ctxMenu.entry)}
+            onNewFile={() => { setCreating({ type: "file", parentPath: targetDir }); setSelected(targetDir); setSelectedIsDir(true); }}
+            onNewFolder={() => { setCreating({ type: "folder", parentPath: targetDir }); setSelected(targetDir); setSelectedIsDir(true); }}
+          />
+        );
+      })()}
 
       {renaming && <RenameModal entry={renaming} onConfirm={handleRename} onCancel={() => setRenaming(null)} />}
       {deleting && <DeleteModal entry={deleting} onConfirm={handleDelete} onCancel={() => setDeleting(null)} />}

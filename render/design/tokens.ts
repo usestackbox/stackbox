@@ -6,13 +6,13 @@ import type React from "react";
 
 // ── Backgrounds ───────────────────────────────────────────────────────────────
 const BG = {
-  0: "#080808",
-  1: "#0d0d0d",
-  2: "#121212",
-  3: "#181818",
-  4: "#1e1e1e",
-  5: "#252525",
-} as const;
+  0: "#000000",  // terminals (pure black)
+  1: "#1a1a1a",  // main app bg (between your two colors)
+  2: "#222222",  // subtle step up
+  3: "#2c2c2c",  // ← PRIMARY — panels, sidebars
+  4: "#353535",  // midpoint step
+  5: "#3f3f3f",  // ← SECONDARY — hover, selected, active
+};
 
 // ── Borders ───────────────────────────────────────────────────────────────────
 const BORDER = {

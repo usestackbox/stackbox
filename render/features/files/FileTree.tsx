@@ -95,7 +95,7 @@ function TreeRow({ entry, depth, expanded, selected, onToggle, onSelect, onOpen,
       style={{
         display: "flex", alignItems: "center",
         paddingLeft: 8 + depth * 14, paddingRight: 8,
-        height: 24, cursor: "pointer",
+        height: 25, cursor: "pointer",
         background: selected ? "rgba(9,71,113,.55)" : hov ? "rgba(255,255,255,.05)" : "transparent",
         userSelect: "none", gap: 5,
       }}>
@@ -109,7 +109,7 @@ function TreeRow({ entry, depth, expanded, selected, onToggle, onSelect, onOpen,
       </span>
       <FileIcon name={entry.name} isDir={entry.is_dir} />
       <span style={{
-        fontSize: 13,
+        fontSize: 13.5,
         fontFamily: SANS,
         fontWeight: 400,
         color: selected ? "rgba(220,230,240,.95)" : hov ? "rgba(210,220,230,.85)" : color,
