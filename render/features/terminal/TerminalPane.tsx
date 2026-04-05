@@ -559,35 +559,41 @@ export function TerminalPane({
           if ((e.target as HTMLElement).closest(".rp-tbtn")) return;
         }}
       >
+        {/* Left side: minimize + maximize */}
+        {(onMinimize || onMaximize) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 2, marginRight: 6, flexShrink: 0 }}>
+            {onMinimize && (
+              <TBtn title="Minimize" onClick={onMinimize}>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="2,6 6,6 6,2"/>
+                  <line x1="6" y1="6" x2="2" y2="2"/>
+                  <polyline points="14,10 10,10 10,14"/>
+                  <line x1="10" y1="10" x2="14" y2="14"/>
+                </svg>
+              </TBtn>
+            )}
+            {onMaximize && (
+              <TBtn title="Maximize" onClick={onMaximize}>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="10,2 14,2 14,6"/>
+                  <line x1="14" y1="2" x2="9" y2="7"/>
+                  <polyline points="6,14 2,14 2,10"/>
+                  <line x1="2" y1="14" x2="7" y2="9"/>
+                </svg>
+              </TBtn>
+            )}
+          </div>
+        )}
+
+        {/* CWD path */}
         <span className="rp-cwd" title={liveCwd || runboxCwd}>
           {liveCwd || runboxCwd}
         </span>
 
-        {label && <span className="rp-chip">{label}</span>}
-
+        {/* Right side: split + close */}
         <div style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: 4 }}>
-          {onMinimize && (
-            <TBtn title="Minimize" onClick={onMinimize}>
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
-                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="2,6 6,6 6,2"/>
-                <line x1="6" y1="6" x2="2" y2="2"/>
-                <polyline points="14,10 10,10 10,14"/>
-                <line x1="10" y1="10" x2="14" y2="14"/>
-              </svg>
-            </TBtn>
-          )}
-          {onMaximize && (
-            <TBtn title="Maximize" onClick={onMaximize}>
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
-                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="10,2 14,2 14,6"/>
-                <line x1="14" y1="2" x2="9" y2="7"/>
-                <polyline points="6,14 2,14 2,10"/>
-                <line x1="2" y1="14" x2="7" y2="9"/>
-              </svg>
-            </TBtn>
-          )}
           {onSplitDown && (
             <TBtn title="Split down" onClick={onSplitDown}>
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"

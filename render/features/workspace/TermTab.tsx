@@ -72,7 +72,7 @@ export function TermTab({
       }}
     >
       {win.minimized && (
-        <span style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: "rgba(255,255,255,.4)" }} />
+        <span style={{ width: 5, height: 5, borderRadius: "2px", flexShrink: 0, background: "rgba(255,255,255,.4)" }} />
       )}
 
       {!win.minimized && (win.kind === "browser" ? (

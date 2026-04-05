@@ -1,16 +1,20 @@
 // src/git/commands.rs
 //
 // Tauri commands for git operations exposed to frontend + MCP.
-// Agents call worktree lifecycle commands (git_ensure, git_commit, git_push_pr,
-// git_worktree_delete) via MCP to manage their own isolated branches.
+//
+// REMOVED: git_push_pr, git_pull_merged, git_pr_view, git_pr_merge, git_push
+//   (GitHub / PR workflow replaced by local branch merge)
+//
+// ADDED: git_merge_branch, git_delete_branch, git_branch_log,
+//        git_branch_status, git_agent_branches
 
 use tauri::Emitter;
 use super::{
     diff::{diff_for_commit, diff_live, clear_cache_for, LiveDiffFile},
-    log::{log_for_runbox, GitCommit},
+    log::{log_for_runbox, log_range, GitCommit},
     repo::{
-        delete_worktree, ensure_git_repo, ensure_worktree, git, git_dir_opt,
-        has_git, init_real_repo, list_worktrees, remove_worktree,
+        delete_branch, ensure_git_repo, ensure_worktree, git, git_dir_opt,
+        has_git, init_real_repo, list_worktrees, remove_worktree_only,
         WorktreeEntry,
     },
 };
@@ -29,14 +33,10 @@ pub struct GitEnsureResult {
 }
 
 #[derive(serde::Serialize)]
-pub struct PushPrResult {
-    pub pr_url: String,
-    pub branch: String,
-    pub pushed: bool,
-    /// Legacy field — same as pr_url, kept for frontend compatibility.
-    pub url:    String,
-    pub is_pr:  bool,
-    pub status: String,
+pub struct BranchStatus {
+    pub ahead:         usize,
+    pub behind:        usize,
+    pub has_conflicts: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,11 +44,12 @@ pub struct PushPrResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Ensure git repo + worktree exist for this agent session.
-/// Persists worktree path and branch to the database.
+/// Persists branch record to the database.
 #[tauri::command]
 pub async fn git_ensure(
     cwd:        String,
     runbox_id:  String,
+    session_id: Option<String>,
     agent_kind: Option<String>,
     state:      tauri::State<'_, AppState>,
 ) -> Result<GitEnsureResult, String> {
@@ -56,22 +57,23 @@ pub async fn git_ensure(
     ensure_git_repo(&cwd, &runbox_id)?;
 
     let kind = agent_kind.as_deref().unwrap_or("shell");
-    let wt   = ensure_worktree(&cwd, &runbox_id, kind);
+    let sid  = session_id.as_deref().unwrap_or(&runbox_id);
+
+    let wt = ensure_worktree(&cwd, &runbox_id, sid, kind);
 
     let worktree_path = wt.as_ref().map(|w| w.path.clone());
     let branch        = wt.as_ref().map(|w| w.branch.clone());
     let worktree_new  = wt.as_ref().map(|w| w.is_new).unwrap_or(false);
 
-    // Persist to DB
     if let Some(ref w) = wt {
-        db::runboxes::runbox_set_worktree(
+        let _ = db::branches::record_branch_start(
             &state.db,
             &runbox_id,
+            sid,
             kind,
-            Some(w.path.as_str()),
-            Some(w.branch.as_str()),
-        )
-        .map_err(|e| e.to_string())?;
+            &w.branch,
+            &w.path,
+        );
     }
 
     let short = &runbox_id[..runbox_id.len().min(8)];
@@ -84,19 +86,20 @@ pub async fn git_ensure(
 }
 
 /// Lightweight query — get the worktree path for an already-running agent.
-/// Use when a second terminal connects to an existing runbox.
 #[tauri::command]
 pub async fn git_agent_worktree(
     cwd:        String,
     runbox_id:  String,
+    session_id: Option<String>,
     agent_kind: Option<String>,
 ) -> Result<Option<String>, String> {
     let kind = agent_kind.as_deref().unwrap_or("shell");
-    Ok(ensure_worktree(&cwd, &runbox_id, kind).map(|w| w.path))
+    let sid  = session_id.as_deref().unwrap_or(&runbox_id);
+    Ok(ensure_worktree(&cwd, &runbox_id, sid, kind).map(|w| w.path))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// git_commit — stage all + commit (called by agent after completing work)
+// git_commit — stage all + commit
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -107,9 +110,7 @@ pub async fn git_commit(
     commit_direct(&worktree_path, &message)
 }
 
-/// Non-command helper callable from MCP tools dispatcher.
 pub fn commit_direct(worktree_path: &str, message: &str) -> Result<String, String> {
-    // Stage all
     let add = std::process::Command::new("git")
         .args(["add", "-A"])
         .current_dir(worktree_path)
@@ -120,7 +121,6 @@ pub fn commit_direct(worktree_path: &str, message: &str) -> Result<String, Strin
         return Err(String::from_utf8_lossy(&add.stderr).to_string());
     }
 
-    // Commit
     let out = std::process::Command::new("git")
         .args(["commit", "-m", message])
         .current_dir(worktree_path)
@@ -139,255 +139,144 @@ pub fn commit_direct(worktree_path: &str, message: &str) -> Result<String, Strin
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// git_push_pr — push branch + open PR via gh CLI
+// Agent branch commands — the new workflow (no GitHub, no PRs)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Push the agent's worktree branch and open a Pull Request via gh CLI.
-/// Saves the PR url to the database so the webhook handler can match events.
+/// List all agent branches for a runbox, from the DB.
+/// Returns all branches including done/merged ones so the frontend can show history.
 #[tauri::command]
-pub async fn git_push_pr(
-    cwd:         String,
-    runbox_id:   String,
-    title:       Option<String>,
-    body:        Option<String>,
-    base_branch: Option<String>,
-    state:       tauri::State<'_, AppState>,
-) -> Result<PushPrResult, String> {
-    let result = push_pr_direct(
-        &cwd,
-        &runbox_id,
-        title,
-        body,
-        base_branch,
-        &state.db,
-    ).await?;
-    Ok(result)
+pub async fn git_agent_branches(
+    runbox_id: String,
+    state:     tauri::State<'_, AppState>,
+) -> Result<Vec<db::branches::AgentBranch>, String> {
+    db::branches::list_for_runbox(&state.db, &runbox_id)
+        .map_err(|e| e.to_string())
 }
 
-/// Non-command helper callable from MCP tools dispatcher.
-/// Takes `&db::Db` so it can be used from McpState.db without needing full AppState.
-pub async fn push_pr_direct(
-    cwd:         &str,
-    runbox_id:   &str,
-    title:       Option<String>,
-    body:        Option<String>,
-    base_branch: Option<String>,
-    db:          &crate::db::Db,
-) -> Result<PushPrResult, String> {
-    let gdo_owned = git_dir_opt(cwd, runbox_id);
-    let gdo: Option<&str> = gdo_owned.as_deref();
-
-    // ── Current branch ───────────────────────────────────────────────────────
-    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"], cwd, gdo)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-
-    if branch.is_empty() || branch == "HEAD" {
-        return Err("Not on a named branch — cannot push PR.".into());
-    }
+/// Merge a stackbox agent branch into the current branch using --no-ff.
+/// Only stackbox/* branches can be merged through this command.
+/// Updates the branch status in the DB to 'merged'.
+#[tauri::command]
+pub async fn git_merge_branch(
+    cwd:    String,
+    branch: String,
+    state:  tauri::State<'_, AppState>,
+) -> Result<String, String> {
     if !branch.starts_with("stackbox/") {
-        return Err(format!(
-            "PRs are only created from stackbox/* branches. Current: {branch}"
-        ));
+        return Err(format!("can only merge stackbox/* branches, got: {branch}"));
     }
 
-    // ── Push ─────────────────────────────────────────────────────────────────
-    let remotes = git(&["remote"], cwd, gdo).unwrap_or_default();
-    if !remotes.lines().any(|l| l.trim() == "origin") {
-        return Err("No remote 'origin' configured. Add a remote first.".into());
-    }
-
-    let pushed = if let Err(e) = git(&["push", "origin", &branch], cwd, gdo) {
-        if e.contains("no upstream") || e.contains("--set-upstream") {
-            git(&["push", "--set-upstream", "origin", &branch], cwd, gdo)?;
-            true
-        } else {
-            return Err(format!("push failed: {e}"));
-        }
-    } else {
-        true
-    };
-
-    let base     = base_branch.as_deref().unwrap_or("main");
-    let pr_title = title.unwrap_or_else(|| {
-        branch.strip_prefix("stackbox/")
-            .map(|s| format!("stackbox: {s}"))
-            .unwrap_or_else(|| branch.clone())
-    });
-    let pr_body = body.unwrap_or_else(|| {
-        format!("Automated PR from Stackbox agent branch `{branch}`.")
-    });
-
-    // ── gh CLI ────────────────────────────────────────────────────────────────
-    let gh_ok = std::process::Command::new("gh")
-        .arg("--version").output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    if !gh_ok {
-        // Fallback: return GitHub compare URL
-        let remote_url = git(&["remote", "get-url", "origin"], cwd, gdo)
-            .unwrap_or_default();
-        let https = remote_url.trim()
-            .replace("git@github.com:", "https://github.com/")
-            .trim_end_matches(".git")
-            .to_string();
-        let compare = if https.contains("github.com") {
-            format!("{https}/compare/{base}...{branch}?expand=1")
-        } else {
-            https
-        };
-        return Ok(PushPrResult {
-            pr_url: compare.clone(),
-            url:    compare.clone(),
-            branch,
-            pushed,
-            is_pr:  false,
-            status: "Branch pushed. Open the URL to create a PR manually.".into(),
-        });
-    }
-
-    // gh pr create
-    let out = std::process::Command::new("gh")
-        .args(["pr", "create",
-               "--title", &pr_title,
-               "--body",  &pr_body,
-               "--base",  base,
-               "--head",  &branch])
-        .current_dir(cwd)
+    // Verify the branch exists
+    let check = std::process::Command::new("git")
+        .args(["rev-parse", "--verify", &branch])
+        .current_dir(&cwd)
         .output()
-        .map_err(|e| format!("gh exec: {e}"))?;
-
-    let pr_url = if out.status.success() {
-        String::from_utf8_lossy(&out.stdout).trim().to_string()
-    } else {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-
-        // PR already exists — fetch its URL
-        if err.contains("already exists") {
-            let view = std::process::Command::new("gh")
-                .args(["pr", "view", &branch, "--json", "url", "--jq", ".url"])
-                .current_dir(cwd)
-                .output()
-                .map_err(|e| format!("gh pr view: {e}"))?;
-            String::from_utf8_lossy(&view.stdout).trim().to_string()
-        } else {
-            return Err(format!("gh pr create failed: {err}"));
-        }
-    };
-
-    eprintln!("[git] PR opened: {pr_url} for runbox {runbox_id}");
-
-    // ── Persist to DB ─────────────────────────────────────────────────────────
-    db::runboxes::runbox_set_pr(db, runbox_id, &pr_url)
-        .map_err(|e| e.to_string())?;
-    db::runboxes::runbox_set_status(db, runbox_id, "pr_open")
         .map_err(|e| e.to_string())?;
 
-    Ok(PushPrResult {
-        url:    pr_url.clone(),
-        pr_url,
-        branch,
-        pushed,
-        is_pr:  true,
-        status: "PR created.".into(),
-    })
+    if !check.status.success() {
+        return Err(format!("branch '{branch}' not found"));
+    }
+
+    let msg = format!("merge agent work from {branch}");
+    let out = std::process::Command::new("git")
+        .args(["merge", "--no-ff", "-m", &msg, &branch])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    db::branches::record_branch_merged(&state.db, &branch)
+        .map_err(|e| e.to_string())?;
+
+    eprintln!("[git] merged branch: {branch}");
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// git_worktree_delete — clean up after PR merged / task cancelled
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Delete the agent's worktree and branch. Called after PR merge or cancellation.
+/// Delete a stackbox/* branch.
+/// Uses -d (safe) by default; set force=true for -D.
+/// Updates DB status to 'deleted'.
 #[tauri::command]
-pub async fn git_worktree_delete(
-    cwd:        String,
-    runbox_id:  String,
-    agent_kind: Option<String>,
-    force:      Option<bool>,   // true = force delete (PR cancelled)
-    state:      tauri::State<'_, AppState>,
+pub async fn git_delete_branch(
+    cwd:    String,
+    branch: String,
+    force:  Option<bool>,
+    state:  tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let kind        = agent_kind.as_deref().unwrap_or("shell");
-    let safe_delete = !force.unwrap_or(false);
+    delete_branch(&cwd, &branch, force.unwrap_or(false))?;
 
-    delete_worktree(&cwd, &runbox_id, kind, safe_delete)?;
-
-    db::runboxes::runbox_delete_worktree(&state.db, &runbox_id)
+    db::branches::record_branch_deleted(&state.db, &branch)
         .map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Pull merged
-// ─────────────────────────────────────────────────────────────────────────────
-
+/// Commits on an agent branch that are not yet on main.
 #[tauri::command]
-pub async fn git_pull_merged(
-    cwd:         String,
-    runbox_id:   String,
-    base_branch: Option<String>,
-) -> Result<PushPrResult, String> {
-    let gdo_owned = git_dir_opt(&cwd, &runbox_id);
-    let gdo: Option<&str> = gdo_owned.as_deref();
-    let base = base_branch.as_deref().unwrap_or("main");
+pub async fn git_branch_log(
+    cwd:    String,
+    branch: String,
+    base:   Option<String>,
+) -> Result<Vec<GitCommit>, String> {
+    let base  = base.as_deref().unwrap_or("main");
+    let range = format!("{base}..{branch}");
+    log_range(&cwd, &range)
+}
 
-    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"], &cwd, gdo)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+/// How many commits ahead/behind a branch is vs main, and whether it conflicts.
+#[tauri::command]
+pub async fn git_branch_status(
+    cwd:    String,
+    branch: String,
+    base:   Option<String>,
+) -> Result<BranchStatus, String> {
+    let base = base.as_deref().unwrap_or("main");
 
-    git(&["fetch", "origin"], &cwd, gdo)?;
-
-    let gh_ok = std::process::Command::new("gh")
-        .arg("--version").output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    let (is_merged, pr_url) = if gh_ok && branch.starts_with("stackbox/") {
-        let out = std::process::Command::new("gh")
-            .args(["pr", "view", &branch, "--json", "state,url", "--jq", "[.state,.url]|@tsv"])
+    let count_commits = |range: &str| -> usize {
+        std::process::Command::new("git")
+            .args(["rev-list", "--count", range])
             .current_dir(&cwd)
             .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
-        let mut parts = out.splitn(2, '\t');
-        let state_str = parts.next().unwrap_or("").to_uppercase();
-        let url   = parts.next().unwrap_or("").to_string();
-        (state_str == "MERGED", url)
-    } else {
-        let merged = git(
-            &["merge-base", "--is-ancestor",
-              &format!("origin/{branch}"),
-              &format!("origin/{base}")],
-            &cwd, gdo,
-        ).is_ok();
-        (merged, String::new())
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+            .unwrap_or(0)
     };
 
-    if !is_merged {
-        return Ok(PushPrResult {
-            url: pr_url.clone(), pr_url,
-            branch, pushed: false,
-            is_pr: true,
-            status: "PR not merged yet.".into(),
-        });
-    }
+    let ahead  = count_commits(&format!("{base}..{branch}"));
+    let behind = count_commits(&format!("{branch}..{base}"));
 
-    git(&["checkout", base], &cwd, gdo)?;
-    git(&["pull", "origin", base], &cwd, gdo)?;
+    // Quick conflict check via merge-tree (no actual merge)
+    let merge_base_out = std::process::Command::new("git")
+        .args(["merge-base", base, &branch])
+        .current_dir(&cwd)
+        .output()
+        .ok();
 
-    Ok(PushPrResult {
-        url: pr_url.clone(), pr_url,
-        branch, pushed: true,
-        is_pr: true,
-        status: format!("Merged. Now on '{base}' with latest changes."),
-    })
+    let has_conflicts = if let Some(out) = merge_base_out {
+        if out.status.success() {
+            let merge_base = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            std::process::Command::new("git")
+                .args(["merge-tree", &merge_base, base, &branch])
+                .current_dir(&cwd)
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).contains("<<<<<<<"))
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    Ok(BranchStatus { ahead, behind, has_conflicts })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Basic git commands
+// Basic git commands (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -422,22 +311,17 @@ pub async fn git_worktree_create(
 ) -> Result<String, String> {
     let cwd_path = std::path::Path::new(&cwd);
 
-    let folder = cwd_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("worktree");
-
     if !cwd_path.join(".git").exists() {
         init_real_repo(&cwd)?;
     }
 
-    let parent  = cwd_path.parent().ok_or("cwd has no parent")?;
-    let wt_path = parent.join(format!("{folder}-{wt_name}"));
+    let wt_dir  = cwd_path.join(".worktrees");
+    std::fs::create_dir_all(&wt_dir).map_err(|e| e.to_string())?;
+    let wt_path = wt_dir.join(&wt_name);
     let wt_str  = wt_path.to_str().ok_or("non-UTF8 path")?;
 
     if wt_path.exists() { return Ok(wt_str.to_string()); }
 
-    // Try create new branch + worktree
     let out = std::process::Command::new("git")
         .args(["worktree", "add", "-b", &branch, wt_str, "HEAD"])
         .current_dir(&cwd)
@@ -446,7 +330,6 @@ pub async fn git_worktree_create(
 
     if out.status.success() { return Ok(wt_str.to_string()); }
 
-    // Branch exists — attach
     let out2 = std::process::Command::new("git")
         .args(["worktree", "add", wt_str, &branch])
         .current_dir(&cwd)
@@ -460,11 +343,10 @@ pub async fn git_worktree_create(
 
 #[tauri::command]
 pub async fn git_worktree_remove(wt_path: String) -> Result<(), String> {
-    remove_worktree(&wt_path);
+    remove_worktree_only(&wt_path);
     Ok(())
 }
 
-/// List all worktrees including non-stackbox ones (for the worktree manager UI).
 #[tauri::command]
 pub async fn git_worktree_list(cwd: String) -> Result<Vec<FullWorktreeEntry>, String> {
     let out = std::process::Command::new("git")
@@ -510,7 +392,6 @@ pub async fn git_worktree_list(cwd: String) -> Result<Vec<FullWorktreeEntry>, St
     Ok(entries)
 }
 
-/// List only stackbox-managed worktrees.
 #[tauri::command]
 pub async fn git_worktree_list_stackbox(cwd: String) -> Result<Vec<WorktreeEntry>, String> {
     Ok(list_worktrees(&cwd))
@@ -542,7 +423,7 @@ pub async fn git_current_branch(cwd: String) -> Result<String, String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Commit / stage / push
+// Commit / stage
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -579,38 +460,6 @@ pub async fn git_stage_and_commit(
 }
 
 #[tauri::command]
-pub async fn git_push(cwd: String, runbox_id: String) -> Result<String, String> {
-    let gdo_owned = git_dir_opt(&cwd, &runbox_id);
-    let gdo: Option<&str> = gdo_owned.as_deref();
-
-    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"], &cwd, gdo)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-
-    if branch.is_empty() || branch == "HEAD" {
-        return Err("Not on a named branch — cannot push.".into());
-    }
-
-    let remotes = git(&["remote"], &cwd, gdo).unwrap_or_default();
-    if !remotes.lines().any(|l| l.trim() == "origin") {
-        return Err("No remote 'origin' configured.".into());
-    }
-
-    match git(&["push", "origin", &branch], &cwd, gdo) {
-        Ok(out) => Ok(out.trim().lines().last().unwrap_or("Pushed.").to_string()),
-        Err(e) => {
-            if e.contains("no upstream") || e.contains("--set-upstream") {
-                git(&["push", "--set-upstream", "origin", &branch], &cwd, gdo)?;
-                Ok(format!("Branch '{branch}' pushed and upstream set."))
-            } else {
-                Err(e)
-            }
-        }
-    }
-}
-
-#[tauri::command]
 pub async fn git_stage_file(
     cwd: String, runbox_id: String, path: String,
 ) -> Result<(), String> {
@@ -629,6 +478,19 @@ pub async fn git_unstage_file(
     if git(&["restore", "--staged", &path], &cwd, gdo).is_err() {
         git(&["rm", "--cached", &path], &cwd, gdo)?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn git_discard_file(
+    cwd: String, runbox_id: String, path: String,
+) -> Result<(), String> {
+    let gdo_owned = git_dir_opt(&cwd, &runbox_id);
+    let gdo: Option<&str> = gdo_owned.as_deref();
+    if git(&["restore", "--worktree", "--", &path], &cwd, gdo).is_ok() {
+        return Ok(());
+    }
+    git(&["checkout", "--", &path], &cwd, gdo)?;
     Ok(())
 }
 
@@ -717,6 +579,18 @@ pub async fn git_checkout(cwd: String, branch: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn git_rename_branch(cwd: String, old_name: String, new_name: String) -> Result<(), String> {
+    let out = std::process::Command::new("git")
+        .args(["branch", "-m", &old_name, &new_name])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() { return Ok(()); }
+    Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+}
+
+#[tauri::command]
 pub async fn git_diff_between_worktrees(
     cwd: String, other_cwd: String,
 ) -> Result<String, String> {
@@ -767,135 +641,4 @@ pub async fn git_diff_between_worktrees(
     }
 
     Ok(format!("{stat_str}\n\n{capped}"))
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// NEW COMMANDS
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Discard working-tree changes for a single file ───────────────────────────
-
-/// Discards unstaged changes for a single file.
-/// Tries `git restore --worktree` (Git ≥ 2.23) then falls back to `git checkout --`.
-#[tauri::command]
-pub async fn git_discard_file(
-    cwd: String, runbox_id: String, path: String,
-) -> Result<(), String> {
-    let gdo_owned = git_dir_opt(&cwd, &runbox_id);
-    let gdo: Option<&str> = gdo_owned.as_deref();
-    // First try restore (Git ≥ 2.23)
-    if git(&["restore", "--worktree", "--", &path], &cwd, gdo).is_ok() {
-        return Ok(());
-    }
-    // Fallback for older Git
-    git(&["checkout", "--", &path], &cwd, gdo)?;
-    Ok(())
-}
-
-// ── PR detail types ───────────────────────────────────────────────────────────
-
-#[derive(serde::Serialize, serde::Deserialize, Default)]
-pub struct PrDetails {
-    pub title:      String,
-    pub body:       String,
-    pub number:     u64,
-    pub state:      String,      // OPEN | MERGED | CLOSED
-    pub url:        String,
-    pub mergeable:  String,      // MERGEABLE | CONFLICTING | UNKNOWN
-    pub author:     String,
-    pub created_at: String,
-    pub reviews:    Vec<PrReview>,
-    pub checks:     Vec<PrCheck>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct PrReview {
-    pub author: String,
-    pub state:  String,   // APPROVED | CHANGES_REQUESTED | COMMENTED
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct PrCheck {
-    pub name:       String,
-    pub status:     String,   // SUCCESS | FAILURE | PENDING | IN_PROGRESS | SKIPPED
-    pub conclusion: String,
-}
-
-// ── git_pr_view — fetch PR details via gh CLI ─────────────────────────────────
-
-/// Fetches full PR details for the current branch via `gh pr view --json ...`.
-/// Returns an error string if no PR exists or gh CLI is not installed.
-#[tauri::command]
-pub async fn git_pr_view(cwd: String) -> Result<PrDetails, String> {
-    let fields = "title,body,number,state,url,mergeable,author,createdAt,reviews,statusCheckRollup";
-    let out = std::process::Command::new("gh")
-        .args(["pr", "view", "--json", fields])
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("gh not found: {e}"))?;
-
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
-
-    let raw: serde_json::Value = serde_json::from_slice(&out.stdout)
-        .map_err(|e| e.to_string())?;
-
-    let reviews = raw["reviews"]
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .map(|r| PrReview {
-            author: r["author"]["login"].as_str().unwrap_or("").to_string(),
-            state:  r["state"].as_str().unwrap_or("").to_string(),
-        })
-        .collect();
-
-    let checks = raw["statusCheckRollup"]
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .map(|c| PrCheck {
-            name:       c["name"].as_str()
-                            .or_else(|| c["context"].as_str())
-                            .unwrap_or("check")
-                            .to_string(),
-            status:     c["status"].as_str().unwrap_or("UNKNOWN").to_string(),
-            conclusion: c["conclusion"].as_str()
-                            .or_else(|| c["state"].as_str())
-                            .unwrap_or("")
-                            .to_string(),
-        })
-        .collect();
-
-    Ok(PrDetails {
-        title:      raw["title"].as_str().unwrap_or("").to_string(),
-        body:       raw["body"].as_str().unwrap_or("").to_string(),
-        number:     raw["number"].as_u64().unwrap_or(0),
-        state:      raw["state"].as_str().unwrap_or("").to_string(),
-        url:        raw["url"].as_str().unwrap_or("").to_string(),
-        mergeable:  raw["mergeable"].as_str().unwrap_or("UNKNOWN").to_string(),
-        author:     raw["author"]["login"].as_str().unwrap_or("").to_string(),
-        created_at: raw["createdAt"].as_str().unwrap_or("").to_string(),
-        reviews,
-        checks,
-    })
-}
-
-// ── git_pr_merge — merge the open PR via gh CLI ───────────────────────────────
-
-/// Squash-merges the current branch PR and deletes the remote branch.
-#[tauri::command]
-pub async fn git_pr_merge(cwd: String) -> Result<String, String> {
-    let out = std::process::Command::new("gh")
-        .args(["pr", "merge", "--squash", "--delete-branch"])
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("gh not found: {e}"))?;
-
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
-
-    Ok("Merged and branch deleted.".to_string())
 }

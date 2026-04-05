@@ -111,7 +111,7 @@ export function WorkspaceView({
     const aw = area.offsetWidth || 800, ah = area.offsetHeight || 600;
     labelCount.current = 1;
     const id = crypto.randomUUID();
-    setWins([{ id, label: "w1", kind: "terminal", x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }]);
+    setWins([{ id, label: id.slice(0, 6), kind: "terminal", x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }]);
     setActiveWinId(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -202,7 +202,7 @@ export function WorkspaceView({
     labelCount.current += 1;
     const id = crypto.randomUUID();
     setWins(prev => {
-      const all: WinState[] = [...prev, { id, label: `w${labelCount.current}`, kind: "terminal", x: 0, y: 0, w: 400, h: 300, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }];
+      const all: WinState[] = [...prev, { id, label: id.slice(0, 6), kind: "terminal", x: 0, y: 0, w: 400, h: 300, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }];
       const visible = all.filter(w => !w.minimized && !w.maximized);
       const tiles   = tileWindows(visible.length, aw, ah);
       let ti = 0;
@@ -254,17 +254,24 @@ export function WorkspaceView({
     setWins(prev => {
       const win = prev.find(w => w.id === id);
       if (!win) return prev;
-      // If already the only visible window and maximized, restore to normal
-      const visibleOthers = prev.filter(w => w.id !== id && !w.minimized);
-      if (win.maximized && visibleOthers.length === 0) {
-        return prev.map(w => w.id === id
-          ? { ...w, maximized: false, x: w.preMaxX ?? GAP, y: w.preMaxY ?? GAP, w: w.preMaxW ?? 400, h: w.preMaxH ?? 300 }
-          : w
-        );
+      if (win.maximized) {
+        // Un-maximize: restore this window and bring back any auto-minimized windows
+        return prev.map(w => {
+          if (w.id === id)
+            return { ...w, maximized: false, x: w.preMaxX ?? GAP, y: w.preMaxY ?? GAP, w: w.preMaxW ?? 400, h: w.preMaxH ?? 300 };
+          if (w.minimizedByMaximize)
+            return { ...w, minimized: false, minimizedByMaximize: false };
+          return w;
+        });
       }
-      // Close all other non-minimized windows and go full-size
-      return [{ ...win, maximized: true, preMaxX: win.x, preMaxY: win.y, preMaxW: win.w, preMaxH: win.h, x: 0, y: 0, w: aw, h: ah, zIndex: nextZ() },
-        ...prev.filter(w => w.id !== id && w.minimized)];
+      // Maximize: fill canvas, minimize all other non-minimized windows (keep their tabs)
+      return prev.map(w => {
+        if (w.id === id)
+          return { ...w, maximized: true, preMaxX: win.x, preMaxY: win.y, preMaxW: win.w, preMaxH: win.h, x: 0, y: 0, w: aw, h: ah, zIndex: nextZ() };
+        if (!w.minimized)
+          return { ...w, minimized: true, minimizedByMaximize: true };
+        return w;
+      });
     });
     setActiveWinId(id);
     setTimeout(() => window.dispatchEvent(new Event("resize")), 200);
@@ -356,11 +363,11 @@ export function WorkspaceView({
       if (dir === "down") {
         const halfH = Math.max(MIN_H, Math.floor((src.h - GAP) / 2));
         updated = { ...src, h: halfH };
-        newWin  = { ...src, id: newId, label: `w${labelCount.current}`, y: src.y + halfH + GAP, h: src.h - halfH - GAP, zIndex: nextZ(), minimized: false, maximized: false };
+        newWin  = { ...src, id: newId, label: newId.slice(0, 6), y: src.y + halfH + GAP, h: src.h - halfH - GAP, zIndex: nextZ(), minimized: false, maximized: false };
       } else {
         const halfW = Math.max(MIN_W, Math.floor((src.w - GAP) / 2));
         updated = { ...src, w: halfW };
-        newWin  = { ...src, id: newId, label: `w${labelCount.current}`, x: src.x + halfW + GAP, w: src.w - halfW - GAP, zIndex: nextZ(), minimized: false, maximized: false };
+        newWin  = { ...src, id: newId, label: newId.slice(0, 6), x: src.x + halfW + GAP, w: src.w - halfW - GAP, zIndex: nextZ(), minimized: false, maximized: false };
       }
       setActiveWinId(newId);
       return [...prev.map(w => w.id === id ? updated : w), newWin];

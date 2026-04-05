@@ -4,9 +4,7 @@
 // Migrations are additive — never drop columns on existing installs.
 //
 // MIGRATION ORDER RULE: always run ALTER TABLE column additions BEFORE any
-// CREATE INDEX that references those columns. SQLite's CREATE TABLE IF NOT
-// EXISTS is a no-op on existing databases, so the index would reference a
-// non-existent column and panic at startup.
+// CREATE INDEX that references those columns.
 
 use rusqlite::{Connection, Result};
 
@@ -48,14 +46,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // Additive migrations — safe on existing databases
     conn.execute("ALTER TABLE runboxes ADD COLUMN worktree_path TEXT", []).ok();
 
-    // ── Per-agent worktree table (V2 schema) ─────────────────────────────────
-    //
-    // PRIMARY KEY = runbox_id (one row per runbox, not per agent-kind).
-    // Tracks worktree path, branch, PR url, and lifecycle status.
-    //
-    // CRITICAL: all ALTER TABLE column additions for this table MUST come
-    // before the CREATE INDEX on pr_url. On existing installs the CREATE TABLE
-    // is a no-op, so the index would reference a missing column and crash.
+    // ── Legacy agent_worktrees table — kept for backwards compat reads ─────────
+    // New writes go to agent_branches. This table is not dropped to avoid
+    // breaking existing installs that might still have data in it.
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS agent_worktrees (
             runbox_id      TEXT PRIMARY KEY,
@@ -69,8 +62,6 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         );
     ")?;
 
-    // Additive column migrations — run BEFORE any index that touches these columns.
-    // Each uses .ok() so they silently no-op on new installs (column already exists).
     conn.execute("ALTER TABLE agent_worktrees ADD COLUMN agent_kind TEXT NOT NULL DEFAULT ''", []).ok();
     conn.execute("ALTER TABLE agent_worktrees ADD COLUMN branch TEXT", []).ok();
     conn.execute("ALTER TABLE agent_worktrees ADD COLUMN pr_url TEXT", []).ok();
@@ -78,10 +69,71 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     conn.execute("ALTER TABLE agent_worktrees ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0", []).ok();
     conn.execute("ALTER TABLE agent_worktrees ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0", []).ok();
 
-    // NOW safe to create the index — pr_url is guaranteed to exist.
     conn.execute_batch("
         CREATE INDEX IF NOT EXISTS idx_awt_pr_url ON agent_worktrees(pr_url);
     ")?;
+
+    // ── Agent branches — the new persistent branch tracking table ─────────────
+    //
+    // Separates worktree lifetime (temporary) from branch lifetime (permanent).
+    //
+    // id = "{runbox_id}-{session_id}" — unique per session, not per runbox.
+    // branch = "stackbox/{runbox_short}/{slug}" — survives worktree removal.
+    // worktree_path = NULL once PTY exits.
+    // status: working → done → merged | deleted
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS agent_branches (
+            id            TEXT PRIMARY KEY,
+            runbox_id     TEXT NOT NULL,
+            session_id    TEXT NOT NULL,
+            agent_kind    TEXT NOT NULL DEFAULT '',
+            branch        TEXT NOT NULL,
+            worktree_path TEXT,
+            status        TEXT NOT NULL DEFAULT 'working',
+            commit_count  INTEGER NOT NULL DEFAULT 0,
+            created_at    INTEGER NOT NULL DEFAULT 0,
+            updated_at    INTEGER NOT NULL DEFAULT 0,
+            merged_at     INTEGER
+        );
+    ")?;
+
+    // Additive column migrations for agent_branches (safe on existing installs)
+    conn.execute("ALTER TABLE agent_branches ADD COLUMN session_id TEXT NOT NULL DEFAULT ''", []).ok();
+    conn.execute("ALTER TABLE agent_branches ADD COLUMN agent_kind TEXT NOT NULL DEFAULT ''", []).ok();
+    conn.execute("ALTER TABLE agent_branches ADD COLUMN branch TEXT NOT NULL DEFAULT ''", []).ok();
+    conn.execute("ALTER TABLE agent_branches ADD COLUMN worktree_path TEXT", []).ok();
+    conn.execute("ALTER TABLE agent_branches ADD COLUMN status TEXT NOT NULL DEFAULT 'working'", []).ok();
+    conn.execute("ALTER TABLE agent_branches ADD COLUMN commit_count INTEGER NOT NULL DEFAULT 0", []).ok();
+    conn.execute("ALTER TABLE agent_branches ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0", []).ok();
+    conn.execute("ALTER TABLE agent_branches ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0", []).ok();
+    conn.execute("ALTER TABLE agent_branches ADD COLUMN merged_at INTEGER", []).ok();
+
+    conn.execute_batch("
+        CREATE INDEX IF NOT EXISTS idx_ab_runbox  ON agent_branches(runbox_id);
+        CREATE INDEX IF NOT EXISTS idx_ab_session ON agent_branches(session_id);
+        CREATE INDEX IF NOT EXISTS idx_ab_status  ON agent_branches(status);
+        CREATE INDEX IF NOT EXISTS idx_ab_branch  ON agent_branches(branch);
+    ")?;
+
+    // Migrate existing agent_worktrees data into agent_branches (one-time, idempotent)
+    conn.execute(
+        "INSERT OR IGNORE INTO agent_branches
+            (id, runbox_id, session_id, agent_kind, branch, worktree_path,
+             status, created_at, updated_at)
+         SELECT
+            runbox_id,
+            runbox_id,
+            runbox_id,
+            agent_kind,
+            COALESCE(branch, 'stackbox/migrated'),
+            NULL,
+            CASE status WHEN 'merged' THEN 'merged' ELSE 'done' END,
+            created_at,
+            updated_at
+         FROM agent_worktrees
+         WHERE branch IS NOT NULL",
+        [],
+    ).ok();
 
     // ── Workspace events — the core append-only event log ─────────────────────
     conn.execute_batch("

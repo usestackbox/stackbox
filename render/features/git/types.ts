@@ -29,17 +29,28 @@ export interface ConflictFile {
   status: string;
 }
 
-/** Mirrors db::runboxes::WorktreeRecord on the Rust side */
-export interface WorktreeRecord {
+/** Mirrors db::branches::AgentBranch on the Rust side */
+export interface AgentBranch {
+  id:            string;
   runbox_id:     string;
+  session_id:    string;
   agent_kind:    string;
+  /** e.g. "stackbox/a1b2c3d4/codex" */
+  branch:        string;
+  /** null once PTY exits; branch still alive */
   worktree_path: string | null;
-  branch:        string | null;
-  pr_url:        string | null;
-  /** working | pr_open | approved | changes_requested | merged | cancelled */
-  status:        string;
+  /** working | done | merged | deleted */
+  status:        "working" | "done" | "merged" | "deleted";
+  commit_count:  number;
   created_at:    number;
   updated_at:    number;
+  merged_at:     number | null;
+}
+
+export interface BranchStatus {
+  ahead:         number;
+  behind:        number;
+  has_conflicts: boolean;
 }
 
 /** Attribution of a file change to a specific agent */
@@ -56,30 +67,4 @@ export interface GitPanelProps {
   branch:       string;
   onClose:      () => void;
   onFileClick?: (fc: LiveDiffFile) => void;
-}
-
-// ── PR detail types (mirrors kernel PrDetails) ────────────────────────────────
-
-export interface PrReview {
-  author: string;
-  state:  "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | string;
-}
-
-export interface PrCheck {
-  name:       string;
-  status:     "SUCCESS" | "FAILURE" | "PENDING" | "IN_PROGRESS" | "SKIPPED" | string;
-  conclusion: string;
-}
-
-export interface PrDetails {
-  title:      string;
-  body:       string;
-  number:     number;
-  state:      "OPEN" | "MERGED" | "CLOSED" | string;
-  url:        string;
-  mergeable:  "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | string;
-  author:     string;
-  created_at: string;
-  reviews:    PrReview[];
-  checks:     PrCheck[];
 }

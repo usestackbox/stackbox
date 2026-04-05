@@ -19,6 +19,8 @@ export interface WinState {
   zIndex:    number;
   /** Agent command to run in this pane (e.g. "claude", "gemini"). Undefined = plain shell. */
   agentCmd?: string;
+  /** True when this window was auto-minimized by another window's maximize — restored on un-maximize. */
+  minimizedByMaximize?: boolean;
 }
 
 export interface FileTab {

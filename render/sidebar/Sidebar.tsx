@@ -56,7 +56,10 @@ export function Sidebar({
 
   // ── Local state ───────────────────────────────────────────────────────────
   const [showModal,   setShowModal]   = useState(false);
-  const [lastUsedMap, setLastUsedMap] = useState<Record<string, number>>({});
+  const [lastUsedMap, setLastUsedMap] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem("stackbox-last-used") ?? "{}"); }
+    catch { return {}; }
+  });
   const [ctxMenu,     setCtxMenu]     = useState<{ x: number; y: number; id: string } | null>(null);
   const [wsName,      setWsName]      = useState("WORKSPACE");
   const [wsEditing,   setWsEditing]   = useState(false);
@@ -72,7 +75,11 @@ export function Sidebar({
 
   // Record timestamp whenever a workspace is activated
   const handleSelect = (id: string) => {
-    setLastUsedMap(prev => ({ ...prev, [id]: Date.now() }));
+    setLastUsedMap(prev => {
+      const next = { ...prev, [id]: Date.now() };
+      try { localStorage.setItem("stackbox-last-used", JSON.stringify(next)); } catch {}
+      return next;
+    });
     onSelect(id);
   };
 

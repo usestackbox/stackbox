@@ -1,20 +1,19 @@
 import { useState } from "react";
 import { C, MONO, SANS } from "../../design";
-import { NoGitPane }    from "./NoGitPane";
-import { ChangesTab }   from "./ChangesTab";
-import { BranchesTab }  from "./BranchesTab";
-import { HistoryTab }   from "./HistoryTab";
-import { useGitPanel }  from "./useGitPanel";
+import { NoGitPane }   from "./NoGitPane";
+import { ChangesTab }  from "./ChangesTab";
+import { BranchesTab } from "./BranchesTab";
+import { HistoryTab }  from "./HistoryTab";
+import { useGitPanel } from "./useGitPanel";
 import type { GitPanelProps, GitTab } from "./types";
 
 export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileClick }: GitPanelProps) {
   const git = useGitPanel(workspaceCwd, workspaceId);
 
-  const [tab,        setTab]        = useState<GitTab>("changes");
-  const [sourceTab,  setSourceTab]  = useState<"branches" | "history">("branches");
-  const [message,    setMessage]    = useState("");
+  const [tab,       setTab]       = useState<GitTab>("changes");
+  const [sourceTab, setSourceTab] = useState<"branches" | "history">("branches");
+  const [message,   setMessage]   = useState("");
   const [committing, setCommitting] = useState(false);
-  const [pushing,    setPushing]    = useState(false);
 
   const handleCommit = async () => {
     if (!message.trim()) return;
@@ -22,24 +21,6 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
     try { await git.commit(message.trim()); setMessage(""); }
     catch (e: any) { git.showNotice(String(e), false); }
     finally { setCommitting(false); }
-  };
-
-  const handlePush = async () => {
-    setPushing(true);
-    try { await git.push(); }
-    catch (e: any) { git.showNotice(String(e), false); }
-    finally { setPushing(false); }
-  };
-
-  const handleCommitPush = async () => {
-    if (!message.trim()) return;
-    setCommitting(true);
-    try {
-      await git.commit(message.trim()); setMessage("");
-      setPushing(true);
-      await git.push();
-    } catch (e: any) { git.showNotice(String(e), false); }
-    finally { setCommitting(false); setPushing(false); }
   };
 
   if (git.isGitRepo === null) {
@@ -58,8 +39,6 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
     return <NoGitPane cwd={workspaceCwd} onClose={onClose} onInitDone={() => git.setIsGitRepo(null)} />;
   }
 
-  const busy = committing || pushing;
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg1 }}>
 
@@ -69,21 +48,19 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
         borderBottom: `1px solid ${C.border}`,
         display: "flex", alignItems: "center", gap: 6,
       }}>
-
-        {/* Branch label */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
-          <span style={{
-            fontSize: 16,
-            color: C.t2,
-            userSelect: "none", flexShrink: 0,
-            lineHeight: 1,
-          }}>
-            ⎇
-          </span>
+          <span style={{ fontSize: 16, color: C.t2, userSelect: "none", flexShrink: 0, lineHeight: 1 }}>⎇</span>
           <span style={{ fontSize: 14, fontFamily: MONO, color: C.t1, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {branch || "main"}
           </span>
         </div>
+
+        {/* Active agent branch badge */}
+        {git.agentBranches.filter(ab => ab.status === "working").length > 0 && (
+          <span style={{ fontSize: 10, fontFamily: MONO, color: "#4ade80", background: "#4ade8022", borderRadius: 4, padding: "2px 7px", flexShrink: 0 }}>
+            {git.agentBranches.filter(ab => ab.status === "working").length} agent{git.agentBranches.filter(ab => ab.status === "working").length > 1 ? "s" : ""} working
+          </span>
+        )}
 
         {git.conflicts.length > 0 && (
           <span style={{ fontSize: 10, fontFamily: MONO, color: C.amber, background: C.amberBg, borderRadius: 4, padding: "2px 7px" }}>
@@ -91,13 +68,9 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
           </span>
         )}
 
-        {/* ── Tab nav: Changes · Source · GitHub ── */}
+        {/* Tab nav */}
         <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-
-          {/* Changes tab */}
           <NavTab active={tab === "changes"} onClick={() => setTab("changes")} label="Changes" />
-
-          {/* Source tab (branches + history merged) */}
           <button
             title="Branches & History"
             onClick={() => setTab(tab === "source" ? "changes" : "source")}
@@ -112,7 +85,6 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
             onMouseLeave={e => { if (tab !== "source") (e.currentTarget as HTMLElement).style.color = C.t3; }}>
             <SourceIcon />
           </button>
-
         </div>
 
         <button onClick={onClose}
@@ -141,12 +113,12 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
           files={git.files}
           agentSpans={git.agentSpans}
           committing={committing}
-          pushing={pushing}
+          pushing={false}
           message={message}
           onMessage={setMessage}
           onCommit={handleCommit}
-          onCommitPush={handleCommitPush}
-          onPush={handlePush}
+          onCommitPush={handleCommit}
+          onPush={() => {}}
           onFileClick={fc => onFileClick?.(fc)}
           onStage={git.stageFile}
           onUnstage={git.unstageFile}
@@ -154,14 +126,10 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
         />
       )}
 
-      {/* Source: branches + history with internal sub-tabs */}
       {tab === "source" && (
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
           {/* Sub-tab bar */}
-          <div style={{
-            display: "flex", borderBottom: `1px solid ${C.border}`,
-            padding: "0 14px", flexShrink: 0,
-          }}>
+          <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, padding: "0 14px", flexShrink: 0 }}>
             {(["branches", "history"] as const).map(st => (
               <button key={st} onClick={() => setSourceTab(st)}
                 style={{
@@ -175,17 +143,28 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
                 onMouseEnter={e => { if (sourceTab !== st) (e.currentTarget as HTMLElement).style.color = C.t1; }}
                 onMouseLeave={e => { if (sourceTab !== st) (e.currentTarget as HTMLElement).style.color = C.t3; }}>
                 {st.charAt(0).toUpperCase() + st.slice(1)}
+                {st === "branches" && git.agentBranches.filter(ab => ab.status === "done").length > 0 && (
+                  <span style={{ marginLeft: 6, fontSize: 9, fontFamily: MONO, color: "#4ade80", background: "#4ade8022", borderRadius: 3, padding: "1px 4px" }}>
+                    {git.agentBranches.filter(ab => ab.status === "done").length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
-          {/* Sub-tab content */}
+
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
             {sourceTab === "branches" && (
               <BranchesTab
+                agentBranches={git.agentBranches}
                 allBranches={git.allBranches}
                 currentBranch={branch}
                 onSwitch={b => git.switchBranch(b).catch(e => git.showNotice(String(e), false))}
                 onCreate={b => git.createBranch(b).catch(e => { git.showNotice(String(e), false); throw e; })}
+                onRename={(o, n) => git.renameBranch(o, n).catch(e => git.showNotice(String(e), false))}
+                onMerge={b => git.mergeBranch(b).catch(e => { git.showNotice(String(e), false); throw e; })}
+                onDelete={(b, f) => git.deleteBranch(b, f).catch(e => git.showNotice(String(e), false))}
+                onBranchLog={git.branchLog}
+                onBranchStatus={git.branchStatus}
               />
             )}
             {sourceTab === "history" && (
@@ -195,13 +174,12 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
         </div>
       )}
 
-
       <style>{`@keyframes gitspin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }
 
-// ── Nav helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function NavTab({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (

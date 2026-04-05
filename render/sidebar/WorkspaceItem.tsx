@@ -110,7 +110,7 @@ export function WorkspaceItem({
           }}>
             {dirName}
           </span>
-          {lastUsed !== undefined && (
+          {lastUsed !== undefined && lastUsed > 0 && (
             <span style={{
               fontSize: 11, fontFamily: MONO, color: C.t3,
               flexShrink: 0, marginLeft: 8, opacity: 0.7,

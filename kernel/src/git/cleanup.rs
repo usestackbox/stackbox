@@ -1,31 +1,27 @@
 // src-tauri/src/git/cleanup.rs
 //
-// On startup: scan all parent directories of known runbox CWDs for
-// stackbox-wt-* folders. Any that don't match a known worktree_path
-// or runbox short-ID in SQLite are orphans from a crash — prune them.
+// On startup: scan {cwd}/.worktrees/ for stackbox-wt-* folders.
+// Any that aren't in agent_branches as an active worktree are orphans
+// from a crash — prune them.
 //
-// FIX (Bug #cleanup-A): Query was reading `runboxes.worktree_path` which is
-//   always NULL. Actual worktree paths are stored in `agent_worktrees`. Fixed
-//   to query `agent_worktrees` instead.
-//
-// FIX (Bug #cleanup-B): Suffix check used `known_short_ids.contains(suffix)`
-//   where suffix = "a1b2c3d4-claude-code" but known_short_ids held "a1b2c3d4".
-//   Never matched → every worktree pruned as orphan on every startup.
-//   Fixed to `suffix.starts_with(short_id)`.
+// FIX vs old code:
+//   - Scans {cwd}/.worktrees/ instead of parent dir (worktrees moved inside project)
+//   - Reads from agent_branches table instead of agent_worktrees
+//   - Also handles legacy sibling-style orphans for one-time cleanup
 
 use crate::db::Db;
 use std::path::Path;
 
 /// Call once on startup after DB is open.
 pub fn prune_orphan_worktrees(db: &Db) {
-    // Collect all known runbox IDs and CWDs from the runboxes table
+    // Collect all known runbox IDs and CWDs
     let runbox_rows: Vec<(String, String)> = {
         let conn = db.read();
         let mut stmt = match conn.prepare("SELECT id, cwd FROM runboxes") {
             Ok(s) => s,
             Err(_) => return,
         };
-        let collected = match stmt.query_map([], |row| {
+        match stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -33,46 +29,88 @@ pub fn prune_orphan_worktrees(db: &Db) {
         }) {
             Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
             Err(_)     => return,
-        };
-        collected
+        }
     };
 
-    // FIX (Bug #cleanup-A): Read worktree paths from agent_worktrees, not runboxes.
-    //
-    // Borrow-checker note: `MappedRows<'_>` borrows `stmt`; `stmt` borrows `conn`.
-    // If `stmt.query_map(...)` is the *last* expression in the block its
-    // intermediate `Result<MappedRows<'_,…>>` temporary is kept alive until after
-    // `stmt` and `conn` are dropped, causing "does not live long enough".
-    // Binding to a named `let` forces the iterator to be fully consumed and the
-    // temporary dropped *before* the block closes, so `stmt`/`conn` can then
-    // drop cleanly.
+    // Collect known active worktree paths from agent_branches
     let known_wt_paths: std::collections::HashSet<String> = {
         let conn = db.read();
         let mut stmt = match conn.prepare(
-            "SELECT worktree_path FROM agent_worktrees WHERE worktree_path IS NOT NULL"
+            "SELECT worktree_path FROM agent_branches WHERE worktree_path IS NOT NULL"
         ) {
             Ok(s) => s,
-            Err(_) => return,
+            Err(_) => {
+                // Fall back to legacy table
+                let mut stmt2 = match conn.prepare(
+                    "SELECT worktree_path FROM agent_worktrees WHERE worktree_path IS NOT NULL"
+                ) {
+                    Ok(s)  => s,
+                    Err(_) => return,
+                };
+                let paths: std::collections::HashSet<String> =
+                    match stmt2.query_map([], |row| row.get::<_, String>(0)) {
+                        Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
+                        Err(_)     => std::collections::HashSet::new(),
+                    };
+                return prune_with_known_paths(&runbox_rows, paths);
+            }
         };
-        let paths: std::collections::HashSet<String> =
-            match stmt.query_map([], |row| row.get::<_, String>(0)) {
-                Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
-                Err(_)     => std::collections::HashSet::new(),
-            };
-        // `stmt` and `conn` drop here; `paths` owns its data — no borrow survives.
-        paths
+        match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
+            Err(_)     => std::collections::HashSet::new(),
+        }
     };
 
-    // Build short-ID lookup set (first 8 chars of runbox_id)
+    prune_with_known_paths(&runbox_rows, known_wt_paths);
+}
+
+fn prune_with_known_paths(
+    runbox_rows:    &[(String, String)],
+    known_wt_paths: std::collections::HashSet<String>,
+) {
+    // Short IDs for name-based matching
     let known_short_ids: std::collections::HashSet<String> = runbox_rows
         .iter()
         .map(|(id, _)| id[..id.len().min(8)].to_string())
         .collect();
 
-    // Scan parent dirs of every known CWD for stackbox-wt-* folders
     let mut scanned: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for (_, cwd) in &runbox_rows {
+    for (_, cwd) in runbox_rows {
+        // ── New layout: scan {cwd}/.worktrees/ ───────────────────────────────
+        let wt_dir = Path::new(cwd).join(".worktrees");
+        let wt_dir_str = wt_dir.to_string_lossy().to_string();
+
+        if wt_dir.is_dir() && !scanned.contains(&wt_dir_str) {
+            scanned.insert(wt_dir_str.clone());
+
+            if let Ok(entries) = std::fs::read_dir(&wt_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !name.starts_with("stackbox-wt-") { continue; }
+
+                    let path     = entry.path();
+                    let path_str = path.to_string_lossy().to_string();
+
+                    if known_wt_paths.contains(&path_str) { continue; }
+
+                    // suffix = "{runbox_short}-{session_short}-{slug}"
+                    let suffix = &name["stackbox-wt-".len()..];
+                    if known_short_ids.iter().any(|id| suffix.starts_with(id.as_str())) {
+                        continue;
+                    }
+
+                    eprintln!("[cleanup] pruning orphan worktree (new layout): {path_str}");
+                    let _ = std::process::Command::new("git")
+                        .args(["worktree", "remove", "--force", &path_str])
+                        .current_dir(cwd)
+                        .output();
+                    std::fs::remove_dir_all(&path).ok();
+                }
+            }
+        }
+
+        // ── Legacy layout: scan parent dir for sibling stackbox-wt-* ─────────
         let parent = match Path::new(cwd).parent() {
             Some(p) => p.to_path_buf(),
             None    => continue,
@@ -93,23 +131,18 @@ pub fn prune_orphan_worktrees(db: &Db) {
             let path     = entry.path();
             let path_str = path.to_string_lossy().to_string();
 
-            // Safe: known by exact absolute path stored in agent_worktrees
             if known_wt_paths.contains(&path_str) { continue; }
 
-            // FIX (Bug #cleanup-B): suffix includes the agent slug, e.g.
-            // "a1b2c3d4-claude-code". Check with starts_with, not contains.
             let suffix = &name["stackbox-wt-".len()..];
             if known_short_ids.iter().any(|id| suffix.starts_with(id.as_str())) {
                 continue;
             }
 
-            // Orphan — not referenced by any runbox in DB
-            eprintln!("[cleanup] pruning orphan worktree: {path_str}");
+            eprintln!("[cleanup] pruning orphan worktree (legacy sibling): {path_str}");
             let _ = std::process::Command::new("git")
                 .args(["worktree", "remove", "--force", &path_str])
                 .current_dir(&parent)
                 .output();
-            // Fallback: plain remove if git worktree remove fails
             std::fs::remove_dir_all(&path).ok();
         }
     }

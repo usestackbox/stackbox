@@ -2,6 +2,13 @@
 // Supercontext V3 — OutputClassifier + ResponseCapture removed.
 // Agents write memory intentionally via remember()/session_log()/session_summary().
 // Session end: expire TEMPORARY for agent, run auto_session_summary fallback.
+//
+// WORKTREE LIFECYCLE:
+//   spawn()  → ensure_worktree(cwd, runbox_id, session_id, agent_kind)
+//            → worktree created at {cwd}/.worktrees/stackbox-wt-{rb}-{sid}-{slug}
+//            → branch stays alive after worktree is removed
+//   PTY exit → remove_worktree_only() → directory gone, branch intact
+//   User     → git_merge_branch / git_delete_branch from frontend
 
 pub mod detection;
 pub mod watcher;
@@ -15,7 +22,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::{
     agent::{context::inject, injector, kind::AgentKind},
-    git::repo::{ensure_git_repo, remove_worktree},
+    git::repo::{ensure_git_repo, remove_worktree_only},
     memory,
     state::{AppState, PtySession},
     workspace::{
@@ -58,39 +65,41 @@ fn clear_git_lock(cwd: &str) {
 }
 
 /// Detect whether `cwd` is already an agent worktree.
+/// Worktrees now live inside .worktrees/ so we check the grandparent folder name.
 fn detect_worktree(cwd: &str) -> Option<String> {
-    let folder = std::path::Path::new(cwd)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let path = std::path::Path::new(cwd);
 
-    if folder.starts_with("stackbox-wt-") {
-        Some(cwd.to_string())
-    } else {
-        None
+    // New layout: .worktrees/stackbox-wt-...  — parent is .worktrees/, grandparent is project
+    if let Some(parent) = path.parent() {
+        if parent.file_name().and_then(|n| n.to_str()) == Some(".worktrees") {
+            let folder = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if folder.starts_with("stackbox-wt-") {
+                return Some(cwd.to_string());
+            }
+        }
     }
+
+    // Legacy layout: sibling folder named stackbox-wt-*
+    let folder = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if folder.starts_with("stackbox-wt-") {
+        return Some(cwd.to_string());
+    }
+
+    None
 }
 
-/// Returns true if this URL is intentional (localhost / file://) and should
-/// open in the browser pane.  Filters out the noise that build tools print
-/// (cargo doc links, npm package URLs, log lines, etc.).
 fn is_intentional_url(url: &str) -> bool {
-    if url.starts_with("file://") {
-        return true;
-    }
+    if url.starts_with("file://") { return true; }
     if url.contains("localhost") || url.contains("127.0.0.1") || url.contains("0.0.0.0") {
         return true;
     }
     false
 }
 
-/// On Windows, try to find PowerShell Core (pwsh.exe) first for a better
-/// terminal experience, falling back to Windows PowerShell.
 #[cfg(windows)]
 fn find_powershell() -> String {
-    // Try PowerShell Core locations
     let candidates = [
-        "pwsh.exe", // in PATH
+        "pwsh.exe",
         r"C:\Program Files\PowerShell\7\pwsh.exe",
         r"C:\Program Files\PowerShell\6\pwsh.exe",
     ];
@@ -99,7 +108,6 @@ fn find_powershell() -> String {
             return c.to_string();
         }
     }
-    // Fallback: Windows PowerShell
     let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
     format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", sys_root)
 }
@@ -165,9 +173,33 @@ pub async fn spawn(
             .unwrap_or_else(|e| { eprintln!("[pty] ensure_git_repo: {e}"); String::new() });
     }
 
-    let effective_cwd = worktree_path.as_deref().unwrap_or(&resolved_cwd).to_string();
+    // ── Create agent worktree for non-shell agents ────────────────────────────
+    // Pass session_id so each session gets a unique worktree even if the same
+    // agent runs multiple times on the same runbox.
+    let agent_worktree = if worktree_path.is_none() && agent_kind != AgentKind::Shell {
+        crate::git::repo::ensure_worktree(&resolved_cwd, &runbox_id, &session_id, agent_str)
+    } else {
+        None
+    };
+
+    let effective_cwd = agent_worktree
+        .as_ref().map(|w| w.path.clone())
+        .or_else(|| worktree_path.clone())
+        .unwrap_or_else(|| resolved_cwd.clone());
 
     clear_git_lock(&effective_cwd);
+
+    // Persist branch record to DB
+    if let Some(ref wt) = agent_worktree {
+        let _ = crate::db::branches::record_branch_start(
+            &state.db,
+            &runbox_id,
+            &session_id,
+            agent_str,
+            &wt.branch,
+            &wt.path,
+        );
+    }
 
     record_agent_spawned(&state.db, &runbox_id, &session_id, agent_kind.display_name(), &effective_cwd);
 
@@ -195,20 +227,6 @@ pub async fn spawn(
     }
 
     // ── Shell command ─────────────────────────────────────────────────────────
-
-    // WINDOWS: Launch PowerShell (Core preferred, Windows PowerShell fallback).
-    //
-    // CRITICAL FIX: The previous code passed -NonInteractive which caused the
-    // shell to exit immediately even with -NoExit, because -NonInteractive tells
-    // PowerShell not to read from stdin at all. Removed entirely.
-    //
-    // Flag explanation:
-    //   -NoLogo    — suppress copyright banner
-    //   -NoProfile — skip $PROFILE (faster startup; we inject our own prompt)
-    //   -NoExit    — stay running after -Command executes
-    //   -Command   — set a compact prompt function then hand off to the REPL
-    //
-    // Without -NonInteractive the shell reads from the PTY's stdin normally.
     #[cfg(windows)]
     let mut cmd = {
         let ps = find_powershell();
@@ -218,11 +236,8 @@ pub async fn spawn(
             "-NoProfile",
             "-NoExit",
             "-Command",
-            // Set a compact prompt: "FolderName> "
-            // Single quotes inside the raw string to avoid escaping issues.
             r#"function prompt { (Split-Path -Leaf (Get-Location)) + '> ' }"#,
         ]);
-        // Pass through essential Windows environment variables
         for var in &[
             "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
             "PATH", "SystemRoot", "COMSPEC", "USERNAME", "USERDOMAIN",
@@ -235,16 +250,12 @@ pub async fn spawn(
         c
     };
 
-    // UNIX: Use the user's preferred shell (from $SHELL), falling back through
-    // zsh → bash → sh. Inject a minimal .zshrc / .bashrc that sources the
-    // real one and sets a Stackbox-themed prompt.
     #[cfg(not(windows))]
     let mut cmd = {
         let preferred_shell = std::env::var("SHELL").unwrap_or_default();
         let shell = if !preferred_shell.is_empty() && std::path::Path::new(&preferred_shell).exists() {
             preferred_shell
         } else {
-            // Probe common shells in order of preference
             let candidates = ["/bin/zsh", "/usr/bin/zsh", "/bin/bash", "/usr/bin/bash", "/bin/sh"];
             candidates.iter()
                 .find(|p| std::path::Path::new(*p).exists())
@@ -260,43 +271,28 @@ pub async fn spawn(
         let mut c = CommandBuilder::new(&shell);
 
         if shell_name == "zsh" {
-            // Write a minimal ZDOTDIR/.zshrc that sources the real .zshrc
-            // and sets a clean Stackbox prompt.
             let stackbox_zsh_dir = format!("/tmp/stackbox-zsh-{}", std::process::id());
             let _ = std::fs::create_dir_all(&stackbox_zsh_dir);
             let zshrc = r#"
-# Source the user's real .zshrc if it exists
 [ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc" 2>/dev/null
-
-# Stackbox prompt: cyan folder + grey prompt char
 autoload -U colors && colors 2>/dev/null
 PROMPT="%B%F{cyan}%1~%f%b %% "
-
-# OSC 7: report CWD so the titlebar stays in sync
 chpwd() { printf '\e]7;file://%s%s\a' "$HOST" "$PWD" }
 chpwd
 "#;
             let _ = std::fs::write(format!("{stackbox_zsh_dir}/.zshrc"), zshrc);
             c.env("ZDOTDIR", &stackbox_zsh_dir);
-
         } else if shell_name == "bash" {
-            // Write a minimal bashrc
             let stackbox_bash_dir = format!("/tmp/stackbox-bash-{}", std::process::id());
             let _ = std::fs::create_dir_all(&stackbox_bash_dir);
             let bashrc = r#"
-# Source the user's real .bashrc if it exists
 [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc" 2>/dev/null
-
-# Stackbox prompt: cyan folder + grey $
 PS1='\[\033[01;36m\]\W\[\033[00m\] \$ '
-
-# OSC 7: report CWD so the titlebar stays in sync
 _stackbox_osc7() { printf '\e]7;file://%s%s\a' "$HOSTNAME" "$PWD"; }
 PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 "#;
             let bashrc_path = format!("{stackbox_bash_dir}/.bashrc");
             let _ = std::fs::write(&bashrc_path, bashrc);
-            // bash --rcfile <file> loads the file as interactive rc
             c = CommandBuilder::new(&shell);
             c.args(&["--rcfile", &bashrc_path]);
         }
@@ -308,11 +304,10 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 
     // ── Universal environment ─────────────────────────────────────────────────
     cmd.env("STACKBOX_WORKSPACE_NAME", &ws_label);
-    cmd.env("TERM",      "xterm-256color"); // full 256-colour + OSC sequences
-    cmd.env("COLORTERM", "truecolor");      // enable 24-bit RGB in colour-aware apps
-    cmd.env("LANG",      "en_US.UTF-8");    // UTF-8 for emoji, box-drawing, etc.
+    cmd.env("TERM",      "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("LANG",      "en_US.UTF-8");
 
-    // BROWSER shim: routes `start index.html` → Stackbox browser panel
     {
         let shim = if cfg!(windows) { "stackbox-open.exe" } else { "stackbox-open" };
         if let Some(path) = std::env::current_exe().ok()
@@ -334,7 +329,6 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
         }
     }
 
-    // Deterministic per-workspace port (3100–3999) so parallel agents don't collide
     let pane_port = {
         let mut hash: u32 = 0x811c9dc5;
         for b in runbox_id.as_bytes() {
@@ -358,7 +352,9 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
     cmd.env("STACKBOX_MEMORY_URL",   format!("http://localhost:{port}/memory"));
     cmd.env("STACKBOX_RUNBOX_ID",    &runbox_id);
     cmd.env("STACKBOX_SESSION_ID",   &session_id);
-    cmd.env("STACKBOX_WORKTREE",     worktree_path.as_deref().unwrap_or(""));
+    // STACKBOX_WORKTREE now points inside .worktrees/ — relative path for agent awareness
+    let wt_env = agent_worktree.as_ref().map(|w| w.path.as_str()).unwrap_or("");
+    cmd.env("STACKBOX_WORKTREE",     wt_env);
     cmd.env("STACKBOX_EVENTS_URL",   format!("http://localhost:{port}/events?runbox_id={runbox_id}"));
 
     match &agent_kind {
@@ -372,11 +368,6 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 
     let child      = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-
-    // ── Writer channel ────────────────────────────────────────────────────────
-    // take_writer() must be called exactly once (portable-pty limitation).
-    // We own the writer behind an mpsc channel; every caller (pty_write command,
-    // webhook handler, agent launch cmd) sends through the channel.
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
@@ -393,7 +384,6 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
         });
     }
 
-    // Send the agent's launch command after the shell has had time to start
     if let Some(launch) = agent_kind.launch_cmd(&ctx_file) {
         let tx2 = tx.clone();
         tauri::async_runtime::spawn(async move {
@@ -415,6 +405,9 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 
     let _ = session_start(&state.db, &session_id, &runbox_id, "", agent_str, &effective_cwd);
 
+    // Store the worktree path for cleanup on exit
+    let wt_path_for_session = agent_worktree.as_ref().map(|w| w.path.clone());
+
     state.sessions.lock().unwrap().insert(session_id.clone(), PtySession {
         writer:        Box::new(ChannelWriter(tx)),
         _master:       pair.master,
@@ -423,7 +416,7 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
         runbox_id:     runbox_id.clone(),
         cwd:           effective_cwd.clone(),
         agent_kind:    agent_kind.clone(),
-        worktree_path: worktree_path.clone(),
+        worktree_path: wt_path_for_session.clone(),
         docker,
     });
 
@@ -434,19 +427,18 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
     let db_arc            = state.db.clone();
     let pty_writer_arc    = state.pty_writer.clone();
     let conflict_reg_thr  = state.conflict_registry.clone();
-    let worktree_path_thr = worktree_path.clone();
+    let worktree_path_thr = wt_path_for_session.clone();
     let cwd_thr           = effective_cwd.clone();
     let session_start_ts  = Instant::now();
 
     std::thread::spawn(move || {
-        let mut buf           = [0u8; 8192]; // larger buffer → fewer round-trips
+        let mut buf           = [0u8; 8192];
         let mut detected_kind = agent_kind.clone();
 
         while let Ok(n) = reader.read(&mut buf) {
             if n == 0 { break; }
             let text = String::from_utf8_lossy(&buf[..n]).to_string();
 
-            // Agent kind detection from shell output
             if detected_kind == AgentKind::Shell {
                 let stripped = strip_ansi(&text);
                 if let Some(upgraded) = AgentKind::infer_from_output(&stripped) {
@@ -456,7 +448,6 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
                 }
             }
 
-            // URL detection: only localhost / file:// open in browser pane
             let text_clean = strip_ansi(&text);
             for word in text_clean.split_whitespace() {
                 let clean = word.trim_matches(|c: char| {
@@ -477,7 +468,6 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
                 }
             }
 
-            // `start ./index.html` intercept
             for line in text_clean.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("start ") || trimmed.starts_with("Start-Process ") {
@@ -507,6 +497,8 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
         }
 
         // ── Session ended ─────────────────────────────────────────────────────
+        eprintln!("[pty] session ended naturally: {sid}");
+
         let duration_ms = session_start_ts.elapsed().as_millis() as i64;
         let _ = session_end(&db_arc, &sid, None, None);
         on_command_result(&db_arc, &rb_id, &sid, 0, duration_ms);
@@ -518,11 +510,17 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
             snapshot_from_git(&db_arc, &rb_id, &sid, &cwd_thr);
         }
 
+        // Remove worktree directory — branch is kept for user to merge/delete.
         if let Some(ref wt) = worktree_path_thr {
-            remove_worktree(wt);
+            remove_worktree_only(wt);
+            let _ = crate::db::branches::record_branch_done(&db_arc, &rb_id, &sid);
+            eprintln!("[pty] worktree removed, branch kept for {rb_id}/{sid}");
         }
 
-        // V3 session cleanup + GCC+Letta sleep-time jobs
+        // Emit pty:exited so frontend can update branch status badge.
+        let _ = app_pty.emit("pty:exited", &sid);
+
+        // V3 session cleanup + sleep-time jobs
         if agent_kind != AgentKind::Shell {
             let rb2  = rb_id.clone();
             let sid2 = sid.clone();

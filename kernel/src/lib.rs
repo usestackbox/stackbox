@@ -147,6 +147,7 @@ pub fn run() {
             git::commands::git_conflicts,
             git::commands::git_branches,
             git::commands::git_checkout,
+            git::commands::git_rename_branch,
             git::commands::git_diff_between_worktrees,
             git::commands::git_commit,
             git::commands::git_worktree_delete,
