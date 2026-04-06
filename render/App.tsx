@@ -6,7 +6,7 @@ import { C, SANS, MONO } from "./design";
 import { useRunboxes }     from "./features/runbox";
 import { useBranchPoller } from "./hooks";
 import { StripIcon }       from "./ui";
-import { IcoBrain, IcoGit } from "./ui/icons";
+// icons — memory panel hidden, IcoBrain not needed
 
 import { WorkspaceView }  from "./features/workspace";
 import type { WinState, FileTab, SidePanel as WsSidePanel } from "./features/workspace/types";
@@ -85,34 +85,8 @@ export default function App() {
   const contentMarginLeft = sidebarCollapsed ? 0 : sidebarTotal;
 
   // ── Render props for WorkspaceView ─────────────────────────────────────────
-
-  const renderTermPane = useCallback((win: WinState, callbacks: TermPaneCallbacks) => {
-    const rb = runboxes.find(r => r.id === safeId);
-    return (
-      <TerminalPane
-        key={win.id}
-        runboxId={rb?.id}
-        runboxName={rb?.name}
-        runboxCwd={win.cwd || rb?.cwd}
-        agentCmd={rb?.agentCmd}
-        onWorktreeReady={path => {
-          setWorktreeMap(p => ({ ...p, [rb?.id ?? ""]: path }));
-          callbacks.onCwdChange(path);
-        }}
-        sessionId={activeSessionId ?? undefined}
-        label={win.label}
-        isActive={callbacks.isActive}
-        onActivate={callbacks.onActivate}
-        onCwdChange={callbacks.onCwdChange}
-        onSessionChange={callbacks.onSessionChange}
-        onClose={callbacks.onClose}
-        onMinimize={callbacks.onMinimize}
-        onMaximize={callbacks.onMaximize}
-        onSplitDown={callbacks.onSplitDown}
-        onSplitLeft={callbacks.onSplitLeft}
-      />
-    );
-  }, [runboxes, safeId, activeSessionId]);
+  // NOTE: renderTermPane is now defined inline per-runbox inside the map below.
+  // Each WorkspaceView needs its own scoped renderer so runboxId is always correct.
 
   const renderBrowsePane = useCallback((
     win: WinState,
@@ -199,7 +173,35 @@ export default function App() {
       />
 
       {/* One WorkspaceView per runbox — only active is visible */}
-      {runboxes.map(rb => (
+      {runboxes.map(rb => {
+        // Each WorkspaceView gets its OWN renderTermPane scoped to its runbox.
+        // The shared renderTermPane used safeId (the globally active workspace),
+        // so ALL inactive WorkspaceViews were spawning PTYs with the wrong runboxId —
+        // two PTYs on the same ID = double prompt output.
+        const renderTermPaneForRb = (win: WinState, callbacks: TermPaneCallbacks) => (
+          <TerminalPane
+            key={win.id}
+            runboxId={rb.id}
+            runboxName={rb.name}
+            runboxCwd={win.cwd || rb.cwd}
+            agentCmd={rb.agentCmd}
+            onWorktreeReady={path => {
+              setWorktreeMap(p => ({ ...p, [rb.id]: path }));
+              callbacks.onCwdChange(path);
+            }}
+            label={win.label}
+            isActive={callbacks.isActive}
+            onActivate={callbacks.onActivate}
+            onCwdChange={callbacks.onCwdChange}
+            onSessionChange={callbacks.onSessionChange}
+            onClose={callbacks.onClose}
+            onMinimize={callbacks.onMinimize}
+            onMaximize={callbacks.onMaximize}
+            onSplitDown={callbacks.onSplitDown}
+            onSplitLeft={callbacks.onSplitLeft}
+          />
+        );
+        return (
         <div
           key={rb.id}
           style={{
@@ -221,22 +223,49 @@ export default function App() {
             onFileTreeToggle={handleFileTreeToggle}
             toolbarSlot={
               <div style={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <StripIcon title="Memory" active={sidePanel === "memory"} onClick={() => toggleSide("memory")}><IcoBrain on /></StripIcon>
-                {/* REMOVED: "Changed Files" strip icon — now inside Git → Changes tab */}
-                <StripIcon title="Git" active={sidePanel === "git"} onClick={() => toggleSide("git")}><IcoGit on /></StripIcon>
+                {/* Memory panel hidden — not needed with per-agent git worktrees */}
+                <button
+                  onClick={() => toggleSide("git")}
+                  title="Changes"
+                  style={{
+                    background: sidePanel === "git" ? "rgba(255,255,255,.18)" : "transparent",
+                    border: sidePanel === "git" ? "1px solid rgba(255,255,255,.12)" : "1px solid rgba(255,255,255,.1)",
+                    borderRadius: 6,
+                    color: sidePanel === "git" ? "#ffffff" : "rgba(255,255,255,.45)",
+                    cursor: "pointer",
+                    padding: "0 10px",
+                    height: 28,
+                    fontSize: 11,
+                    fontWeight: 500,
+                    letterSpacing: "0.04em",
+                    whiteSpace: "nowrap",
+                    transition: "all .12s",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                  onMouseEnter={e => {
+                    const el = e.currentTarget as HTMLElement;
+                    if (sidePanel !== "git") { el.style.color = "#fff"; el.style.background = "rgba(255,255,255,.09)"; }
+                  }}
+                  onMouseLeave={e => {
+                    const el = e.currentTarget as HTMLElement;
+                    if (sidePanel !== "git") { el.style.color = "rgba(255,255,255,.45)"; el.style.background = "transparent"; }
+                  }}
+                >Changes</button>
               </div>
             }
             onCwdChange={cwd => setCwdMap(p => ({ ...p, [rb.id]: cwd }))}
             onSessionChange={setActiveSessionId}
             onOpenDiff={ref => { diffOpenerRefs.current[rb.id] = ref; }}
             onOpenFile={ref => { fileOpenerRefs.current[rb.id] = ref; }}
-            renderTermPane={renderTermPane}
+            renderTermPane={renderTermPaneForRb}
             renderBrowsePane={renderBrowsePane}
             renderFileEditor={renderFileEditor}
             renderSidePanel={renderSidePanel}
           />
         </div>
-      ))}
+        );
+      })}
 
       {/* Empty state */}
       {(runboxes.length === 0 || !safeId) && (

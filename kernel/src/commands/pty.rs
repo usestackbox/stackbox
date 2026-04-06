@@ -5,7 +5,7 @@ use crate::{
     agent::kind::AgentKind,
     db::sessions::session_end,
     git::repo::{ensure_git_repo, ensure_worktree, has_git, remove_worktree},
-    pty::{self, expand_cwd},
+    pty::{self, expand_cwd, tmux_session_alive, kill_tmux_session},
     state::AppState,
 };
 
@@ -135,7 +135,7 @@ pub fn pty_write(
         let sid = session_id.clone();
         let _db  = state.db.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = crate::agent::context::inject(&cwd, &rb, &sid, kind.kind_str()) {
+            if let Err(e) = crate::agent::context::inject(&cwd, &rb, &sid, kind.kind_str(), None) {
                 eprintln!("[pty_write] re-inject: {e}");
             }
         });
@@ -201,4 +201,24 @@ pub fn pty_kill(session_id: String, state: tauri::State<'_, AppState>) -> Result
         }
     }
     Ok(())
+}
+#[tauri::command]
+pub fn pty_session_alive(runbox_id: String) -> bool {
+    tmux_session_alive(&runbox_id)
+}
+
+#[tauri::command]
+pub fn pty_kill_session(runbox_id: String) -> Result<(), String> {
+    kill_tmux_session(&runbox_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_session_worktree_path(
+    runbox_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    Ok(state.sessions.lock().unwrap()
+        .get(&runbox_id)
+        .and_then(|s| s.worktree_path.clone()))
 }

@@ -53,6 +53,54 @@ pub fn expand_cwd(raw: &str) -> String {
     expanded
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tmux session persistence (Unix only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(not(windows))]
+fn tmux_available() -> bool {
+    std::process::Command::new("tmux").arg("-V")
+        .output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn tmux_session_name(runbox_id: &str) -> String {
+    // Use first 16 chars to keep name short; replace non-alphanumeric with -
+    let short: String = runbox_id.chars().take(16)
+        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+        .collect();
+    format!("sb-{}", short)
+}
+
+#[cfg(not(windows))]
+fn tmux_session_exists(name: &str) -> bool {
+    std::process::Command::new("tmux")
+        .args(["has-session", "-t", name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+pub fn kill_tmux_session(runbox_id: &str) {
+    let name = tmux_session_name(runbox_id);
+    let _ = std::process::Command::new("tmux")
+        .args(["kill-session", "-t", &name])
+        .output();
+    eprintln!("[pty] tmux session killed: {name}");
+}
+
+#[cfg(not(windows))]
+pub fn tmux_session_alive(runbox_id: &str) -> bool {
+    tmux_available() && tmux_session_exists(&tmux_session_name(runbox_id))
+}
+
+#[cfg(windows)]
+pub fn kill_tmux_session(_runbox_id: &str) {}
+#[cfg(windows)]
+pub fn tmux_session_alive(_runbox_id: &str) -> bool { false }
+
 fn clear_git_lock(cwd: &str) {
     let lock = std::path::Path::new(cwd).join(".git").join("index.lock");
     if lock.exists() {
@@ -215,12 +263,14 @@ pub async fn spawn(
     }
 
     {
-        let rb    = runbox_id.clone();
-        let sid   = session_id.clone();
-        let cwd_c = effective_cwd.clone();
-        let ak    = agent_kind.display_name().to_string();
+        let rb       = runbox_id.clone();
+        let sid      = session_id.clone();
+        let cwd_c    = effective_cwd.clone();
+        let ak       = agent_kind.display_name().to_string();
+        // Pass the real worktree path so the context file has the correct `cd` target.
+        let wt_path  = agent_worktree.as_ref().map(|w| w.path.clone());
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = inject(&cwd_c, &rb, &sid, &ak) {
+            if let Err(e) = inject(&cwd_c, &rb, &sid, &ak, wt_path.as_deref()) {
                 eprintln!("[pty] inject context: {e}");
             }
         });
@@ -230,13 +280,47 @@ pub async fn spawn(
     #[cfg(windows)]
     let mut cmd = {
         let ps = find_powershell();
+
+        // Write a temp init script so we can:
+        //   1. Set a proper prompt (shows just the folder name)
+        //   2. Emit OSC 7 on every prompt so the titlebar CWD tracks correctly
+        //   3. OSC 7 emitted immediately so titlebar CWD is correct on first render
+        let tmp_script = std::env::temp_dir()
+            .join(format!("stackbox-ps-init-{}.ps1", std::process::id()));
+
+        // The prompt function:
+        //   • Builds a file:// URL with forward slashes for the OSC 7 sequence
+        //   • URL-encodes spaces as %20 so the frontend parser handles them
+        //   • Writes ESC]7;url BEL directly to the console stream
+        //   • Returns "leaf> " as the visible prompt string
+        let init_ps1 = r#"
+function prompt {
+    $loc  = (Get-Location).Path
+    $leaf = Split-Path -Leaf $loc
+    # Build OSC 7 CWD sequence: ESC ] 7 ; file://hostname/C:/path BEL
+    $url  = $loc.Replace('\', '/').Replace(' ', '%20')
+    if (-not $url.StartsWith('/')) { $url = '/' + $url }
+    $osc7 = [char]27 + ']7;file://' + $env:COMPUTERNAME + $url + [char]7
+    [Console]::Write($osc7)
+    return $leaf + '> '
+}
+# Emit CWD immediately so the titlebar is correct before the user types anything
+$loc  = (Get-Location).Path
+$url  = $loc.Replace('\', '/').Replace(' ', '%20')
+if (-not $url.StartsWith('/')) { $url = '/' + $url }
+[Console]::Write([char]27 + ']7;file://' + $env:COMPUTERNAME + $url + [char]7)
+# Invoke prompt immediately so first render has no blank line
+[Console]::Write((prompt))
+"#;
+        let _ = std::fs::write(&tmp_script, init_ps1);
+
         let mut c = CommandBuilder::new(&ps);
         c.args(&[
             "-NoLogo",
             "-NoProfile",
             "-NoExit",
-            "-Command",
-            r#"function prompt { (Split-Path -Leaf (Get-Location)) + '> ' }"#,
+            "-File",
+            tmp_script.to_str().unwrap_or(""),
         ]);
         for var in &[
             "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
@@ -270,7 +354,28 @@ pub async fn spawn(
 
         let mut c = CommandBuilder::new(&shell);
 
-        if shell_name == "zsh" {
+        // ── Tmux session persistence ───────────────────────────────────────────
+        // If tmux is available, wrap the shell inside a persistent tmux session.
+        // On app reopen the shell reconnects to the existing session — CWD,
+        // running processes, and scrollback are all preserved.
+        let tmux_name = tmux_session_name(&runbox_id);
+        let use_tmux  = tmux_available();
+
+        if use_tmux {
+            // Create new session if it doesn't exist yet; attach if it does.
+            if !tmux_session_exists(&tmux_name) {
+                let _ = std::process::Command::new("tmux")
+                    .args(["new-session", "-d", "-s", &tmux_name, "-c", &effective_cwd])
+                    .output();
+                eprintln!("[pty] tmux session created: {tmux_name}");
+            } else {
+                eprintln!("[pty] tmux session reconnect: {tmux_name}");
+            }
+            let mut c = CommandBuilder::new("tmux");
+            c.args(&["attach-session", "-t", &tmux_name]);
+            c.cwd(&effective_cwd);
+            c
+        } else if shell_name == "zsh" {
             let stackbox_zsh_dir = format!("/tmp/stackbox-zsh-{}", std::process::id());
             let _ = std::fs::create_dir_all(&stackbox_zsh_dir);
             let zshrc = r#"
@@ -282,6 +387,7 @@ chpwd
 "#;
             let _ = std::fs::write(format!("{stackbox_zsh_dir}/.zshrc"), zshrc);
             c.env("ZDOTDIR", &stackbox_zsh_dir);
+            c
         } else if shell_name == "bash" {
             let stackbox_bash_dir = format!("/tmp/stackbox-bash-{}", std::process::id());
             let _ = std::fs::create_dir_all(&stackbox_bash_dir);
@@ -295,9 +401,10 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
             let _ = std::fs::write(&bashrc_path, bashrc);
             c = CommandBuilder::new(&shell);
             c.args(&["--rcfile", &bashrc_path]);
+            c
+        } else {
+            c
         }
-
-        c
     };
 
     cmd.cwd(&effective_cwd);
@@ -391,6 +498,10 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
             let _ = tx2.send(launch.into_bytes());
         });
     }
+    // NOTE: The old "send \\r\\n after 300ms for shell sessions" block was removed.
+    // It caused the prompt to render twice — the shell already prints its prompt on
+    // startup via the ZDOTDIR .zshrc / .bashrc init scripts above (chpwd / PROMPT_COMMAND),
+    // so the extra Enter just triggered a second, blank prompt line.
 
     struct ChannelWriter(tokio::sync::mpsc::UnboundedSender<Vec<u8>>);
     impl Write for ChannelWriter {

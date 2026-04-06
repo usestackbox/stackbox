@@ -111,7 +111,7 @@ export function WorkspaceView({
     const aw = area.offsetWidth || 800, ah = area.offsetHeight || 600;
     labelCount.current = 1;
     const id = crypto.randomUUID();
-    setWins([{ id, label: id.slice(0, 6), kind: "terminal", x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }]);
+    setWins([{ id, label: "", kind: "terminal", x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }]);
     setActiveWinId(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -202,7 +202,7 @@ export function WorkspaceView({
     labelCount.current += 1;
     const id = crypto.randomUUID();
     setWins(prev => {
-      const all: WinState[] = [...prev, { id, label: id.slice(0, 6), kind: "terminal", x: 0, y: 0, w: 400, h: 300, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }];
+      const all: WinState[] = [...prev, { id, label: "", kind: "terminal", x: 0, y: 0, w: 400, h: 300, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }];
       const visible = all.filter(w => !w.minimized && !w.maximized);
       const tiles   = tileWindows(visible.length, aw, ah);
       let ti = 0;
@@ -363,11 +363,11 @@ export function WorkspaceView({
       if (dir === "down") {
         const halfH = Math.max(MIN_H, Math.floor((src.h - GAP) / 2));
         updated = { ...src, h: halfH };
-        newWin  = { ...src, id: newId, label: newId.slice(0, 6), y: src.y + halfH + GAP, h: src.h - halfH - GAP, zIndex: nextZ(), minimized: false, maximized: false };
+        newWin  = { ...src, id: newId, label: "", y: src.y + halfH + GAP, h: src.h - halfH - GAP, zIndex: nextZ(), minimized: false, maximized: false };
       } else {
         const halfW = Math.max(MIN_W, Math.floor((src.w - GAP) / 2));
         updated = { ...src, w: halfW };
-        newWin  = { ...src, id: newId, label: newId.slice(0, 6), x: src.x + halfW + GAP, w: src.w - halfW - GAP, zIndex: nextZ(), minimized: false, maximized: false };
+        newWin  = { ...src, id: newId, label: "", x: src.x + halfW + GAP, w: src.w - halfW - GAP, zIndex: nextZ(), minimized: false, maximized: false };
       }
       setActiveWinId(newId);
       return [...prev.map(w => w.id === id ? updated : w), newWin];
@@ -487,7 +487,12 @@ export function WorkspaceView({
         {sidePanel && (
           <div style={{ width: panelWidth, flexShrink: 0, display: "flex", alignItems: "stretch", borderLeft: `1px solid ${C.border}`, animation: "slideIn .14s ease-out" }}>
             <ResizeHandle onResize={w => setPanelWidth(w)} />
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", margin: "8px 8px 8px 4px", boxShadow: "0 4px 24px rgba(0,0,0,.45)" }}>
+            <div style={{
+              flex: 1, minWidth: 0, display: "flex", flexDirection: "column",
+              background: C.bg1, overflow: "hidden",
+              borderRadius: 0,
+              boxShadow: "-4px 0 24px rgba(0,0,0,.35)",
+            }}>
               {renderSidePanel(sidePanel, runbox, branch, () => onSidePanelToggle?.(sidePanel as any))}
             </div>
           </div>

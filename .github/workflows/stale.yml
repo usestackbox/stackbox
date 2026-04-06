@@ -1,0 +1,34 @@
+name: Stale Issues & PRs
+
+on:
+  schedule:
+    - cron: "0 9 * * *"  # Daily at 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token:              ${{ secrets.GITHUB_TOKEN }}
+          days-before-stale:       30
+          days-before-close:       60
+          stale-issue-message:     >
+            This issue has had no activity for 30 days and has been marked
+            stale. It will be closed in 30 more days unless there is further
+            activity. If this is still relevant, please leave a comment.
+          stale-pr-message:        >
+            This pull request has had no activity for 30 days and has been
+            marked stale. It will be closed in 30 more days unless there is
+            further activity or it is marked `keep-open`.
+          close-issue-message:     >
+            Closing due to inactivity. Feel free to re-open if this is still
+            relevant.
+          close-pr-message:        >
+            Closing due to inactivity. Please re-open and rebase if you'd
+            like to continue this work.
+          exempt-issue-labels:     "pinned,security,roadmap,keep-open"
+          exempt-pr-labels:        "pinned,security,keep-open"
+          stale-issue-label:       "stale"
+          stale-pr-label:          "stale"

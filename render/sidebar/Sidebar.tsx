@@ -60,6 +60,13 @@ export function Sidebar({
     try { return JSON.parse(localStorage.getItem("stackbox-last-used") ?? "{}"); }
     catch { return {}; }
   });
+
+  // ── Live tick — re-render every 60 s so "Xm ago" stays accurate ──────────
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
   const [ctxMenu,     setCtxMenu]     = useState<{ x: number; y: number; id: string } | null>(null);
   const [wsName,      setWsName]      = useState("WORKSPACE");
   const [wsEditing,   setWsEditing]   = useState(false);
@@ -72,6 +79,16 @@ export function Sidebar({
     if (wsVal.trim()) setWsName(wsVal.trim().toUpperCase()); else setWsVal(wsName);
     setWsEditing(false);
   };
+
+  // Stamp whenever the active workspace changes (covers create, kernel-driven switch, etc.)
+  useEffect(() => {
+    if (!activeId) return;
+    setLastUsedMap(prev => {
+      const next = { ...prev, [activeId]: Date.now() };
+      try { localStorage.setItem("stackbox-last-used", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [activeId]);
 
   // Record timestamp whenever a workspace is activated
   const handleSelect = (id: string) => {
@@ -87,7 +104,12 @@ export function Sidebar({
     <>
       {showModal && (
         <CreateWorkspaceModal
-          onSubmit={(n, c) => { onCreate(n, c); setShowModal(false); }}
+          onSubmit={(n, c) => {
+            onCreate(n, c);
+            // Stamp the new workspace — we don't have its ID here, so we stamp
+            // on the next render cycle once activeId changes to the new one.
+            setShowModal(false);
+          }}
           onClose={() => setShowModal(false)}
         />
       )}

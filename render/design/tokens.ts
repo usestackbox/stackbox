@@ -5,14 +5,15 @@
 import type React from "react";
 
 // ── Backgrounds ───────────────────────────────────────────────────────────────
-const BG = {
-  0: "#000000",  // terminals (pure black)
-  1: "#1a1a1a",  // main app bg (between your two colors)
-  2: "#222222",  // subtle step up
-  3: "#2c2c2c",  // ← PRIMARY — panels, sidebars
-  4: "#353535",  // midpoint step
-  5: "#3f3f3f",  // ← SECONDARY — hover, selected, active
+export const BG = {
+  0: "#0B0E11",  // terminal (deepest, noticeable)
+  1: "#12161A",  // app base
+  2: "#181C20",  // canvas
+  3: "#21262B",  // ← PRIMARY panels
+  4: "#2C3238",  // borders / separation
+  5: "#3A4149",  // ← SECONDARY hover/active
 };
+
 
 // ── Borders ───────────────────────────────────────────────────────────────────
 const BORDER = {

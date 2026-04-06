@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Tauri (dev)",
+      "cargo": {
+        "args": ["build", "--manifest-path", "${workspaceFolder}/kernel/Cargo.toml"],
+        "filter": {
+          "name": "app",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_LOG": "debug",
+        "RUST_BACKTRACE": "1",
+        "TAURI_DEV": "1"
+      },
+      "sourceLanguages": ["rust"],
+      "preLaunchTask": "tauri: build kernel (debug)"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug stackbox-open binary",
+      "cargo": {
+        "args": [
+          "build",
+          "--manifest-path",
+          "${workspaceFolder}/kernel/Cargo.toml",
+          "--bin",
+          "stackbox-open"
+        ]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_LOG": "debug",
+        "RUST_BACKTRACE": "1"
+      },
+      "sourceLanguages": ["rust"]
+    }
+  ]
+}

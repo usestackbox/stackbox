@@ -1,0 +1,69 @@
+{
+  // ── Editor ────────────────────────────────────────────────────────────────
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "biomejs.biome",
+  "editor.codeActionsOnSave": {
+    "quickfix.biome": "explicit",
+    "source.organizeImports.biome": "explicit"
+  },
+  "editor.rulers": [100],
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+
+  // ── Rust Analyzer ─────────────────────────────────────────────────────────
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  },
+  "rust-analyzer.checkOnSave": true,
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.extraArgs": ["--", "-D", "warnings"],
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.procMacro.enable": true,
+
+  // ── TOML ──────────────────────────────────────────────────────────────────
+  "[toml]": {
+    "editor.defaultFormatter": "tamasfe.even-better-toml"
+  },
+
+  // ── TypeScript / TSX ──────────────────────────────────────────────────────
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // ── Biome ─────────────────────────────────────────────────────────────────
+  "biome.lspBin": "./node_modules/@biomejs/biome/bin/biome",
+
+  // ── Files ─────────────────────────────────────────────────────────────────
+  "files.watcherExclude": {
+    "**/kernel/target/**": true,
+    "**/node_modules/**": true,
+    "**/.turbo/**": true
+  },
+  "files.exclude": {
+    "**/kernel/target": true,
+    "**/.turbo": true
+  },
+  "search.exclude": {
+    "**/kernel/target": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.turbo": true,
+    "**/kernel/gen": true
+  },
+
+  // ── Spell checker ─────────────────────────────────────────────────────────
+  "cSpell.words": [
+    "stackbox",
+    "tauri",
+    "lancedb",
+    "reqwest",
+    "rusqlite",
+    "arboard",
+    "hmac",
+    "minisign",
+    "tokio",
+    "serde",
+    "axum",
+    "walkdir",
+    "urlencoding"
+  ]
+}

@@ -4,6 +4,7 @@ import { NoGitPane }   from "./NoGitPane";
 import { ChangesTab }  from "./ChangesTab";
 import { BranchesTab } from "./BranchesTab";
 import { HistoryTab }  from "./HistoryTab";
+import { WorktreesTab } from "./WorktreesTab";
 import { useGitPanel } from "./useGitPanel";
 import type { GitPanelProps, GitTab } from "./types";
 
@@ -44,38 +45,34 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
 
       {/* ── Header ── */}
       <div style={{
-        height: 52, padding: "0 10px 0 14px", flexShrink: 0,
+        height: 44, padding: "0 8px 0 14px", flexShrink: 0,
         borderBottom: `1px solid ${C.border}`,
         display: "flex", alignItems: "center", gap: 6,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: 16, color: C.t2, userSelect: "none", flexShrink: 0, lineHeight: 1 }}>⎇</span>
-          <span style={{ fontSize: 14, fontFamily: MONO, color: C.t1, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ fontSize: 14, color: C.t2, userSelect: "none", flexShrink: 0, lineHeight: 1 }}>⎇</span>
+          <span style={{ fontSize: 13, fontFamily: MONO, color: C.t1, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {branch || "main"}
           </span>
         </div>
 
-        {/* Active agent branch badge */}
         {git.agentBranches.filter(ab => ab.status === "working").length > 0 && (
-          <span style={{ fontSize: 10, fontFamily: MONO, color: "#4ade80", background: "#4ade8022", borderRadius: 4, padding: "2px 7px", flexShrink: 0 }}>
-            {git.agentBranches.filter(ab => ab.status === "working").length} agent{git.agentBranches.filter(ab => ab.status === "working").length > 1 ? "s" : ""} working
+          <span style={{ fontSize: 10, fontFamily: MONO, color: "#4ade80", background: "#4ade8022", borderRadius: 3, padding: "2px 6px", flexShrink: 0 }}>
+            {git.agentBranches.filter(ab => ab.status === "working").length} working
           </span>
         )}
-
         {git.conflicts.length > 0 && (
-          <span style={{ fontSize: 10, fontFamily: MONO, color: C.amber, background: C.amberBg, borderRadius: 4, padding: "2px 7px" }}>
+          <span style={{ fontSize: 10, fontFamily: MONO, color: C.amber, background: C.amberBg, borderRadius: 3, padding: "2px 6px" }}>
             ⚡{git.conflicts.length}
           </span>
         )}
 
-        {/* Tab nav */}
-        <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          <NavTab active={tab === "changes"} onClick={() => setTab("changes")} label="Changes" />
+        <div style={{ display: "flex", alignItems: "center", gap: 0, flexShrink: 0 }}>
           <button
             title="Branches & History"
             onClick={() => setTab(tab === "source" ? "changes" : "source")}
             style={{
-              width: 32, height: 32, borderRadius: tab === "source" ? 9999 : 7, border: "none",
+              width: 28, height: 28, borderRadius: 4, border: "none",
               background: tab === "source" ? C.bg4 : "transparent",
               color: tab === "source" ? C.t0 : C.t3,
               cursor: "pointer", transition: "all .15s",
@@ -85,14 +82,29 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
             onMouseLeave={e => { if (tab !== "source") (e.currentTarget as HTMLElement).style.color = C.t3; }}>
             <SourceIcon />
           </button>
-        </div>
 
-        <button onClick={onClose}
-          style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", color: C.t3, borderRadius: 7, cursor: "pointer", flexShrink: 0 }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.t1; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.t3; }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
+          <button
+            title="Worktrees"
+            onClick={() => setTab(tab === "worktrees" ? "changes" : "worktrees")}
+            style={{
+              width: 28, height: 28, borderRadius: 4, border: "none",
+              background: tab === "worktrees" ? C.bg4 : "transparent",
+              color: tab === "worktrees" ? C.t0 : C.t3,
+              cursor: "pointer", transition: "all .15s",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+            onMouseEnter={e => { if (tab !== "worktrees") (e.currentTarget as HTMLElement).style.color = C.t1; }}
+            onMouseLeave={e => { if (tab !== "worktrees") (e.currentTarget as HTMLElement).style.color = C.t3; }}>
+            <WorktreeIcon />
+          </button>
+
+            <button onClick={onClose}
+            style={{ width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", color: C.t3, borderRadius: 4, cursor: "pointer", flexShrink: 0 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.t1; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.t3; }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
       </div>
 
       {/* ── Notice ── */}
@@ -123,6 +135,14 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
           onStage={git.stageFile}
           onUnstage={git.unstageFile}
           onDiscard={git.discardFile}
+        />
+      )}
+
+      {tab === "worktrees" && (
+        <WorktreesTab
+          worktrees={git.worktrees}
+          onCreateWorktree={git.createWorktree}
+          onDiff={git.diffWorktrees}
         />
       )}
 
@@ -161,10 +181,10 @@ export function GitPanel({ workspaceCwd, workspaceId, branch, onClose, onFileCli
                 onSwitch={b => git.switchBranch(b).catch(e => git.showNotice(String(e), false))}
                 onCreate={b => git.createBranch(b).catch(e => { git.showNotice(String(e), false); throw e; })}
                 onRename={(o, n) => git.renameBranch(o, n).catch(e => git.showNotice(String(e), false))}
-                onMerge={b => git.mergeBranch(b).catch(e => { git.showNotice(String(e), false); throw e; })}
+                onMerge={async b => { try { await git.mergeBranch(b); } catch (e) { git.showNotice(String(e), false); throw e; } }}
                 onDelete={(b, f) => git.deleteBranch(b, f).catch(e => git.showNotice(String(e), false))}
                 onBranchLog={git.branchLog}
-                onBranchStatus={git.branchStatus}
+                onBranchStatus={(b: string) => git.branchStatus(b)}
               />
             )}
             {sourceTab === "history" && (
@@ -185,7 +205,7 @@ function NavTab({ active, onClick, label }: { active: boolean; onClick: () => vo
   return (
     <button onClick={onClick}
       style={{
-        height: 32, padding: "0 12px", borderRadius: 7, border: "none",
+        height: 32, padding: "0 12px", borderRadius: 4, border: "none",
         background: active ? C.bg4 : "transparent",
         color: active ? C.t0 : C.t3,
         fontSize: 12, fontFamily: SANS, fontWeight: active ? 500 : 400,
@@ -195,6 +215,19 @@ function NavTab({ active, onClick, label }: { active: boolean; onClick: () => vo
       onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.color = C.t3; }}>
       {label}
     </button>
+  );
+}
+
+function WorktreeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="8" height="6" rx="1.5"/>
+      <rect x="14" y="3" width="8" height="6" rx="1.5"/>
+      <rect x="7" y="15" width="10" height="6" rx="1.5"/>
+      <line x1="6" y1="9" x2="6" y2="12"/><line x1="18" y1="9" x2="18" y2="12"/>
+      <line x1="6" y1="12" x2="18" y2="12"/>
+      <line x1="12" y1="12" x2="12" y2="15"/>
+    </svg>
   );
 }
 

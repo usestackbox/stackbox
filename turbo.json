@@ -1,0 +1,49 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "render/**",
+        "kernel/src/**",
+        "kernel/Cargo.toml",
+        "kernel/tauri.conf.json",
+        "package.json",
+        "tsconfig.json",
+        "vite.config.ts"
+      ],
+      "outputs": ["dist/**", "kernel/target/release/bundle/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "inputs": [
+        "render/**/*.ts",
+        "render/**/*.tsx",
+        "biome.json"
+      ],
+      "outputs": []
+    },
+    "typecheck": {
+      "inputs": [
+        "render/**/*.ts",
+        "render/**/*.tsx",
+        "tsconfig.json"
+      ],
+      "outputs": []
+    },
+    "test": {
+      "inputs": [
+        "render/**",
+        "kernel/src/**"
+      ],
+      "outputs": ["coverage/**"]
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

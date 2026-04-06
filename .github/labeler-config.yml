@@ -1,0 +1,32 @@
+# .github/labeler-config.yml
+# Maps changed file paths to PR labels.
+
+kernel:
+  - changed-files:
+    - any-glob-to-any-file: "kernel/**"
+
+frontend:
+  - changed-files:
+    - any-glob-to-any-file: "render/**"
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file: ".github/**"
+
+docs:
+  - changed-files:
+    - any-glob-to-any-file:
+      - "*.md"
+      - "docs/**"
+
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file:
+      - "package.json"
+      - "bun.lock"
+      - "kernel/Cargo.toml"
+      - "kernel/Cargo.lock"
+
+scripts:
+  - changed-files:
+    - any-glob-to-any-file: "scripts/**"

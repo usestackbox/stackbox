@@ -1,42 +1,36 @@
-# EXAMPLE USAGE:
-#
-#   Refer for explanation to following link:
-#   https://lefthook.dev/configuration/
-#
-# pre-push:
-#   jobs:
-#     - name: packages audit
-#       tags:
-#         - frontend
-#         - security
-#       run: yarn audit
-#
-#     - name: gems audit
-#       tags:
-#         - backend
-#         - security
-#       run: bundle audit
-#
-# pre-commit:
-#   parallel: true
-#   jobs:
-#     - run: yarn eslint {staged_files}
-#       glob: "*.{js,ts,jsx,tsx}"
-#
-#     - name: rubocop
-#       glob: "*.rb"
-#       exclude:
-#         - config/application.rb
-#         - config/routes.rb
-#       run: bundle exec rubocop --force-exclusion {all_files}
-#
-#     - name: govet
-#       files: git ls-files -m
-#       glob: "*.go"
-#       run: go vet {files}
-#
-#     - script: "hello.js"
-#       runner: node
-#
-#     - script: "hello.go"
-#       runner: go run
+# lefthook.yml — git hook runner config for Stackbox
+# Docs: https://lefthook.dev/configuration/
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome lint + format check
+      glob: "*.{ts,tsx,js,jsx,json}"
+      run: bun biome check --no-errors-on-unmatched {staged_files}
+
+    - name: typescript typecheck
+      glob: "*.{ts,tsx}"
+      run: bun run typecheck
+
+    - name: no debug console.log
+      glob: "render/**/*.{ts,tsx}"
+      run: |
+        if grep -rn "console\.log" {staged_files} 2>/dev/null; then
+          echo "ERROR: console.log found in staged files. Use the notifications system instead."
+          exit 1
+        fi
+
+pre-push:
+  parallel: false
+  jobs:
+    - name: cargo check
+      root: "kernel/"
+      run: cargo check --all-targets
+
+    - name: cargo clippy
+      root: "kernel/"
+      run: cargo clippy --all-targets -- -D warnings
+
+    - name: cargo fmt check
+      root: "kernel/"
+      run: cargo fmt --check

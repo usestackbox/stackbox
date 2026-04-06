@@ -15,6 +15,27 @@
 use std::path::Path;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Path helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Expand a leading `~` to the real home directory.
+/// On Windows Tauri passes `~/foo` literally; `std::process::Command::current_dir`
+/// and `Path::exists()` do NOT expand the shell alias — this must be done manually.
+pub fn expand_home(path: &str) -> String {
+    if path == "~" {
+        return dirs::home_dir()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string());
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest).to_string_lossy().to_string();
+        }
+    }
+    path.to_string()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Git directory helpers
 // ─────────────────────────────────────────────────────────────────────────────
 

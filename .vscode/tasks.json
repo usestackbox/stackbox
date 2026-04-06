@@ -1,0 +1,113 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "tauri: dev",
+      "type": "shell",
+      "command": "bun tauri dev",
+      "group": "build",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "tauri",
+        "pattern": {
+          "regexp": "^error\\[(.*)\\]: (.*)$",
+          "code": 1,
+          "message": 2
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Compiling",
+          "endsPattern": "Finished|error"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tauri"
+      }
+    },
+    {
+      "label": "tauri: build kernel (debug)",
+      "type": "shell",
+      "command": "cargo build --manifest-path kernel/Cargo.toml",
+      "group": "build",
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "tauri: build (release)",
+      "type": "shell",
+      "command": "bun tauri build",
+      "group": "build",
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "bun: lint",
+      "type": "shell",
+      "command": "bun run lint",
+      "group": "test",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "bun: typecheck",
+      "type": "shell",
+      "command": "bun run typecheck",
+      "group": "test",
+      "problemMatcher": ["$tsc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "cargo: test",
+      "type": "shell",
+      "command": "cargo test",
+      "options": {
+        "cwd": "${workspaceFolder}/kernel"
+      },
+      "group": "test",
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "cargo: clippy",
+      "type": "shell",
+      "command": "cargo clippy --all-targets -- -D warnings",
+      "options": {
+        "cwd": "${workspaceFolder}/kernel"
+      },
+      "group": "test",
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "scripts: clean",
+      "type": "shell",
+      "command": "bash scripts/clean.sh",
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}

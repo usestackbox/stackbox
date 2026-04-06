@@ -26,6 +26,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(state::AppState {
             sessions:          Arc::new(Mutex::new(HashMap::new())),
             db:                db::open().expect("failed to open stackbox db"),
@@ -82,10 +83,13 @@ pub fn run() {
         })
         .register_uri_scheme_protocol("proxy", |_ctx, req| proxy::handle(req))
         .invoke_handler(tauri::generate_handler![
+            // ── PTY ─────────────────────────
             commands::pty::pty_spawn,
             commands::pty::pty_write,
             commands::pty::pty_resize,
             commands::pty::pty_kill,
+            commands::pty::get_session_worktree_path,
+
             commands::watcher::watch_runbox,
             commands::watcher::unwatch_runbox,
             // ── Memory V1/V2 ─────────────────────────────────────────────────
@@ -146,6 +150,7 @@ pub fn run() {
             git::commands::git_watch_start,
             git::commands::git_watch_stop,
             git::commands::git_init,
+            git::commands::git_is_repo,
             git::commands::git_stage_file,
             git::commands::git_unstage_file,
             git::commands::git_discard_file,

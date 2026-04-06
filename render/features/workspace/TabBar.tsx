@@ -1,7 +1,7 @@
 // features/workspace/TabBar.tsx
 import { useCallback, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { C, FS, MONO, SANS } from "../../design";
+import { C, FS, MONO } from "../../design";
 import { StripIcon } from "../../ui";
 import { TermTab } from "./TermTab";
 import { FileTab } from "./FileTab";
@@ -101,18 +101,12 @@ export function TabBar({
       <div style={{ display: "flex", alignItems: "stretch", flex: 1, padding: "0 6px", gap: 3 }}>
         {/* Brand + view toggles */}
         <div style={{
-          display: "flex", alignItems: "center", gap: 5, flexShrink: 0,
+          display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
           paddingLeft: 6, paddingRight: 8, alignSelf: "center",
           borderRight: `1px solid rgba(255,255,255,.08)`, marginRight: 2,
         }}>
-          <span style={{
-            fontSize: FS.base, fontWeight: 500, color: "rgb(126, 121, 121)",
-            fontFamily: SANS, letterSpacing: "0.06em",
-            userSelect: "none", paddingLeft: 2, lineHeight: "1",
-          }}>Stackbox</span>
-
-          <StripIcon title="Workspace" active={!sidebarCollapsed && !fileTreeOpen} onClick={onSidebarToggle} size={28}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+          <StripIcon title="Workspace" active={!sidebarCollapsed && !fileTreeOpen} onClick={onSidebarToggle} size={32}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" opacity="0.5"/>
               <path d="M3 5a2 2 0 0 1 2-2h4v18H5a2 2 0 0 1-2-2V5z"
@@ -121,9 +115,9 @@ export function TabBar({
             </svg>
           </StripIcon>
 
-          <StripIcon title="Code" active={!sidebarCollapsed && fileTreeOpen} onClick={onFileTreeToggle} size={28}>
+          <StripIcon title="Code" active={!sidebarCollapsed && fileTreeOpen} onClick={onFileTreeToggle} size={32}>
             <span style={{
-              fontSize: 12, fontWeight: 700, letterSpacing: "-0.03em",
+              fontSize: 13, fontWeight: 700, letterSpacing: "-0.03em",
               fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
               lineHeight: 1, userSelect: "none",
               color: "currentColor",
@@ -134,7 +128,7 @@ export function TabBar({
         {/* Terminal tabs */}
         <div style={{
           display: "flex", alignItems: "stretch", gap: 0,
-          overflowX: "auto", minWidth: 0, maxWidth: "55%",
+          overflowX: "auto", minWidth: 0, maxWidth: "65%",
           scrollbarWidth: "none",
         }}>
           {wins.map((w, idx) => (
@@ -175,7 +169,6 @@ export function TabBar({
         {/* File tabs */}
         {fileTabs.length > 0 && (
           <>
-            <div style={{ width: 1, height: 20, background: "rgba(255,255,255,.1)", flexShrink: 0, margin: "0 4px" }} />
             <div style={{ display: "flex", alignItems: "stretch", gap: 0, overflowX: "auto", minWidth: 0, flex: 1, scrollbarWidth: "none" }}>
               {fileTabs.map(tab => (
                 <FileTab

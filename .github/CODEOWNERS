@@ -1,0 +1,19 @@
+# CODEOWNERS — GitHub enforces review requirements based on changed paths.
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default — everything not matched below
+*                          @your-org/stackbox-core
+
+# Rust kernel
+/kernel/                   @your-org/stackbox-rust
+
+# React frontend
+/render/                   @your-org/stackbox-frontend
+
+# CI / release workflows
+/.github/workflows/        @your-org/stackbox-core
+
+# Docs
+/CHANGELOG.md              @your-org/stackbox-core
+/ARCHITECTURE.md           @your-org/stackbox-core
+/CONTRIBUTING.md           @your-org/stackbox-core

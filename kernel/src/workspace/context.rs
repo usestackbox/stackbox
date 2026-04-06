@@ -1,5 +1,5 @@
 // src-tauri/src/workspace/context.rs
-// Supercontext V3 — 4 tools: memory_context / remember / session_log / session_summary
+// Supercontext V3 — git worktree per agent, no memory system
 //
 // Stackbox context system — files written to every worktree at session start:
 //
@@ -855,9 +855,7 @@ fn diff_stat_vs_main(cwd: &str, branch: &str) -> String {
 //   1. LOCKED rules only at startup — max 5 rules, zero noise
 //   2. Git status inline — agent needs this to know where it is
 //   3. Full snapshot deferred to .stackbox/snapshot.md — cat lazily
-//   4. memory_context(task=...) called ONCE per NEW task only
 //   5. Playbooks referenced by path, never inlined
-//   6. remember() + session_summary() only at task completion
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn build_agent_context(
@@ -892,24 +890,11 @@ Full workspace snapshot (diff, file tree, open PRs, other agents):
 ---
 
 ## Starting a task
-1. **NEW task** → `memory_context(task="<what you are doing")` — loads relevant context
-2. **Continuing** previous task → skip memory_context, just work
-3. **Coding >2 files** → `cat .stackbox/commands/plan.md` first
-4. **Before PR** → `cat .stackbox/commands/ci-check.md` then `cat .stackbox/commands/pr.md`
+1. **Coding >2 files** → `cat .stackbox/commands/plan.md` first
+2. **Before PR** → `cat .stackbox/commands/ci-check.md` then `cat .stackbox/commands/pr.md`
 
 ## Finishing a task
-```
-session_summary(text="What you did. Port {pane_port}. Branch {branch}. Next steps.")
-remember(content="key=value", level="PREFERRED")   ← 1-2 key facts only
-```
-Also update `.stackbox/roadmap.md` to mark completed milestones.
-
-## Logging (append as you work — also mirror to .stackbox/log/{branch_file}.md)
-```
-session_log(entry="[step] what you did")
-session_log(entry="[done] result — port {pane_port}")
-session_log(entry="[blocked] reason")
-```
+Update `.stackbox/roadmap.md` to mark completed milestones.
 
 ---
 
@@ -930,7 +915,6 @@ session_log(entry="[blocked] reason")
         pane_port       = pane_port,
         cwd             = cwd,
         branch          = branch,
-        branch_file     = branch_file,
         status_snapshot = status_snapshot,
     )
 }
@@ -1057,7 +1041,6 @@ pub async fn build(
 
     // Startup: LOCKED rules only — ~30 tokens.
     // Full memory (SESSION, PREFERRED, TEMPORARY) loaded on-demand via
-    // memory_context(task="...") when the agent starts an actual task.
     let locked_block = if *agent != AgentKind::Shell {
         crate::agent::injector::build_locked_only(runbox_id).await
     } else {

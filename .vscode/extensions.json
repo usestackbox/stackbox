@@ -1,0 +1,18 @@
+{
+  "recommendations": [
+    // Rust
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "vadimcn.vscode-lldb",
+    // Frontend
+    "biomejs.biome",
+    "bradlc.vscode-tailwindcss",
+    // Tauri
+    "tauri-apps.tauri-vscode",
+    // General DX
+    "usernamehw.errorlens",
+    "streetsidesoftware.code-spell-checker",
+    "christian-kohler.path-intellisense",
+    "editorconfig.editorconfig"
+  ]
+}

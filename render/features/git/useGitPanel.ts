@@ -69,14 +69,18 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
   // ── Detect git repo ───────────────────────────────────────────────────────────
   useEffect(() => {
     const detect = async () => {
+      // Primary check: .git directory existence. Reliable even on fresh repos
+      // with no commits — git_current_branch fails on an unborn HEAD.
+      try {
+        const isRepo = await invoke<boolean>("git_is_repo", { cwd: workspaceCwd });
+        if (isRepo) { setIsGitRepo(true); return; }
+      } catch { /* fall through */ }
+      // Secondary: branch name (needs at least one commit)
       try {
         const b = await invoke<string>("git_current_branch", { cwd: workspaceCwd });
         if (b?.trim().length > 0) { setIsGitRepo(true); return; }
       } catch { /* not git */ }
-      try {
-        const wts = await invoke<any[]>("git_worktree_list", { cwd: workspaceCwd });
-        if (Array.isArray(wts) && wts.length > 0) { setIsGitRepo(true); return; }
-      } catch { /* not git */ }
+      // Last resort: try to init (idempotent — safe to call on existing repos)
       try {
         await invoke("git_init", { cwd: workspaceCwd });
         setIsGitRepo(true);

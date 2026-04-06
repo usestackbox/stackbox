@@ -13,7 +13,7 @@ use super::{
     diff::{diff_for_commit, diff_live, clear_cache_for, LiveDiffFile},
     log::{log_for_runbox, log_range, GitCommit},
     repo::{
-        delete_branch, ensure_git_repo, ensure_worktree, git, git_dir_opt,
+        delete_branch, ensure_git_repo, ensure_worktree, expand_home, git, git_dir_opt,
         has_git, init_real_repo, list_worktrees, remove_worktree_only,
         WorktreeEntry,
     },
@@ -53,6 +53,7 @@ pub async fn git_ensure(
     agent_kind: Option<String>,
     state:      tauri::State<'_, AppState>,
 ) -> Result<GitEnsureResult, String> {
+    let cwd      = expand_home(&cwd);
     let is_new   = !has_git(&cwd, &runbox_id);
     ensure_git_repo(&cwd, &runbox_id)?;
 
@@ -279,9 +280,19 @@ pub async fn git_branch_status(
 // Basic git commands (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Cheap check — just tests whether a .git directory (or file, for worktrees) exists.
+/// Does NOT require any commits, so it reliably detects a freshly `git init`-ed repo
+/// unlike `git_current_branch` which fails on an unborn HEAD.
+#[tauri::command]
+pub async fn git_is_repo(cwd: String) -> Result<bool, String> {
+    let real = expand_home(&cwd);
+    let git_path = std::path::Path::new(&real).join(".git");
+    Ok(git_path.exists())
+}
+
 #[tauri::command]
 pub async fn git_init(cwd: String) -> Result<(), String> {
-    init_real_repo(&cwd)
+    init_real_repo(&expand_home(&cwd))
 }
 
 #[tauri::command]
@@ -309,6 +320,7 @@ pub async fn git_diff_live(cwd: String, runbox_id: String) -> Result<Vec<LiveDif
 pub async fn git_worktree_create(
     cwd: String, branch: String, wt_name: String,
 ) -> Result<String, String> {
+    let cwd = expand_home(&cwd);
     let cwd_path = std::path::Path::new(&cwd);
 
     if !cwd_path.join(".git").exists() {
@@ -409,9 +421,10 @@ pub struct FullWorktreeEntry {
 
 #[tauri::command]
 pub async fn git_current_branch(cwd: String) -> Result<String, String> {
+    let real = expand_home(&cwd);
     let out = std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(&cwd)
+        .current_dir(&real)
         .output()
         .map_err(|e| e.to_string())?;
 

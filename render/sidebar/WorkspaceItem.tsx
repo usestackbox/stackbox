@@ -43,8 +43,14 @@ export function WorkspaceItem({
     setRenaming(false);
   };
 
-  const rawDir = workspace.cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? workspace.cwd;
-  const dirName = `~/${rawDir}`;
+  // Strip leading ~/ before extracting the last segment, then re-apply ~/
+  // This prevents "~/foo" → rawDir="foo" → dirName="~/foo" looking like a duplicate
+  // when the workspace name is already "foo".
+  const normalized = workspace.cwd.replace(/\\/g, "/").replace(/^~\//, "");
+  const rawDir  = normalized.split("/").filter(Boolean).pop() ?? normalized;
+  const dirName = `~/${normalized}`;
+  // Hide the path row when it adds no information (name already equals last segment)
+  const showPath = rawDir.toLowerCase() !== workspace.name.toLowerCase();
 
   const bg = isActive
     ? "rgba(255,255,255,.07)"
@@ -108,7 +114,7 @@ export function WorkspaceItem({
             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             flex: 1, minWidth: 0,
           }}>
-            {dirName}
+            {showPath ? dirName : normalized.includes("/") ? dirName : "~/"}
           </span>
           {lastUsed !== undefined && lastUsed > 0 && (
             <span style={{

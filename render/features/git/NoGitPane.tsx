@@ -13,15 +13,19 @@ export function NoGitPane({ cwd, onClose, onInitDone }: Props) {
 
   useEffect(() => {
     const t = setInterval(async () => {
+      // Primary check: .git directory exists (works even with no commits yet).
+      // git_current_branch fails on unborn HEAD (fresh git init, no commits),
+      // so we can't rely on it as the first check.
+      try {
+        const isRepo = await invoke<boolean>("git_is_repo", { cwd });
+        if (isRepo) { clearInterval(t); onInitDone(); return; }
+      } catch { /* fall through */ }
+      // Fallback: branch name (works once there's at least one commit)
       try {
         const b = await invoke<string>("git_current_branch", { cwd });
         if (b?.trim().length > 0) { clearInterval(t); onInitDone(); return; }
       } catch { /* not yet */ }
-      try {
-        const wts = await invoke<any[]>("git_worktree_list", { cwd });
-        if (Array.isArray(wts) && wts.length > 0) { clearInterval(t); onInitDone(); return; }
-      } catch { /* not yet */ }
-    }, 2000);
+    }, 1000);
     return () => clearInterval(t);
   }, [cwd, onInitDone]);
 
