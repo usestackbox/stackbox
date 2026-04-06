@@ -1,5 +1,6 @@
 // src-tauri/src/db/mod.rs
 
+pub mod branches;
 pub mod events;
 pub mod layout;
 pub mod runboxes;

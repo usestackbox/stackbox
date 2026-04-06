@@ -43,7 +43,7 @@ pub async fn pty_spawn(
     //   • Two Claude sessions in the same workspace → same worktree (shared)
     let _worktree_path: Option<String> = if has_git(&real_cwd, &runbox_id) {
         let _ = ensure_git_repo(&real_cwd, &runbox_id);
-        let wt = ensure_worktree(&real_cwd, &runbox_id, agent_kind_str);
+        let wt = ensure_worktree(&real_cwd, &runbox_id, &session_id, agent_kind_str);
 
         if let Some(ref wt) = wt {
             let _ = crate::db::runboxes::runbox_set_worktree(

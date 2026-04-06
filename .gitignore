@@ -25,3 +25,4 @@ Cargo.lock -diff
 *.otf  binary
 *.woff binary
 *.woff2 binary
+.worktrees/

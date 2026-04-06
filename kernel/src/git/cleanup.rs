@@ -4,10 +4,8 @@
 // Any that aren't in agent_branches as an active worktree are orphans
 // from a crash — prune them.
 //
-// FIX vs old code:
-//   - Scans {cwd}/.worktrees/ instead of parent dir (worktrees moved inside project)
-//   - Reads from agent_branches table instead of agent_worktrees
-//   - Also handles legacy sibling-style orphans for one-time cleanup
+// FIX: Borrow checker — conn/stmt lifetimes fixed by collecting results
+//   into owned Vec before the block ends.
 
 use crate::db::Db;
 use std::path::Path;
@@ -21,7 +19,7 @@ pub fn prune_orphan_worktrees(db: &Db) {
             Ok(s) => s,
             Err(_) => return,
         };
-        match stmt.query_map([], |row| {
+        let x = match stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -29,7 +27,8 @@ pub fn prune_orphan_worktrees(db: &Db) {
         }) {
             Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
             Err(_)     => return,
-        }
+        };
+        x
     };
 
     // Collect known active worktree paths from agent_branches
@@ -41,7 +40,8 @@ pub fn prune_orphan_worktrees(db: &Db) {
             Ok(s) => s,
             Err(_) => {
                 // Fall back to legacy table
-                let mut stmt2 = match conn.prepare(
+                let conn2 = db.read();
+                let mut stmt2 = match conn2.prepare(
                     "SELECT worktree_path FROM agent_worktrees WHERE worktree_path IS NOT NULL"
                 ) {
                     Ok(s)  => s,
@@ -55,10 +55,12 @@ pub fn prune_orphan_worktrees(db: &Db) {
                 return prune_with_known_paths(&runbox_rows, paths);
             }
         };
-        match stmt.query_map([], |row| row.get::<_, String>(0)) {
-            Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
-            Err(_)     => std::collections::HashSet::new(),
-        }
+        let x: std::collections::HashSet<String> =
+            match stmt.query_map([], |row| row.get::<_, String>(0)) {
+                Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
+                Err(_)     => std::collections::HashSet::new(),
+            };
+        x
     };
 
     prune_with_known_paths(&runbox_rows, known_wt_paths);
@@ -68,7 +70,6 @@ fn prune_with_known_paths(
     runbox_rows:    &[(String, String)],
     known_wt_paths: std::collections::HashSet<String>,
 ) {
-    // Short IDs for name-based matching
     let known_short_ids: std::collections::HashSet<String> = runbox_rows
         .iter()
         .map(|(id, _)| id[..id.len().min(8)].to_string())
@@ -94,7 +95,6 @@ fn prune_with_known_paths(
 
                     if known_wt_paths.contains(&path_str) { continue; }
 
-                    // suffix = "{runbox_short}-{session_short}-{slug}"
                     let suffix = &name["stackbox-wt-".len()..];
                     if known_short_ids.iter().any(|id| suffix.starts_with(id.as_str())) {
                         continue;

@@ -2,10 +2,9 @@
 //
 // MCP tool definitions exposed to agents.
 //
-// FIX (mcp-agent): dispatch() now accepts agent_name so that future memory-
-//   writing tools can tag memories with the correct agent. Previously the
-//   resolved name was computed in the handler but discarded before reaching
-//   this function.
+// FIX: Removed push_pr_direct / git_push_pr (PR workflow replaced by local
+//   branch merge). Fixed delete_worktree → remove_worktree_only.
+//   ensure_worktree now requires 4 args (added session_id).
 
 use serde_json::{json, Value};
 use crate::{db, git, state::AppState};
@@ -19,6 +18,7 @@ pub fn tool_definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "runbox_id":  { "type": "string", "description": "Your runbox ID from STACKBOX_RUNBOX_ID env var" },
+                    "session_id": { "type": "string", "description": "Your session ID from STACKBOX_SESSION_ID env var" },
                     "agent_kind": { "type": "string", "description": "Your agent type: claude-code, codex, cursor, shell" },
                     "cwd":        { "type": "string", "description": "Workspace root path from STACKBOX_CWD env var" }
                 },
@@ -49,41 +49,24 @@ pub fn tool_definitions() -> Value {
             }
         },
         {
-            "name": "git_push_pr",
-            "description": "Push your branch and open a GitHub PR to main. Call after committing. Do NOT merge the PR yourself — humans review and merge PRs.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "cwd":       { "type": "string", "description": "Workspace root path from STACKBOX_CWD env var" },
-                    "runbox_id": { "type": "string" },
-                    "title":     { "type": "string", "description": "PR title" },
-                    "body":      { "type": "string", "description": "PR description" }
-                },
-                "required": ["cwd", "runbox_id"]
-            }
-        },
-        {
             "name": "git_worktree_delete",
-            "description": "Delete your worktree and branch after PR is merged. Only call this after you receive the PR MERGED notification — do NOT merge the PR yourself. Call with force=true only if the task is cancelled.",
+            "description": "Remove your worktree directory. The branch is preserved so humans can merge it later.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "cwd":        { "type": "string" },
-                    "runbox_id":  { "type": "string" },
-                    "agent_kind": { "type": "string" },
-                    "force":      { "type": "boolean", "description": "true = force delete (PR cancelled). false = safe delete (PR merged, default)" }
+                    "worktree_path": { "type": "string", "description": "Absolute path to your worktree" }
                 },
-                "required": ["cwd", "runbox_id", "agent_kind"]
+                "required": ["worktree_path"]
             }
         },
         {
             "name": "set_agent_status",
-            "description": "Update your task status. Values: working | pr_open | changes_requested | merged | cancelled",
+            "description": "Update your task status. Values: working | done | merged | cancelled",
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "runbox_id": { "type": "string" },
-                    "status":    { "type": "string", "enum": ["working", "pr_open", "changes_requested", "merged", "cancelled"] }
+                    "status":    { "type": "string", "enum": ["working", "done", "merged", "cancelled"] }
                 },
                 "required": ["runbox_id", "status"]
             }
@@ -94,26 +77,35 @@ pub fn tool_definitions() -> Value {
 // ── tool dispatcher ───────────────────────────────────────────────────────────
 
 pub async fn dispatch(
-    tool_name:  &str,
-    input:      &Value,
-    state:      &AppState,
-    db:         &crate::db::Db,
-    _agent_name: &str,   // FIX: was discarded in handler; now threaded through
+    tool_name:   &str,
+    input:       &Value,
+    state:       &AppState,
+    _db:         &crate::db::Db,
+    _agent_name: &str,
 ) -> Result<Value, String> {
     match tool_name {
         "git_ensure" => {
             let cwd        = str_field(input, "cwd")?;
             let runbox_id  = str_field(input, "runbox_id")?;
             let agent_kind = input["agent_kind"].as_str().unwrap_or("shell");
+            let session_id = input["session_id"].as_str().unwrap_or(&runbox_id).to_string();
 
             git::repo::ensure_git_repo(&cwd, &runbox_id)?;
-            let wt = git::repo::ensure_worktree(&cwd, &runbox_id, agent_kind);
+            let wt = git::repo::ensure_worktree(&cwd, &runbox_id, &session_id, agent_kind);
 
             if let Some(ref w) = wt {
                 db::runboxes::runbox_set_worktree(
                     &state.db, &runbox_id, agent_kind,
                     Some(&w.path), Some(&w.branch),
                 ).ok();
+                let _ = db::branches::record_branch_start(
+                    &state.db,
+                    &runbox_id,
+                    &session_id,
+                    agent_kind,
+                    &w.branch,
+                    &w.path,
+                );
             }
 
             Ok(json!({
@@ -140,32 +132,9 @@ pub async fn dispatch(
             Ok(json!({ "result": result }))
         }
 
-        "git_push_pr" => {
-            let cwd       = str_field(input, "cwd")?;
-            let runbox_id = str_field(input, "runbox_id")?;
-            let title     = input["title"].as_str().map(str::to_string);
-            let body      = input["body"].as_str().map(str::to_string);
-
-            let result = git::commands::push_pr_direct(
-                &cwd, &runbox_id, title, body, None, db,
-            ).await?;
-
-            Ok(json!({
-                "pr_url": result.pr_url,
-                "branch": result.branch,
-                "pushed": result.pushed,
-            }))
-        }
-
         "git_worktree_delete" => {
-            let cwd        = str_field(input, "cwd")?;
-            let runbox_id  = str_field(input, "runbox_id")?;
-            let agent_kind = input["agent_kind"].as_str().unwrap_or("shell");
-            let force      = input["force"].as_bool().unwrap_or(false);
-
-            git::repo::delete_worktree(&cwd, &runbox_id, agent_kind, !force)?;
-            db::runboxes::runbox_delete_worktree(&state.db, &runbox_id).ok();
-
+            let worktree_path = str_field(input, "worktree_path")?;
+            git::repo::remove_worktree_only(&worktree_path);
             Ok(json!({ "deleted": true }))
         }
 

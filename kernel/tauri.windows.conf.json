@@ -1,0 +1,11 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "decorations": false,
+        "titleBarStyle": "Visible"
+      }
+    ]
+  }
+}

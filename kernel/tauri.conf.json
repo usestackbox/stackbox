@@ -19,12 +19,12 @@
         "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
-        "decorations": false,
+        "decorations": true,
         "transparent": false,
         "focus": true,
         "visible": true,
         "titleBarStyle": "Overlay",
-        "title": "Stackbox"
+        "title": ""
       }
     ],
     "security": {

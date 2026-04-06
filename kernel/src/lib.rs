@@ -1,5 +1,6 @@
 // src/lib.rs
 
+#![allow(unused, dead_code)]
 mod agent;
 mod browser;
 mod conflict;
@@ -128,33 +129,32 @@ pub fn run() {
             // ── Git ──────────────────────────────────────────────────────────
             git::commands::git_ensure,
             git::commands::git_agent_worktree,
-            git::commands::git_push_pr,
-            git::commands::git_pull_merged,
+            git::commands::git_agent_branches,
+            git::commands::git_merge_branch,
+            git::commands::git_delete_branch,
+            git::commands::git_branch_log,
+            git::commands::git_branch_status,
             git::commands::git_log_for_runbox,
             git::commands::git_diff_for_commit,
             git::commands::git_diff_live,
             git::commands::git_worktree_create,
             git::commands::git_worktree_remove,
+            git::commands::git_worktree_list,
+            git::commands::git_worktree_list_stackbox,
             git::commands::git_current_branch,
             git::commands::git_stage_and_commit,
-            git::commands::git_worktree_list,
             git::commands::git_watch_start,
             git::commands::git_watch_stop,
-            git::commands::git_push,
             git::commands::git_init,
             git::commands::git_stage_file,
             git::commands::git_unstage_file,
+            git::commands::git_discard_file,
             git::commands::git_conflicts,
             git::commands::git_branches,
             git::commands::git_checkout,
             git::commands::git_rename_branch,
             git::commands::git_diff_between_worktrees,
             git::commands::git_commit,
-            git::commands::git_worktree_delete,
-            git::commands::git_worktree_list_stackbox,
-            git::commands::git_discard_file,     // NEW
-            git::commands::git_pr_view,          // NEW
-            git::commands::git_pr_merge,         // NEW
             // ── Conflict ─────────────────────────────────────────────────────
             conflict::conflict_request_lock,
             conflict::conflict_release_lock,
