@@ -46,23 +46,23 @@ impl AgentKind {
 
     pub fn display_name(&self) -> &'static str {
         match self {
-            Self::ClaudeCode   => "Claude Code",
-            Self::Codex        => "OpenAI Codex",
-            Self::CursorAgent  => "Cursor Agent",
-            Self::GeminiCli    => "Gemini",
+            Self::ClaudeCode => "Claude Code",
+            Self::Codex => "OpenAI Codex",
+            Self::CursorAgent => "Cursor Agent",
+            Self::GeminiCli => "Gemini",
             Self::GitHubCopilot => "GitHub Copilot",
-            Self::Shell        => "Shell",
+            Self::Shell => "Shell",
         }
     }
 
     pub fn kind_str(&self) -> &'static str {
         match self {
-            Self::ClaudeCode    => "claude",
-            Self::Codex         => "codex",
-            Self::CursorAgent   => "cursor",
-            Self::GeminiCli     => "gemini",
+            Self::ClaudeCode => "claude",
+            Self::Codex => "codex",
+            Self::CursorAgent => "cursor",
+            Self::GeminiCli => "gemini",
             Self::GitHubCopilot => "copilot",
-            Self::Shell         => "shell",
+            Self::Shell => "shell",
         }
     }
 
@@ -73,12 +73,12 @@ impl AgentKind {
     /// Copilot → sends `copilot\n` (GitHub Copilot CLI)
     pub fn launch_cmd(&self, _ctx_file: &str) -> Option<String> {
         match self {
-            Self::ClaudeCode    => Some("claude\n".to_string()),
-            Self::Codex         => Some("codex\n".to_string()),
-            Self::GeminiCli     => Some("gemini\n".to_string()),
-            Self::CursorAgent   => Some("agent\n".to_string()),
+            Self::ClaudeCode => Some("claude\n".to_string()),
+            Self::Codex => Some("codex\n".to_string()),
+            Self::GeminiCli => Some("gemini\n".to_string()),
+            Self::CursorAgent => Some("agent\n".to_string()),
             Self::GitHubCopilot => Some("copilot\n".to_string()),
-            Self::Shell         => None,
+            Self::Shell => None,
         }
     }
 

@@ -354,17 +354,10 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
     // Injected only when this runbox has a registered worktree (agent sessions).
     // Kept last so it doesn't eat budget from LOCKED/SESSION/PREFERRED.
     if used < BUDGET_TOTAL_V3 {
-        if let Some((wt_cwd, wt_name)) =
-            crate::workspace::persistent::get_session_info(runbox_id)
-        {
+        if let Some((wt_cwd, wt_name)) = crate::workspace::persistent::get_session_info(runbox_id) {
             // Read only the first 20 lines of STATE.md — enough to resume (~80 tokens)
             let state_snippet = crate::workspace::persistent::read_agent_state(&wt_cwd, &wt_name)
-                .map(|s| {
-                    s.lines()
-                        .take(20)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
+                .map(|s| s.lines().take(20).collect::<Vec<_>>().join("\n"))
                 .unwrap_or_default();
 
             let sp = crate::workspace::persistent::state_path(&wt_cwd, &wt_name);

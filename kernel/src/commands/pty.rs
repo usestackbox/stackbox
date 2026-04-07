@@ -62,13 +62,9 @@ pub async fn pty_spawn(
             eprintln!("[pty_spawn] worktree ready for {runbox_id}/{agent_kind_str}: {wt_path}");
 
             // ── Register agent in ~/.stackbox/projects/<repo>/WORKSPACE.md ──
-            if let Err(e) = persistent::register_agent(
-                &real_cwd,
-                &wt_name,
-                &wt.branch,
-                agent_kind_str,
-                wt_path,
-            ) {
+            if let Err(e) =
+                persistent::register_agent(&real_cwd, &wt_name, &wt.branch, agent_kind_str, wt_path)
+            {
                 eprintln!("[pty_spawn] persistent::register_agent: {e}");
             }
 
@@ -125,10 +121,7 @@ pub async fn pty_spawn(
     // The env var is passed through to pty::spawn via workspace_name for now;
     // in a full impl this would go into pty::SpawnOptions.
     // We log it so agents can find it via `env | grep STACKBOX`.
-    eprintln!(
-        "[pty_spawn] STACKBOX_CONTEXT={}",
-        context_file.display()
-    );
+    eprintln!("[pty_spawn] STACKBOX_CONTEXT={}", context_file.display());
 
     // ── 6. Terminal always starts in the user's real workspace folder ─────────
     let effective_cwd = real_cwd.clone();

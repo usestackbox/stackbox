@@ -218,9 +218,7 @@ pub async fn sync_to_fs(runbox_id: &str, cwd: &str, memories: &[Memory]) {
                     .collect()
             })
             .unwrap_or_default();
-        existing.sort_by_key(|e: &std::fs::DirEntry| {
-            e.metadata().and_then(|m| m.modified()).ok()
-        });
+        existing.sort_by_key(|e: &std::fs::DirEntry| e.metadata().and_then(|m| m.modified()).ok());
         if existing.len() > 10 {
             for old in &existing[..existing.len() - 10] {
                 std::fs::remove_file(old.path()).ok();

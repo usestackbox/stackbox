@@ -113,9 +113,7 @@ pub fn init_project(cwd: &str) -> Result<(), String> {
     let gp = graph_md_path(cwd);
     if !gp.exists() {
         let repo = repo_name(cwd);
-        let content = format!(
-            "# graph\nrepo: {repo}\n\n## agents\n## links\n"
-        );
+        let content = format!("# graph\nrepo: {repo}\n\n## agents\n## links\n");
         std::fs::write(&gp, content).map_err(|e| format!("write GRAPH.md: {e}"))?;
     }
 
@@ -136,8 +134,7 @@ pub fn register_agent(
 ) -> Result<(), String> {
     // Ensure agent dir exists
     let adir = agent_dir(cwd, wt_name);
-    std::fs::create_dir_all(&adir)
-        .map_err(|e| format!("mkdir agent_dir: {e}"))?;
+    std::fs::create_dir_all(&adir).map_err(|e| format!("mkdir agent_dir: {e}"))?;
 
     // Write initial STATE.md if not present (agent will fill it in)
     let sp = state_path(cwd, wt_name);
@@ -172,9 +169,7 @@ fn update_workspace_md(
     let existing = std::fs::read_to_string(&ws).unwrap_or_default();
     let now = now_iso();
 
-    let new_row = format!(
-        "{wt_name} | {branch} | {agent_kind} | {status} | {wt_path} | {now}"
-    );
+    let new_row = format!("{wt_name} | {branch} | {agent_kind} | {status} | {wt_path} | {now}");
 
     // Split at separator line
     let (header, rows_raw) = if let Some(sep) = existing.find("---\n") {
@@ -282,9 +277,7 @@ pub struct AgentEntry {
 pub fn list_active_agents(cwd: &str) -> Vec<AgentEntry> {
     let content = read_workspace(cwd);
     let sep_pos = content.find("---\n");
-    let rows_raw = sep_pos
-        .map(|p| &content[p + 4..])
-        .unwrap_or("");
+    let rows_raw = sep_pos.map(|p| &content[p + 4..]).unwrap_or("");
 
     rows_raw
         .lines()
@@ -314,9 +307,7 @@ pub fn list_active_agents(cwd: &str) -> Vec<AgentEntry> {
 pub fn list_all_agents(cwd: &str) -> Vec<AgentEntry> {
     let content = read_workspace(cwd);
     let sep_pos = content.find("---\n");
-    let rows_raw = sep_pos
-        .map(|p| &content[p + 4..])
-        .unwrap_or("");
+    let rows_raw = sep_pos.map(|p| &content[p + 4..]).unwrap_or("");
 
     rows_raw
         .lines()
@@ -352,11 +343,7 @@ pub fn build_skill(cwd: &str, wt_name: &str, wt_path: &str, branch: &str) -> Str
 
     // Read existing STATE.md if present (resume context, ~15 lines max)
     let state_block = if let Some(state) = read_agent_state(cwd, wt_name) {
-        let trimmed: String = state
-            .lines()
-            .take(20)
-            .collect::<Vec<_>>()
-            .join("\n");
+        let trimmed: String = state.lines().take(20).collect::<Vec<_>>().join("\n");
         format!("\n## Last State\n```\n{trimmed}\n```\n")
     } else {
         String::new()
@@ -479,7 +466,20 @@ fn now_iso() -> String {
     }
 
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let month_days = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31u64,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u32;
     for &md in &month_days {
         if days < md {

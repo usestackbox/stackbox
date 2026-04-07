@@ -93,7 +93,6 @@ pub fn run() {
             commands::pty::get_resumable_agents,
             commands::pty::get_agent_state,
             commands::pty::mark_agent_done,
-
             commands::watcher::watch_runbox,
             commands::watcher::unwatch_runbox,
             // ── Memory V1/V2 ─────────────────────────────────────────────────
