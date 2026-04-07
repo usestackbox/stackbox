@@ -4,7 +4,9 @@
 import { useRef } from "react";
 import { C } from "../design";
 
-interface Props { onResize: (w: number) => void; }
+interface Props {
+  onResize: (w: number) => void;
+}
 
 export function ResizeHandle({ onResize }: Props) {
   const dragging = useRef(false);
@@ -29,9 +31,15 @@ export function ResizeHandle({ onResize }: Props) {
   return (
     <div
       onMouseDown={onMouseDown}
-      style={{ width: 4, flexShrink: 0, cursor: "col-resize", background: "transparent", transition: "background .1s" }}
-      onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = C.borderMd}
-      onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}
+      style={{
+        width: 4,
+        flexShrink: 0,
+        cursor: "col-resize",
+        background: "transparent",
+        transition: "background .1s",
+      }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = C.borderMd)}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
     />
   );
 }

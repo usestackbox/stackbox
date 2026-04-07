@@ -1,18 +1,18 @@
+import type { PaneNode } from "../../types";
+import { PaneLeaf } from "./PaneLeaf";
 // features/terminal/PaneTree.tsx
 import { PaneSplit } from "./PaneSplit";
-import { PaneLeaf }  from "./PaneLeaf";
-import type { PaneNode } from "../../types";
 
 interface PaneTreeProps {
-  node:          PaneNode;
-  activePane:    string;
-  onActivate:    (id: string) => void;
-  onClose:       (id: string) => void;
-  onSplitH:      (id: string) => void;
-  onSplitV:      (id: string) => void;
-  onSlotMount:   (id: string, el: HTMLDivElement) => void;
+  node: PaneNode;
+  activePane: string;
+  onActivate: (id: string) => void;
+  onClose: (id: string) => void;
+  onSplitH: (id: string) => void;
+  onSplitV: (id: string) => void;
+  onSlotMount: (id: string, el: HTMLDivElement) => void;
   onSlotUnmount: (id: string) => void;
-  flex?:         number;
+  flex?: number;
 }
 
 export function PaneTree({ node, flex = 1, ...rest }: PaneTreeProps) {

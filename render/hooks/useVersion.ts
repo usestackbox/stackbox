@@ -1,8 +1,8 @@
 // render/hooks/useVersion.ts
 // Fetches the app version from the Tauri `get_app_version` command once on mount.
 
-import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
 
 interface VersionInfo {
   version: string;
@@ -29,7 +29,9 @@ export function useVersion(): VersionInfo {
         if (!cancelled)
           setState({ version: "0.0.0", platform: "unknown", loading: false, error: String(e) });
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return state;

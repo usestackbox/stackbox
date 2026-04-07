@@ -10,8 +10,7 @@ type Handler = (e: KeyboardEvent) => void;
 
 export type KeyMap = Record<string, Handler>;
 
-const isMac =
-  typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/.test(navigator.platform);
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/.test(navigator.platform);
 
 /** Normalise a key combo string into a canonical form. */
 function normalise(combo: string): string {
@@ -29,9 +28,9 @@ function normalise(combo: string): string {
 /** Derive a canonical string from a KeyboardEvent. */
 function eventKey(e: KeyboardEvent): string {
   const parts: string[] = [];
-  if (e.ctrlKey)  parts.push("ctrl");
-  if (e.altKey)   parts.push("alt");
-  if (e.metaKey)  parts.push("meta");
+  if (e.ctrlKey) parts.push("ctrl");
+  if (e.altKey) parts.push("alt");
+  if (e.metaKey) parts.push("meta");
   if (e.shiftKey) parts.push("shift");
   parts.push(e.key.toLowerCase());
   return parts.sort().join("+");
@@ -43,11 +42,13 @@ function eventKey(e: KeyboardEvent): string {
  */
 export function useKeyboard(
   keymap: KeyMap,
-  { allowInInput = false }: { allowInInput?: boolean } = {},
+  { allowInInput = false }: { allowInInput?: boolean } = {}
 ) {
   // Keep a ref so we don't need to re-register on every render.
   const mapRef = useRef<KeyMap>(keymap);
-  useEffect(() => { mapRef.current = keymap; });
+  useEffect(() => {
+    mapRef.current = keymap;
+  });
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -80,12 +81,18 @@ export function fmtShortcut(combo: string): string {
     .split("+")
     .map((k) => {
       switch (k.toLowerCase()) {
-        case "mod":   return isMac ? "⌘" : "Ctrl";
-        case "shift": return isMac ? "⇧" : "Shift";
-        case "alt":   return isMac ? "⌥" : "Alt";
-        case "ctrl":  return isMac ? "⌃" : "Ctrl";
-        case "meta":  return "⌘";
-        default:      return k.toUpperCase();
+        case "mod":
+          return isMac ? "⌘" : "Ctrl";
+        case "shift":
+          return isMac ? "⇧" : "Shift";
+        case "alt":
+          return isMac ? "⌥" : "Alt";
+        case "ctrl":
+          return isMac ? "⌃" : "Ctrl";
+        case "meta":
+          return "⌘";
+        default:
+          return k.toUpperCase();
       }
     })
     .join(isMac ? "" : "+");

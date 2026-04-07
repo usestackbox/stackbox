@@ -2,7 +2,7 @@
 // Generic debounce hook. Delays updating the returned value until
 // `delay` ms have elapsed without the input changing.
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export function useDebounce<T>(value: T, delay = 300): T {
   const [debounced, setDebounced] = useState<T>(value);

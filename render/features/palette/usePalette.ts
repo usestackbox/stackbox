@@ -1,13 +1,9 @@
 // render/features/palette/usePalette.ts
 // State machine for the command palette.
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  PaletteAction,
-  getActions,
-  subscribeActions,
-} from "./paletteActions";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useKeyboard } from "../../hooks/useKeyboard";
+import { type PaletteAction, getActions, subscribeActions } from "./paletteActions";
 
 /** Naive fuzzy match: every char of `needle` appears in `haystack` in order. */
 function fuzzy(haystack: string, needle: string): boolean {
@@ -35,12 +31,15 @@ function score(action: PaletteAction, q: string): number {
 }
 
 export function usePalette() {
-  const [open,    setOpen]    = useState(false);
-  const [query,   setQuery]   = useState("");
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   // Force re-render when registry changes.
   const [tick, setTick] = useState(0);
 
-  const openPalette  = useCallback(() => { setOpen(true); setQuery(""); }, []);
+  const openPalette = useCallback(() => {
+    setOpen(true);
+    setQuery("");
+  }, []);
   const closePalette = useCallback(() => setOpen(false), []);
 
   // React to registry updates.
@@ -53,7 +52,10 @@ export function usePalette() {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); closePalette(); }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePalette();
+      }
     };
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
@@ -81,7 +83,7 @@ export function usePalette() {
       // (avoids focus conflicts with opened modals).
       setTimeout(() => action.handler(), 60);
     },
-    [closePalette],
+    [closePalette]
   );
 
   return { open, query, setQuery, results, openPalette, closePalette, run };

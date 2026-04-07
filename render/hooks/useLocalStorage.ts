@@ -1,7 +1,7 @@
 // render/hooks/useLocalStorage.ts
 // Type-safe localStorage hook with SSR guard and cross-tab sync.
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 function readStorage<T>(key: string, fallback: T): T {
   try {
@@ -19,7 +19,7 @@ function readStorage<T>(key: string, fallback: T): T {
  */
 export function useLocalStorage<T>(
   key: string,
-  defaultValue: T,
+  defaultValue: T
 ): [T, (value: T | ((prev: T) => T)) => void, () => void] {
   const [state, setState] = useState<T>(() => {
     // SSR guard — localStorage is not available server-side.
@@ -30,9 +30,7 @@ export function useLocalStorage<T>(
   const set = useCallback(
     (value: T | ((prev: T) => T)) => {
       setState((prev) => {
-        const next = typeof value === "function"
-          ? (value as (prev: T) => T)(prev)
-          : value;
+        const next = typeof value === "function" ? (value as (prev: T) => T)(prev) : value;
         try {
           window.localStorage.setItem(key, JSON.stringify(next));
         } catch {
@@ -41,7 +39,7 @@ export function useLocalStorage<T>(
         return next;
       });
     },
-    [key],
+    [key]
   );
 
   const remove = useCallback(() => {

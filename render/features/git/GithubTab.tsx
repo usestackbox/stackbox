@@ -6,36 +6,36 @@
 //   git_pr_view  — fetch live PR details (title, state, checks, reviews)
 //   git_pr_merge — squash-merge + delete remote branch
 
-import { useState, useEffect, useCallback } from "react";
-import { invoke }    from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useState } from "react";
 import { C, MONO, SANS } from "../../design";
-import type { WorktreeRecord, PrDetails, PrReview, PrCheck } from "./types";
+import type { PrCheck, PrDetails, PrReview, WorktreeRecord } from "./types";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface GithubTabProps {
-  record:           WorktreeRecord | null;
-  branch:           string;
-  workspaceCwd:     string;
-  busy:             boolean;
-  onCreatePr:       (title: string, body: string) => Promise<string>;
-  onRefreshRecord:  () => void;
+  record: WorktreeRecord | null;
+  branch: string;
+  workspaceCwd: string;
+  busy: boolean;
+  onCreatePr: (title: string, body: string) => Promise<string>;
+  onRefreshRecord: () => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function statusColor(s: string): string {
   const u = s.toUpperCase();
-  if (u === "SUCCESS"  || u === "COMPLETED") return C.green;
-  if (u === "FAILURE"  || u === "ERROR")     return C.red;
-  if (u === "PENDING"  || u === "QUEUED")    return C.amber;
-  if (u === "IN_PROGRESS")                   return C.blue;
+  if (u === "SUCCESS" || u === "COMPLETED") return C.green;
+  if (u === "FAILURE" || u === "ERROR") return C.red;
+  if (u === "PENDING" || u === "QUEUED") return C.amber;
+  if (u === "IN_PROGRESS") return C.blue;
   return C.t3;
 }
 
 function reviewColor(s: string): string {
-  if (s === "APPROVED")           return C.green;
-  if (s === "CHANGES_REQUESTED")  return C.red;
+  if (s === "APPROVED") return C.green;
+  if (s === "CHANGES_REQUESTED") return C.red;
   return C.t3;
 }
 
@@ -48,8 +48,18 @@ function stateLabel(s: string): string {
 function Row({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
-      <span style={{ fontSize: 11, color: C.t3, fontFamily: SANS, width: 80, flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: 11, color: color ?? C.t1, fontFamily: MONO, flex: 1, wordBreak: "break-all" }}>
+      <span style={{ fontSize: 11, color: C.t3, fontFamily: SANS, width: 80, flexShrink: 0 }}>
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: 11,
+          color: color ?? C.t1,
+          fontFamily: MONO,
+          flex: 1,
+          wordBreak: "break-all",
+        }}
+      >
         {value}
       </span>
     </div>
@@ -58,12 +68,17 @@ function Row({ label, value, color }: { label: string; value: string; color?: st
 
 function Pill({ label, color }: { label: string; color: string }) {
   return (
-    <span style={{
-      fontSize: 10, fontFamily: MONO, color,
-      background: color + "1a",
-      border: `1px solid ${color}33`,
-      borderRadius: 6, padding: "2px 7px",
-    }}>
+    <span
+      style={{
+        fontSize: 10,
+        fontFamily: MONO,
+        color,
+        background: `${color}1a`,
+        border: `1px solid ${color}33`,
+        borderRadius: 6,
+        padding: "2px 7px",
+      }}
+    >
       {label}
     </span>
   );
@@ -72,14 +87,19 @@ function Pill({ label, color }: { label: string; color: string }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function GithubTab({
-  record, branch, workspaceCwd, busy, onCreatePr, onRefreshRecord,
+  record,
+  branch,
+  workspaceCwd,
+  busy,
+  onCreatePr,
+  onRefreshRecord,
 }: GithubTabProps) {
-  const [title,     setTitle]     = useState("");
-  const [body,      setBody]      = useState("");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
   const [prDetails, setPrDetails] = useState<PrDetails | null>(null);
   const [prLoading, setPrLoading] = useState(false);
-  const [merging,   setMerging]   = useState(false);
-  const [notice,    setNotice]    = useState<{ text: string; ok: boolean } | null>(null);
+  const [merging, setMerging] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
 
   const showNotice = (text: string, ok = true) => {
     setNotice({ text, ok });
@@ -90,7 +110,7 @@ export default function GithubTab({
     if (!record?.pr_url) return;
     setPrLoading(true);
     invoke<PrDetails>("git_pr_view", { cwd: workspaceCwd })
-      .then(d => setPrDetails(d))
+      .then((d) => setPrDetails(d))
       .catch(() => setPrDetails(null))
       .finally(() => setPrLoading(false));
   }, [workspaceCwd, record?.pr_url]);
@@ -100,10 +120,14 @@ export default function GithubTab({
   }, [loadPrDetails]);
 
   const handleCreate = async () => {
-    if (!title.trim()) { showNotice("Title is required.", false); return; }
+    if (!title.trim()) {
+      showNotice("Title is required.", false);
+      return;
+    }
     try {
       await onCreatePr(title.trim(), body.trim());
-      setTitle(""); setBody("");
+      setTitle("");
+      setBody("");
       showNotice("PR created!", true);
       onRefreshRecord();
       setTimeout(loadPrDetails, 1500);
@@ -130,15 +154,28 @@ export default function GithubTab({
   const noPr = !record?.pr_url;
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 14 }}>
-
+    <div
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        padding: "12px 14px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+      }}
+    >
       {notice && (
-        <div style={{
-          padding: "7px 12px", borderRadius: 8,
-          background: C.bg2,
-          border: `1px solid ${notice.ok ? C.border : C.red + "33"}`,
-          fontSize: 11, color: notice.ok ? C.t1 : C.red, fontFamily: SANS,
-        }}>
+        <div
+          style={{
+            padding: "7px 12px",
+            borderRadius: 8,
+            background: C.bg2,
+            border: `1px solid ${notice.ok ? C.border : `${C.red}33`}`,
+            fontSize: 11,
+            color: notice.ok ? C.t1 : C.red,
+            fontFamily: SANS,
+          }}
+        >
           {notice.text}
         </div>
       )}
@@ -147,19 +184,19 @@ export default function GithubTab({
       {noPr && (
         <section>
           <p style={{ margin: "0 0 10px", fontSize: 11, color: C.t3, fontFamily: SANS }}>
-            No pull request open for{" "}
-            <span style={{ color: C.t1, fontFamily: MONO }}>{branch}</span>.
+            No pull request open for <span style={{ color: C.t1, fontFamily: MONO }}>{branch}</span>
+            .
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <input
               value={title}
-              onChange={e => setTitle(e.target.value)}
+              onChange={(e) => setTitle(e.target.value)}
               placeholder="PR title"
               style={inputStyle}
             />
             <textarea
               value={body}
-              onChange={e => setBody(e.target.value)}
+              onChange={(e) => setBody(e.target.value)}
               placeholder="Description (optional)"
               rows={4}
               style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }}
@@ -180,15 +217,20 @@ export default function GithubTab({
         <>
           <section style={cardStyle}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: C.t0, fontFamily: SANS, flex: 1 }}>
+              <span
+                style={{ fontSize: 12, fontWeight: 600, color: C.t0, fontFamily: SANS, flex: 1 }}
+              >
                 {prDetails?.title ?? record.pr_url}
               </span>
               {prDetails && (
                 <Pill
                   label={stateLabel(prDetails.state)}
                   color={
-                    prDetails.state === "OPEN"   ? C.green :
-                    prDetails.state === "MERGED" ? C.blue  : C.red
+                    prDetails.state === "OPEN"
+                      ? C.green
+                      : prDetails.state === "MERGED"
+                        ? C.blue
+                        : C.red
                   }
                 />
               )}
@@ -201,8 +243,11 @@ export default function GithubTab({
                   label="Mergeable"
                   value={prDetails.mergeable}
                   color={
-                    prDetails.mergeable === "MERGEABLE"   ? C.green :
-                    prDetails.mergeable === "CONFLICTING" ? C.red   : C.t3
+                    prDetails.mergeable === "MERGEABLE"
+                      ? C.green
+                      : prDetails.mergeable === "CONFLICTING"
+                        ? C.red
+                        : C.t3
                   }
                 />
                 <div style={{ marginTop: 8 }}>
@@ -210,19 +255,32 @@ export default function GithubTab({
                     href={prDetails.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{ fontSize: 11, color: C.blue, fontFamily: MONO, textDecoration: "none" }}
+                    style={{
+                      fontSize: 11,
+                      color: C.blue,
+                      fontFamily: MONO,
+                      textDecoration: "none",
+                    }}
                   >
                     {prDetails.url}
                   </a>
                 </div>
                 {prDetails.body?.trim() && (
-                  <pre style={{
-                    marginTop: 10, padding: "8px 10px",
-                    background: C.bg0, borderRadius: 8,
-                    fontSize: 11, fontFamily: MONO, color: C.t2,
-                    whiteSpace: "pre-wrap", wordBreak: "break-word",
-                    maxHeight: 120, overflowY: "auto",
-                  }}>
+                  <pre
+                    style={{
+                      marginTop: 10,
+                      padding: "8px 10px",
+                      background: C.bg0,
+                      borderRadius: 8,
+                      fontSize: 11,
+                      fontFamily: MONO,
+                      color: C.t2,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      maxHeight: 120,
+                      overflowY: "auto",
+                    }}
+                  >
                     {prDetails.body}
                   </pre>
                 )}
@@ -230,7 +288,9 @@ export default function GithubTab({
             )}
 
             {prLoading && !prDetails && (
-              <span style={{ fontSize: 11, color: C.t3, fontFamily: SANS }}>Loading PR details…</span>
+              <span style={{ fontSize: 11, color: C.t3, fontFamily: SANS }}>
+                Loading PR details…
+              </span>
             )}
           </section>
 
@@ -238,8 +298,13 @@ export default function GithubTab({
             <section style={cardStyle}>
               <h4 style={sectionHeading}>Reviews</h4>
               {prDetails.reviews.map((r: PrReview, i: number) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
-                  <span style={{ fontSize: 11, color: C.t2, fontFamily: MONO, flex: 1 }}>{r.author}</span>
+                <div
+                  key={i}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}
+                >
+                  <span style={{ fontSize: 11, color: C.t2, fontFamily: MONO, flex: 1 }}>
+                    {r.author}
+                  </span>
                   <Pill label={stateLabel(r.state)} color={reviewColor(r.state)} />
                 </div>
               ))}
@@ -250,13 +315,29 @@ export default function GithubTab({
             <section style={cardStyle}>
               <h4 style={sectionHeading}>Checks</h4>
               {prDetails.checks.map((c: PrCheck, i: number) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
-                  <span style={{
-                    width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                    background: statusColor(c.conclusion || c.status),
-                  }} />
-                  <span style={{ fontSize: 11, color: C.t2, fontFamily: MONO, flex: 1 }}>{c.name}</span>
-                  <span style={{ fontSize: 10, color: statusColor(c.conclusion || c.status), fontFamily: MONO }}>
+                <div
+                  key={i}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}
+                >
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      flexShrink: 0,
+                      background: statusColor(c.conclusion || c.status),
+                    }}
+                  />
+                  <span style={{ fontSize: 11, color: C.t2, fontFamily: MONO, flex: 1 }}>
+                    {c.name}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: statusColor(c.conclusion || c.status),
+                      fontFamily: MONO,
+                    }}
+                  >
                     {c.conclusion || c.status}
                   </span>
                 </div>
@@ -287,7 +368,8 @@ export default function GithubTab({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const inputStyle: React.CSSProperties = {
-  width: "100%", boxSizing: "border-box",
+  width: "100%",
+  boxSizing: "border-box",
   padding: "7px 10px",
   background: C.bg0,
   border: `1px solid ${C.border}`,

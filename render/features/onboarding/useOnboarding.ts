@@ -1,28 +1,15 @@
 // render/features/onboarding/useOnboarding.ts
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 
-export type OnboardingStep =
-  | "welcome"
-  | "git-setup"
-  | "docker-check"
-  | "mcp-setup"
-  | "done";
+export type OnboardingStep = "welcome" | "git-setup" | "docker-check" | "mcp-setup" | "done";
 
-const STEPS: OnboardingStep[] = [
-  "welcome",
-  "git-setup",
-  "docker-check",
-  "mcp-setup",
-  "done",
-];
+const STEPS: OnboardingStep[] = ["welcome", "git-setup", "docker-check", "mcp-setup", "done"];
 
 const LS_COMPLETE = "stackbox:onboarding:complete";
-const LS_STEP     = "stackbox:onboarding:step";
+const LS_STEP = "stackbox:onboarding:step";
 
 export function useOnboarding() {
-  const [complete, setComplete] = useState(
-    () => localStorage.getItem(LS_COMPLETE) === "true"
-  );
+  const [complete, setComplete] = useState(() => localStorage.getItem(LS_COMPLETE) === "true");
   const [step, setStepState] = useState<OnboardingStep>(
     () => (localStorage.getItem(LS_STEP) as OnboardingStep) ?? "welcome"
   );
@@ -51,8 +38,8 @@ export function useOnboarding() {
     setStepState("welcome");
   }, []);
 
-  const stepIndex   = STEPS.indexOf(step);
-  const totalSteps  = STEPS.length - 1; // don't count "done" in progress
+  const stepIndex = STEPS.indexOf(step);
+  const totalSteps = STEPS.length - 1; // don't count "done" in progress
 
   return { complete, step, next, finish, restart, setStep, stepIndex, totalSteps };
 }

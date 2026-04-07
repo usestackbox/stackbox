@@ -3,17 +3,22 @@ import { useEffect, useRef } from "react";
 import { C, MONO } from "../../design";
 
 interface Props {
-  lineCount:   number;
-  lineHeight:  number;
-  padTop:      number;
-  padBottom:   number;
+  lineCount: number;
+  lineHeight: number;
+  padTop: number;
+  padBottom: number;
   gutterWidth: number;
-  fontSize:    number;
-  scrollRef:   React.RefObject<HTMLDivElement>;
+  fontSize: number;
+  scrollRef: React.RefObject<HTMLDivElement>;
 }
 
 export function GutterInner({
-  lineCount, lineHeight, padTop, padBottom, fontSize, scrollRef,
+  lineCount,
+  lineHeight,
+  padTop,
+  padBottom,
+  fontSize,
+  scrollRef,
 }: Props) {
   const innerRef = useRef<HTMLDivElement>(null);
 
@@ -21,8 +26,7 @@ export function GutterInner({
     const sc = scrollRef.current;
     if (!sc) return;
     const sync = () => {
-      if (innerRef.current)
-        innerRef.current.style.transform = `translateY(-${sc.scrollTop}px)`;
+      if (innerRef.current) innerRef.current.style.transform = `translateY(-${sc.scrollTop}px)`;
     };
     sc.addEventListener("scroll", sync, { passive: true });
     return () => sc.removeEventListener("scroll", sync);
@@ -37,9 +41,13 @@ export function GutterInner({
         <div
           key={i}
           style={{
-            height: lineHeight, lineHeight: `${lineHeight}px`,
-            paddingRight: 10, textAlign: "right",
-            fontSize: fontSize - 1, fontFamily: MONO, color: C.t3,
+            height: lineHeight,
+            lineHeight: `${lineHeight}px`,
+            paddingRight: 10,
+            textAlign: "right",
+            fontSize: fontSize - 1,
+            fontFamily: MONO,
+            color: C.t3,
           }}
         >
           {i + 1}

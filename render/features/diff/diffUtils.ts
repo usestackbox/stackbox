@@ -43,13 +43,14 @@ function classify(l: string): Kind {
 }
 
 export function parseDiff(diff: string): DiffLine[] {
-  let old = 0, neu = 0;
+  let old = 0;
+  let neu = 0;
   return diff.split("\n").map(raw => {
     const kind    = classify(raw);
     const content = (kind === "add" || kind === "remove") ? raw.slice(1) : raw;
     if (kind === "hunk") {
       const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (m) { old = parseInt(m[1]) - 1; neu = parseInt(m[2]) - 1; }
+      if (m) { old = Number.parseInt(m[1]) - 1; neu = Number.parseInt(m[2]) - 1; }
       return { raw, kind, content: raw, oldNum: null, newNum: null };
     }
     if (kind === "add")     { neu++; return { raw, kind, content, oldNum: null, newNum: neu }; }
@@ -86,20 +87,20 @@ export function highlightDiffLine(content: string, lang: string): string {
 export function charDiff(oldStr: string, newStr: string): { old: React.ReactNode; new: React.ReactNode } {
   let start = 0;
   while (start < oldStr.length && start < newStr.length && oldStr[start] === newStr[start]) start++;
-  let oe = oldStr.length - 1, ne = newStr.length - 1;
+  let oe = oldStr.length - 1;
+  let ne = newStr.length - 1;
   while (oe > start && ne > start && oldStr[oe] === newStr[ne]) { oe--; ne--; }
 
   return {
     old: (
       <span>
-        <span style={{ color: "#c0b0b0" }}>{oldStr.slice(0, start)}</span>
-        {oldStr.slice(start, oe + 1) && <span style={{ background: "rgba(200,60,60,.40)", color: "#e09090", borderRadius: 2, padding: "0 1px" }}>{oldStr.slice(start, oe + 1)}</span>}
+        <span style={{ color: "#c0b0b0" }}>{oldStr.slice(0, start)}</span>oldStr.slice(start, oe + 1) && <span style={{ background: "rgba(200,60,60,.40)", color: "#e09090", borderRadius: 2, padding: "0 1px" }>oldStr.slice(start, oe + 1)</span>}
         <span style={{ color: "#c0b0b0" }}>{oldStr.slice(oe + 1)}</span>
       </span>
     ),
     new: (
       <span>
-        <span style={{ color: "#c8c8c8" }}>{newStr.slice(0, start)}</span>
+        <span style={color: "#c8c8c8" }>{newStr.slice(0, start)}</span>
         {newStr.slice(start, ne + 1) && <span style={{ background: "rgba(40,140,70,.28)", color: "#aaddaa", borderRadius: 2, padding: "0 1px" }}>{newStr.slice(start, ne + 1)}</span>}
         <span style={{ color: "#c8c8c8" }}>{newStr.slice(ne + 1)}</span>
       </span>

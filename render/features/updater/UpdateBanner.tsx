@@ -3,7 +3,7 @@ import { C, SANS } from "../../design";
 import type { UpdaterState } from "./useUpdater";
 
 interface Props {
-  state:   UpdaterState;
+  state: UpdaterState;
   onInstall: () => void;
   onDismiss: () => void;
 }
@@ -14,43 +14,45 @@ export function UpdateBanner({ state, onInstall, onDismiss }: Props) {
   }
 
   const isDownloading = state.phase === "downloading";
-  const isReady       = state.phase === "ready";
+  const isReady = state.phase === "ready";
 
   return (
-    <div style={{
-      position:        "fixed",
-      top:             0,
-      left:            0,
-      right:           0,
-      zIndex:          9999,
-      height:          36,
-      display:         "flex",
-      alignItems:      "center",
-      justifyContent:  "space-between",
-      padding:         "0 14px",
-      background:      C.blueBg,
-      borderBottom:    `1px solid ${C.blueBorder}`,
-      fontFamily:      SANS,
-      fontSize:        12,
-    }}>
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 9999,
+        height: 36,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "0 14px",
+        background: C.blueBg,
+        borderBottom: `1px solid ${C.blueBorder}`,
+        fontFamily: SANS,
+        fontSize: 12,
+      }}
+    >
       {/* Left: message */}
       <span style={{ color: C.blue, display: "flex", alignItems: "center", gap: 8 }}>
-        {isDownloading && (
-          <span style={{ color: C.t3 }}>
-            Downloading update… {state.percent}%
-          </span>
-        )}
-        {isReady && (
-          <span style={{ color: C.green }}>✓ Update ready — restarting…</span>
-        )}
+        {isDownloading && <span style={{ color: C.t3 }}>Downloading update… {state.percent}%</span>}
+        {isReady && <span style={{ color: C.green }}>✓ Update ready — restarting…</span>}
         {state.phase === "available" && (
           <>
             <span style={{ color: C.blue }}>★</span>
-            <span style={{ color: C.t1 }}>
-              Stackbox {state.version} is available
-            </span>
+            <span style={{ color: C.t1 }}>Stackbox {state.version} is available</span>
             {state.notes && (
-              <span style={{ color: C.t3, maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span
+                style={{
+                  color: C.t3,
+                  maxWidth: 360,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 — {state.notes}
               </span>
             )}
@@ -61,16 +63,23 @@ export function UpdateBanner({ state, onInstall, onDismiss }: Props) {
       {/* Right: progress bar or action buttons */}
       <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {isDownloading && (
-          <div style={{
-            width: 120, height: 4, background: C.border,
-            borderRadius: 2, overflow: "hidden",
-          }}>
-            <div style={{
-              height: "100%",
-              width:  `${state.percent}%`,
-              background: C.blue,
-              transition: "width .2s",
-            }} />
+          <div
+            style={{
+              width: 120,
+              height: 4,
+              background: C.border,
+              borderRadius: 2,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: `${state.percent}%`,
+                background: C.blue,
+                transition: "width .2s",
+              }}
+            />
           </div>
         )}
 
@@ -79,15 +88,15 @@ export function UpdateBanner({ state, onInstall, onDismiss }: Props) {
             <button
               onClick={onInstall}
               style={{
-                padding:      "3px 10px",
-                background:   C.blue,
-                color:        "#000",
-                border:       "none",
+                padding: "3px 10px",
+                background: C.blue,
+                color: "#000",
+                border: "none",
                 borderRadius: 4,
-                fontSize:     11,
-                fontFamily:   SANS,
-                fontWeight:   600,
-                cursor:       "pointer",
+                fontSize: 11,
+                fontFamily: SANS,
+                fontWeight: 600,
+                cursor: "pointer",
               }}
             >
               Install
@@ -95,14 +104,14 @@ export function UpdateBanner({ state, onInstall, onDismiss }: Props) {
             <button
               onClick={onDismiss}
               style={{
-                padding:      "3px 8px",
-                background:   "transparent",
-                color:        C.t3,
-                border:       `1px solid ${C.border}`,
+                padding: "3px 8px",
+                background: "transparent",
+                color: C.t3,
+                border: `1px solid ${C.border}`,
                 borderRadius: 4,
-                fontSize:     11,
-                fontFamily:   SANS,
-                cursor:       "pointer",
+                fontSize: 11,
+                fontFamily: SANS,
+                cursor: "pointer",
               }}
             >
               Later

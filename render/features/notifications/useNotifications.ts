@@ -3,20 +3,20 @@
 // Backed by a module-level store so any component can push
 // without prop-drilling or context.
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export type NotifLevel = "info" | "success" | "warning" | "error";
 
 export interface Notification {
-  id:        string;
-  level:     NotifLevel;
-  title:     string;
-  message?:  string;
+  id: string;
+  level: NotifLevel;
+  title: string;
+  message?: string;
   /** ms before auto-dismiss. 0 = never. Default 4000. */
   duration?: number;
   /** Timestamp when created. */
-  ts:        number;
-  read:      boolean;
+  ts: number;
+  read: boolean;
 }
 
 type Listener = (notifications: Notification[]) => void;
@@ -33,9 +33,7 @@ function emit() {
 let idSeq = 0;
 
 /** Push a new notification. Returns the generated id. */
-export function pushNotification(
-  opts: Omit<Notification, "id" | "ts" | "read">,
-): string {
+export function pushNotification(opts: Omit<Notification, "id" | "ts" | "read">): string {
   const id = `notif-${Date.now()}-${++idSeq}`;
   store = [
     { ...opts, id, ts: Date.now(), read: false, duration: opts.duration ?? 4000 },
@@ -68,14 +66,19 @@ export function useNotifications() {
   useEffect(() => {
     const handler = (next: Notification[]) => setNotifications(next);
     listeners.add(handler);
-    return () => { listeners.delete(handler); };
+    return () => {
+      listeners.delete(handler);
+    };
   }, []);
 
-  const push     = useCallback((opts: Omit<Notification, "id" | "ts" | "read">) => pushNotification(opts), []);
-  const dismiss  = useCallback((id: string) => dismissNotification(id), []);
+  const push = useCallback(
+    (opts: Omit<Notification, "id" | "ts" | "read">) => pushNotification(opts),
+    []
+  );
+  const dismiss = useCallback((id: string) => dismissNotification(id), []);
   const markRead = useCallback(() => markAllRead(), []);
-  const clear    = useCallback(() => clearAll(), []);
-  const unread   = notifications.filter((n) => !n.read).length;
+  const clear = useCallback(() => clearAll(), []);
+  const unread = notifications.filter((n) => !n.read).length;
 
   return { notifications, push, dismiss, markRead, clear, unread };
 }

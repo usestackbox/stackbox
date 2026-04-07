@@ -1,16 +1,11 @@
 // hooks/useDragResize.ts
-import { useState, useRef, useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 
 /**
  * Generic drag-to-resize hook.
  * Returns [width, onMouseDown] — attach onMouseDown to the resize handle.
  */
-export function useDragResize(
-  init: number,
-  dir: "left" | "right" = "left",
-  min = 180,
-  max = 680,
-) {
+export function useDragResize(init: number, dir: "left" | "right" = "left", min = 180, max = 680) {
   const [w, setW] = useState(init);
   const ref = useRef<{ sx: number; sw: number } | null>(null);
 
@@ -32,7 +27,7 @@ export function useDragResize(
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
     },
-    [w, dir, min, max],
+    [w, dir, min, max]
   );
 
   return [w, onDown] as const;

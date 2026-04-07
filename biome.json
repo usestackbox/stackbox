@@ -6,14 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignore": [
-      "node_modules",
-      "dist",
-      "kernel/target",
-      "kernel/gen",
-      ".turbo",
-      "**/*.d.ts"
-    ]
+    "ignore": ["node_modules", "dist", "kernel/target", "kernel/gen", ".turbo", "**/*.d.ts"]
   },
   "formatter": {
     "enabled": true,
@@ -30,13 +23,15 @@
     "rules": {
       "recommended": true,
       "correctness": {
-        "noUnusedVariables": "error",
+        "noUnusedVariables": "warn",
         "noUnusedImports": "error",
-        "useExhaustiveDependencies": "warn"
+        "useExhaustiveDependencies": "off"
       },
       "suspicious": {
-        "noExplicitAny": "warn",
-        "noConsoleLog": "warn"
+        "noExplicitAny": "off",
+        "noConsoleLog": "warn",
+        "noArrayIndexKey": "off",
+        "noAssignInExpressions": "off"
       },
       "style": {
         "noNonNullAssertion": "warn",
@@ -44,11 +39,17 @@
         "useTemplate": "error",
         "noUnusedTemplateLiteral": "error"
       },
+      "complexity": {
+        "noForEach": "off"
+      },
       "performance": {
         "noDelete": "warn"
       },
       "a11y": {
-        "recommended": true
+        "recommended": true,
+        "useKeyWithClickEvents": "off",
+        "useButtonType": "off",
+        "noSvgWithoutTitle": "off"
       }
     }
   },

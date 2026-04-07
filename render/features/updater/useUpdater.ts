@@ -1,7 +1,7 @@
-// render/features/updater/useUpdater.ts
-import { useEffect, useRef, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+// render/features/updater/useUpdater.ts
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type UpdaterState =
   | { phase: "idle" }
@@ -12,20 +12,20 @@ export type UpdaterState =
   | { phase: "error"; message: string };
 
 export interface UseUpdaterReturn {
-  state:        UpdaterState;
-  checkNow:     () => Promise<void>;
-  install:      () => Promise<void>;
-  dismiss:      () => void;
+  state: UpdaterState;
+  checkNow: () => Promise<void>;
+  install: () => Promise<void>;
+  dismiss: () => void;
 }
 
 const HOUR_MS = 60 * 60 * 1000;
 
 export function useUpdater(): UseUpdaterReturn {
   const [state, setState] = useState<UpdaterState>({ phase: "idle" });
-  const intervalRef       = useRef<ReturnType<typeof setInterval> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Track total bytes to calculate percent
-  const totalBytesRef     = useRef<number>(0);
-  const loadedBytesRef    = useRef<number>(0);
+  const totalBytesRef = useRef<number>(0);
+  const loadedBytesRef = useRef<number>(0);
 
   const check = useCallback(async () => {
     setState({ phase: "checking" });
@@ -35,10 +35,10 @@ export function useUpdater(): UseUpdaterReturn {
       );
       if (info) {
         setState({
-          phase:   "available",
+          phase: "available",
           version: info.version,
-          date:    info.date,
-          notes:   info.body,
+          date: info.date,
+          notes: info.body,
         });
       } else {
         setState({ phase: "idle" });
@@ -79,14 +79,18 @@ export function useUpdater(): UseUpdaterReturn {
         setState({ phase: "downloading", percent });
       }
     );
-    return () => { unsub.then(fn => fn()); };
+    return () => {
+      unsub.then((fn) => fn());
+    };
   }, []);
 
   useEffect(() => {
     const unsub = listen("update-download-finished", () => {
       setState({ phase: "ready" });
     });
-    return () => { unsub.then(fn => fn()); };
+    return () => {
+      unsub.then((fn) => fn());
+    };
   }, []);
 
   // Boot check + hourly re-check

@@ -1,25 +1,28 @@
 // render/features/notifications/Toast.tsx
 // Single toast — info / success / warning / error variants.
 
-import React, { useEffect, useState } from "react";
-import type { Notification, NotifLevel } from "./useNotifications";
+import { useEffect, useState } from "react";
+import { C, FS, SANS, SP } from "../../design/tokens";
+import type { NotifLevel, Notification } from "./useNotifications";
 import { dismissNotification } from "./useNotifications";
-import { C, FS, SP, SANS } from "../../design/tokens";
 
 interface Props {
   notif: Notification;
 }
 
-const LEVEL_STYLE: Record<NotifLevel, {
-  bg:     string;
-  border: string;
-  icon:   string;
-  color:  string;
-}> = {
-  info:    { bg: C.blueBg,   border: C.blueBorder,   icon: "ℹ",  color: C.blue  },
-  success: { bg: C.greenBg,  border: C.greenBorder,  icon: "✓",  color: C.green },
-  warning: { bg: C.amberBg,  border: C.amberBorder,  icon: "⚠",  color: C.amber },
-  error:   { bg: C.redBg,    border: C.redBorder,    icon: "✕",  color: C.red   },
+const LEVEL_STYLE: Record<
+  NotifLevel,
+  {
+    bg: string;
+    border: string;
+    icon: string;
+    color: string;
+  }
+> = {
+  info: { bg: C.blueBg, border: C.blueBorder, icon: "ℹ", color: C.blue },
+  success: { bg: C.greenBg, border: C.greenBorder, icon: "✓", color: C.green },
+  warning: { bg: C.amberBg, border: C.amberBorder, icon: "⚠", color: C.amber },
+  error: { bg: C.redBg, border: C.redBorder, icon: "✕", color: C.red },
 };
 
 export function Toast({ notif }: Props) {
@@ -46,43 +49,41 @@ export function Toast({ notif }: Props) {
   return (
     <div
       style={{
-        fontFamily:    SANS,
-        display:       "flex",
-        alignItems:    "flex-start",
-        gap:           SP[3],
-        padding:       `${SP[3]}px ${SP[4]}px`,
-        background:    style.bg,
-        border:        `1px solid ${style.border}`,
-        borderRadius:  C.r3,
-        boxShadow:     C.shadowMd,
-        minWidth:      280,
-        maxWidth:      380,
+        fontFamily: SANS,
+        display: "flex",
+        alignItems: "flex-start",
+        gap: SP[3],
+        padding: `${SP[3]}px ${SP[4]}px`,
+        background: style.bg,
+        border: `1px solid ${style.border}`,
+        borderRadius: C.r3,
+        boxShadow: C.shadowMd,
+        minWidth: 280,
+        maxWidth: 380,
         pointerEvents: "all",
-        opacity:       visible ? 1 : 0,
-        transform:     visible ? "translateX(0)" : "translateX(24px)",
-        transition:    "opacity 200ms ease, transform 200ms ease",
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateX(0)" : "translateX(24px)",
+        transition: "opacity 200ms ease, transform 200ms ease",
       }}
     >
       {/* Level icon */}
-      <span style={{
-        fontSize:   15,
-        color:      style.color,
-        flexShrink: 0,
-        marginTop:  1,
-        fontWeight: 700,
-      }}>
+      <span
+        style={{
+          fontSize: 15,
+          color: style.color,
+          flexShrink: 0,
+          marginTop: 1,
+          fontWeight: 700,
+        }}
+      >
         {style.icon}
       </span>
 
       {/* Content */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: FS.sm, color: C.t0, fontWeight: 500 }}>
-          {notif.title}
-        </div>
+        <div style={{ fontSize: FS.sm, color: C.t0, fontWeight: 500 }}>{notif.title}</div>
         {notif.message && (
-          <div style={{ fontSize: FS.xs, color: C.t1, marginTop: 2 }}>
-            {notif.message}
-          </div>
+          <div style={{ fontSize: FS.xs, color: C.t1, marginTop: 2 }}>{notif.message}</div>
         )}
       </div>
 
@@ -94,14 +95,14 @@ export function Toast({ notif }: Props) {
         }}
         style={{
           background: "none",
-          border:     "none",
-          cursor:     "pointer",
-          color:      C.t2,
-          fontSize:   16,
+          border: "none",
+          cursor: "pointer",
+          color: C.t2,
+          fontSize: 16,
           lineHeight: 1,
-          padding:    0,
+          padding: 0,
           flexShrink: 0,
-          marginTop:  1,
+          marginTop: 1,
         }}
         title="Dismiss"
       >

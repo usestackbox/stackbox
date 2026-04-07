@@ -9,13 +9,26 @@ export function getHljs(): Promise<HljsCore> {
   _promise = (async () => {
     const { default: hljs } = await import("highlight.js/lib/core");
     const [
-      { default: javascript }, { default: typescript }, { default: python },
-      { default: css },        { default: xml },         { default: json },
-      { default: bash },       { default: markdown },    { default: rust },
-      { default: go },         { default: java },        { default: cpp },
-      { default: csharp },     { default: ruby },        { default: swift },
-      { default: kotlin },     { default: sql },         { default: yaml },
-      { default: dockerfile }, { default: graphql },
+      { default: javascript },
+      { default: typescript },
+      { default: python },
+      { default: css },
+      { default: xml },
+      { default: json },
+      { default: bash },
+      { default: markdown },
+      { default: rust },
+      { default: go },
+      { default: java },
+      { default: cpp },
+      { default: csharp },
+      { default: ruby },
+      { default: swift },
+      { default: kotlin },
+      { default: sql },
+      { default: yaml },
+      { default: dockerfile },
+      { default: graphql },
     ] = await Promise.all([
       import("highlight.js/lib/languages/javascript"),
       import("highlight.js/lib/languages/typescript"),
@@ -39,27 +52,27 @@ export function getHljs(): Promise<HljsCore> {
       import("highlight.js/lib/languages/graphql"),
     ]);
     const reg = (aliases: string[], lang: unknown) =>
-      aliases.forEach(a => hljs.registerLanguage(a, lang as never));
-    reg(["javascript","js","jsx","mjs"], javascript);
-    reg(["typescript","ts","tsx"],       typescript);
-    reg(["python","py"],                 python);
-    reg(["css","scss","less"],           css);
-    reg(["html","xml","svg"],            xml);
-    reg(["json","jsonc"],                json);
-    reg(["bash","sh","zsh"],             bash);
-    reg(["markdown","md","mdx"],         markdown);
-    reg(["rust","rs"],                   rust);
-    reg(["go"],                          go);
-    reg(["java","groovy"],               java);
-    reg(["cpp","c","cc","cxx","h","hpp"],cpp);
-    reg(["csharp","cs"],                 csharp);
-    reg(["ruby","rb"],                   ruby);
-    reg(["swift"],                       swift);
-    reg(["kotlin","kt"],                 kotlin);
-    reg(["sql"],                         sql);
-    reg(["yaml","yml"],                  yaml);
-    reg(["dockerfile"],                  dockerfile);
-    reg(["graphql","gql"],               graphql);
+      aliases.forEach((a) => hljs.registerLanguage(a, lang as never));
+    reg(["javascript", "js", "jsx", "mjs"], javascript);
+    reg(["typescript", "ts", "tsx"], typescript);
+    reg(["python", "py"], python);
+    reg(["css", "scss", "less"], css);
+    reg(["html", "xml", "svg"], xml);
+    reg(["json", "jsonc"], json);
+    reg(["bash", "sh", "zsh"], bash);
+    reg(["markdown", "md", "mdx"], markdown);
+    reg(["rust", "rs"], rust);
+    reg(["go"], go);
+    reg(["java", "groovy"], java);
+    reg(["cpp", "c", "cc", "cxx", "h", "hpp"], cpp);
+    reg(["csharp", "cs"], csharp);
+    reg(["ruby", "rb"], ruby);
+    reg(["swift"], swift);
+    reg(["kotlin", "kt"], kotlin);
+    reg(["sql"], sql);
+    reg(["yaml", "yml"], yaml);
+    reg(["dockerfile"], dockerfile);
+    reg(["graphql", "gql"], graphql);
     return hljs;
   })();
   return _promise;
@@ -68,19 +81,51 @@ export function getHljs(): Promise<HljsCore> {
 export type { HljsCore };
 
 export function extToLang(filename: string): string {
-  const ext  = filename.split(".").pop()?.toLowerCase() ?? "";
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   const name = filename.split(/[/\\]/).pop()?.toLowerCase() ?? "";
   if (name === "dockerfile") return "dockerfile";
-  if (name === "makefile")   return "makefile";
+  if (name === "makefile") return "makefile";
   const map: Record<string, string> = {
-    ts:"typescript", tsx:"typescript", js:"javascript", jsx:"javascript",
-    mjs:"javascript", cjs:"javascript", py:"python", pyw:"python",
-    css:"css", scss:"css", less:"css", html:"html", htm:"html",
-    xml:"xml", svg:"xml", json:"json", jsonc:"json", yaml:"yaml", yml:"yaml",
-    sh:"bash", bash:"bash", zsh:"bash", md:"markdown", mdx:"markdown",
-    rs:"rust", go:"go", c:"c", h:"c", cpp:"cpp", cc:"cpp", cxx:"cpp", hpp:"cpp",
-    cs:"csharp", java:"java", kt:"kotlin", rb:"ruby", swift:"swift",
-    sql:"sql", graphql:"graphql", gql:"graphql",
+    ts: "typescript",
+    tsx: "typescript",
+    js: "javascript",
+    jsx: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    py: "python",
+    pyw: "python",
+    css: "css",
+    scss: "css",
+    less: "css",
+    html: "html",
+    htm: "html",
+    xml: "xml",
+    svg: "xml",
+    json: "json",
+    jsonc: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    sh: "bash",
+    bash: "bash",
+    zsh: "bash",
+    md: "markdown",
+    mdx: "markdown",
+    rs: "rust",
+    go: "go",
+    c: "c",
+    h: "c",
+    cpp: "cpp",
+    cc: "cpp",
+    cxx: "cpp",
+    hpp: "cpp",
+    cs: "csharp",
+    java: "java",
+    kt: "kotlin",
+    rb: "ruby",
+    swift: "swift",
+    sql: "sql",
+    graphql: "graphql",
+    gql: "graphql",
   };
   return map[ext] ?? "plaintext";
 }

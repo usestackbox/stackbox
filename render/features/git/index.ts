@@ -1,8 +1,8 @@
-export { GitPanel }     from "./GitPanel";
-export { NoGitPane }    from "./NoGitPane";
-export { ChangesTab }   from "./ChangesTab";
-export { BranchesTab }  from "./BranchesTab";
-export { HistoryTab }   from "./HistoryTab";
+export { GitPanel } from "./GitPanel";
+export { NoGitPane } from "./NoGitPane";
+export { ChangesTab } from "./ChangesTab";
+export { BranchesTab } from "./BranchesTab";
+export { HistoryTab } from "./HistoryTab";
 export { WorktreesTab } from "./WorktreesTab";
-export { useGitPanel }  from "./useGitPanel";
+export { useGitPanel } from "./useGitPanel";
 export type * from "./types";

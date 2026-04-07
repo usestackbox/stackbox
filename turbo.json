@@ -20,26 +20,15 @@
       "persistent": true
     },
     "lint": {
-      "inputs": [
-        "render/**/*.ts",
-        "render/**/*.tsx",
-        "biome.json"
-      ],
+      "inputs": ["render/**/*.ts", "render/**/*.tsx", "biome.json"],
       "outputs": []
     },
     "typecheck": {
-      "inputs": [
-        "render/**/*.ts",
-        "render/**/*.tsx",
-        "tsconfig.json"
-      ],
+      "inputs": ["render/**/*.ts", "render/**/*.tsx", "tsconfig.json"],
       "outputs": []
     },
     "test": {
-      "inputs": [
-        "render/**",
-        "kernel/src/**"
-      ],
+      "inputs": ["render/**", "kernel/src/**"],
       "outputs": ["coverage/**"]
     },
     "clean": {

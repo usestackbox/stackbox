@@ -1,21 +1,21 @@
 // features/workspace/types.ts
 
 export interface WinState {
-  id:        string;
-  label:     string;
-  kind:      "terminal" | "browser";
-  x:         number;
-  y:         number;
-  w:         number;
-  h:         number;
+  id: string;
+  label: string;
+  kind: "terminal" | "browser";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
   minimized: boolean;
   maximized: boolean;
-  preMaxX?:  number;
-  preMaxY?:  number;
-  preMaxW?:  number;
-  preMaxH?:  number;
-  cwd:       string;
-  zIndex:    number;
+  preMaxX?: number;
+  preMaxY?: number;
+  preMaxW?: number;
+  preMaxH?: number;
+  cwd: string;
+  zIndex: number;
   /** Agent command sent to backend on pane creation (e.g. "claude", "agent"). Undefined = plain shell. */
   agentCmd?: string;
   /** Agent key detected from PTY I/O (e.g. "claude", "cursor"). Undefined = plain shell. */
@@ -25,14 +25,14 @@ export interface WinState {
 }
 
 export interface FileTab {
-  id:       string;
+  id: string;
   filePath: string;
 }
 
 export type SidePanel = "files" | "git" | "memory" | null;
 export type FilesView = "list" | "diff";
 
-export const GAP   = 0;
+export const GAP = 0;
 export const MIN_W = 280;
 export const MIN_H = 180;
 
@@ -43,19 +43,20 @@ export function tileWindows(count: number, aw: number, ah: number) {
   if (count === 0) return [];
   const cols = Math.ceil(Math.sqrt(count));
   const rows = Math.ceil(count / cols);
-  const w    = Math.floor((aw - GAP * (cols + 1)) / cols);
-  const h    = Math.floor((ah - GAP * (rows + 1)) / rows);
+  const w = Math.floor((aw - GAP * (cols + 1)) / cols);
+  const h = Math.floor((ah - GAP * (rows + 1)) / rows);
   return Array.from({ length: count }, (_, i) => ({
     x: GAP + (i % cols) * (w + GAP),
     y: GAP + Math.floor(i / cols) * (h + GAP),
-    w, h,
+    w,
+    h,
   }));
 }
 
 export function winLabel(win: WinState): string {
   if (win.kind === "browser") return win.label ?? "browser";
   if (win.detectedAgent) return AGENT_META[win.detectedAgent]?.label ?? win.detectedAgent;
-  if (win.agentCmd)      return AGENT_META[win.agentCmd]?.label ?? win.agentCmd;
+  if (win.agentCmd) return AGENT_META[win.agentCmd]?.label ?? win.agentCmd;
   return win.cwd.split(/[/\\]/).filter(Boolean).pop() ?? "~";
 }
 
@@ -72,18 +73,18 @@ export function winLabel(win: WinState): string {
 //      onData handler matches the typed command against AGENT_INPUT_CMDS,
 //      and sets detectedAgent immediately on Enter.
 export interface AgentMeta {
-  label: string;   // Display name in the tab
-  color: string;   // Always "#ffffff"
+  label: string; // Display name in the tab
+  color: string; // Always "#ffffff"
 }
 
 export const AGENT_META: Record<string, AgentMeta> = {
-  claude:  { label: "Claude Code",    color: "#ffffff" },
-  codex:   { label: "OpenAI Codex",   color: "#ffffff" },
-  openai:  { label: "OpenAI",         color: "#ffffff" },
-  gemini:  { label: "Gemini",         color: "#ffffff" },
-  cursor:  { label: "Cursor Agent",   color: "#ffffff" },
+  claude: { label: "Claude Code", color: "#ffffff" },
+  codex: { label: "OpenAI Codex", color: "#ffffff" },
+  openai: { label: "OpenAI", color: "#ffffff" },
+  gemini: { label: "Gemini", color: "#ffffff" },
+  cursor: { label: "Cursor Agent", color: "#ffffff" },
   copilot: { label: "GitHub Copilot", color: "#ffffff" },
-  aider:   { label: "Aider",          color: "#ffffff" },
+  aider: { label: "Aider", color: "#ffffff" },
 };
 
 // ── What users type in the terminal → agent key ───────────────────────────────
@@ -93,11 +94,11 @@ export const AGENT_META: Record<string, AgentMeta> = {
 // Copilot: user types `copilot` (the GitHub Copilot CLI).
 // No gh-copilot alias — use the actual CLI name only.
 export const AGENT_INPUT_CMDS: Record<string, string> = {
-  "claude":      "claude",
-  "codex":       "codex",
-  "openai":      "openai",
-  "gemini":      "gemini",
-  "agent":       "cursor",   // Cursor's terminal agent CLI is `agent`
-  "copilot":     "copilot",  // GitHub Copilot CLI
-  "aider":       "aider",
+  claude: "claude",
+  codex: "codex",
+  openai: "openai",
+  gemini: "gemini",
+  agent: "cursor", // Cursor's terminal agent CLI is `agent`
+  copilot: "copilot", // GitHub Copilot CLI
+  aider: "aider",
 };

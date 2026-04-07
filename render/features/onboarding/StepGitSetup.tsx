@@ -1,6 +1,6 @@
-// render/features/onboarding/StepGitSetup.tsx
-import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+// render/features/onboarding/StepGitSetup.tsx
+import { useEffect, useState } from "react";
 import { C, MONO, SANS } from "../../design";
 
 type Status = "checking" | "ok" | "missing";
@@ -13,8 +13,7 @@ export function StepGitSetup({ onNext }: { onNext: () => void }) {
 
   useEffect(() => {
     // Run `git --version` via a PTY-free shell invoke
-    invoke<string>("open_external_url", { url: "noop" })
-      .catch(() => {}); // warm shell
+    invoke<string>("open_external_url", { url: "noop" }).catch(() => {}); // warm shell
     checkGit();
   }, []);
 
@@ -65,11 +64,17 @@ export function StepGitSetup({ onNext }: { onNext: () => void }) {
       />
 
       {gitStatus === "missing" && (
-        <div style={{
-          padding: "12px 14px", background: C.redBg,
-          border: `1px solid ${C.redBorder}`, borderRadius: 8,
-          fontSize: 12, color: C.red, lineHeight: 1.7,
-        }}>
+        <div
+          style={{
+            padding: "12px 14px",
+            background: C.redBg,
+            border: `1px solid ${C.redBorder}`,
+            borderRadius: 8,
+            fontSize: 12,
+            color: C.red,
+            lineHeight: 1.7,
+          }}
+        >
           Install git from <strong>https://git-scm.com</strong> then click Retry.
         </div>
       )}
@@ -85,24 +90,34 @@ export function StepGitSetup({ onNext }: { onNext: () => void }) {
               type="email"
               placeholder="you@example.com"
               value={email}
-              onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") saveEmail(); }}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveEmail();
+              }}
               style={{
-                flex: 1, background: C.bg4, color: C.t1,
+                flex: 1,
+                background: C.bg4,
+                color: C.t1,
                 border: `1px solid ${emailSaved ? C.greenBorder : C.border}`,
-                borderRadius: 6, padding: "7px 10px",
-                fontSize: 13, fontFamily: SANS, outline: "none",
+                borderRadius: 6,
+                padding: "7px 10px",
+                fontSize: 13,
+                fontFamily: SANS,
+                outline: "none",
               }}
             />
             <button
               onClick={saveEmail}
               disabled={emailSaved || !email.trim()}
               style={{
-                padding: "7px 14px", fontSize: 12, fontFamily: SANS,
+                padding: "7px 14px",
+                fontSize: 12,
+                fontFamily: SANS,
                 background: emailSaved ? C.greenBg : C.bg4,
-                color:      emailSaved ? C.green : C.t2,
+                color: emailSaved ? C.green : C.t2,
                 border: `1px solid ${emailSaved ? C.greenBorder : C.border}`,
-                borderRadius: 6, cursor: emailSaved ? "default" : "pointer",
+                borderRadius: 6,
+                cursor: emailSaved ? "default" : "pointer",
               }}
             >
               {emailSaved ? "✓ Saved" : "Save"}
@@ -114,7 +129,9 @@ export function StepGitSetup({ onNext }: { onNext: () => void }) {
       {/* Actions */}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         {gitStatus === "missing" && (
-          <button onClick={checkGit} style={ghostBtn}>Retry</button>
+          <button onClick={checkGit} style={ghostBtn}>
+            Retry
+          </button>
         )}
         <button
           onClick={onNext}
@@ -122,7 +139,7 @@ export function StepGitSetup({ onNext }: { onNext: () => void }) {
           style={{
             ...primaryBtn,
             opacity: canContinue ? 1 : 0.4,
-            cursor:  canContinue ? "pointer" : "default",
+            cursor: canContinue ? "pointer" : "default",
           }}
         >
           Continue →
@@ -132,17 +149,31 @@ export function StepGitSetup({ onNext }: { onNext: () => void }) {
   );
 }
 
-function StatusRow({ label, status, okText, errorText }: {
-  label: string; status: Status; okText: string; errorText: string;
+function StatusRow({
+  label,
+  status,
+  okText,
+  errorText,
+}: {
+  label: string;
+  status: Status;
+  okText: string;
+  errorText: string;
 }) {
   const color = status === "ok" ? C.green : status === "missing" ? C.red : C.t3;
-  const icon  = status === "ok" ? "✓" : status === "missing" ? "✗" : "…";
+  const icon = status === "ok" ? "✓" : status === "missing" ? "✗" : "…";
   return (
-    <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "10px 14px", background: C.bg2,
-      border: `1px solid ${C.borderSubtle}`, borderRadius: 8,
-    }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "10px 14px",
+        background: C.bg2,
+        border: `1px solid ${C.borderSubtle}`,
+        borderRadius: 8,
+      }}
+    >
       <span style={{ fontSize: 13, color: C.t1 }}>{label}</span>
       <span style={{ fontSize: 12, color, fontFamily: MONO }}>
         {icon} {status === "ok" ? okText : status === "missing" ? errorText : "checking…"}
@@ -152,12 +183,24 @@ function StatusRow({ label, status, okText, errorText }: {
 }
 
 const primaryBtn: React.CSSProperties = {
-  flex: 1, padding: "9px 0", background: "#2563eb", color: "#fff",
-  border: "none", borderRadius: 7, fontSize: 13, fontWeight: 600,
-  fontFamily: SANS, cursor: "pointer",
+  flex: 1,
+  padding: "9px 0",
+  background: "#2563eb",
+  color: "#fff",
+  border: "none",
+  borderRadius: 7,
+  fontSize: 13,
+  fontWeight: 600,
+  fontFamily: SANS,
+  cursor: "pointer",
 };
 const ghostBtn: React.CSSProperties = {
-  padding: "9px 16px", background: "transparent", color: C.t2,
-  border: `1px solid ${C.border}`, borderRadius: 7,
-  fontSize: 13, fontFamily: SANS, cursor: "pointer",
+  padding: "9px 16px",
+  background: "transparent",
+  color: C.t2,
+  border: `1px solid ${C.border}`,
+  borderRadius: 7,
+  fontSize: 13,
+  fontFamily: SANS,
+  cursor: "pointer",
 };

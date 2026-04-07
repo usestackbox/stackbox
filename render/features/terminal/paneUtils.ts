@@ -18,12 +18,7 @@ export function removeLeaf(node: PaneNode, id: string): PaneNode | null {
 }
 
 /** Split a leaf in two, inserting `added` as the new sibling. */
-export function splitLeaf(
-  node: PaneNode,
-  id: string,
-  dir: "h" | "v",
-  added: TermNode,
-): PaneNode {
+export function splitLeaf(node: PaneNode, id: string, dir: "h" | "v", added: TermNode): PaneNode {
   if (node.type === "leaf") {
     return node.id !== id ? node : { type: "split", dir, a: node, b: added };
   }

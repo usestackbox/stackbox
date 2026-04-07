@@ -6,19 +6,19 @@ import { useEffect } from "react";
 import { useLocalStorage } from "./useLocalStorage";
 
 export type ThemeMode = "dark" | "light" | "system";
-export type FontSize  = "sm" | "md" | "lg";
-export type Density   = "compact" | "normal" | "relaxed";
+export type FontSize = "sm" | "md" | "lg";
+export type Density = "compact" | "normal" | "relaxed";
 
 export interface ThemeSettings {
-  mode:     ThemeMode;
+  mode: ThemeMode;
   fontSize: FontSize;
-  density:  Density;
+  density: Density;
 }
 
 const DEFAULTS: ThemeSettings = {
-  mode:     "dark",
+  mode: "dark",
   fontSize: "md",
-  density:  "normal",
+  density: "normal",
 };
 
 const FONT_SIZE_MAP: Record<FontSize, string> = {
@@ -28,21 +28,25 @@ const FONT_SIZE_MAP: Record<FontSize, string> = {
 };
 
 const DENSITY_MAP: Record<Density, { spacing: string; rowH: string }> = {
-  compact: { spacing: "4px",  rowH: "26px" },
-  normal:  { spacing: "6px",  rowH: "32px" },
+  compact: { spacing: "4px", rowH: "26px" },
+  normal: { spacing: "6px", rowH: "32px" },
   relaxed: { spacing: "10px", rowH: "40px" },
 };
 
 function applyVars(settings: ThemeSettings) {
   const root = document.documentElement;
   root.style.setProperty("--font-size-base", FONT_SIZE_MAP[settings.fontSize]);
-  root.style.setProperty("--spacing-row",    DENSITY_MAP[settings.density].spacing);
-  root.style.setProperty("--row-height",     DENSITY_MAP[settings.density].rowH);
+  root.style.setProperty("--spacing-row", DENSITY_MAP[settings.density].spacing);
+  root.style.setProperty("--row-height", DENSITY_MAP[settings.density].rowH);
 
   // Light mode is a future feature — dark is the only shipping theme.
-  root.setAttribute("data-theme", settings.mode === "system"
-    ? window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-    : settings.mode,
+  root.setAttribute(
+    "data-theme",
+    settings.mode === "system"
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light"
+      : settings.mode
   );
 }
 
@@ -50,7 +54,9 @@ export function useTheme() {
   const [settings, setSettings] = useLocalStorage<ThemeSettings>("sb:theme", DEFAULTS);
 
   // Apply vars whenever settings change.
-  useEffect(() => { applyVars(settings); }, [settings]);
+  useEffect(() => {
+    applyVars(settings);
+  }, [settings]);
 
   // React to system preference changes when mode = "system".
   useEffect(() => {

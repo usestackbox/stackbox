@@ -1,7 +1,10 @@
 // features/diff/StatBar.tsx
 import { MONO } from "../../design";
 
-interface Props { ins: number; del: number; }
+interface Props {
+  ins: number;
+  del: number;
+}
 
 export function StatBar({ ins, del }: Props) {
   const total = ins + del;
@@ -15,7 +18,15 @@ export function StatBar({ ins, del }: Props) {
       </span>
       <div style={{ display: "flex", gap: 1.5 }}>
         {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} style={{ width: 8, height: 8, borderRadius: 2, background: i < g ? "rgba(74,222,128,.40)" : "rgba(248,113,113,.35)" }} />
+          <div
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 2,
+              background: i < g ? "rgba(74,222,128,.40)" : "rgba(248,113,113,.35)",
+            }}
+          />
         ))}
       </div>
     </div>

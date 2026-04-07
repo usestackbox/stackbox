@@ -1,7 +1,7 @@
 // render/hooks/useClickOutside.ts
 // Close dropdowns/modals when clicking outside a ref'd element.
 
-import { useEffect, RefObject } from "react";
+import { type RefObject, useEffect } from "react";
 
 /**
  * Calls `handler` when a pointer event fires outside of `ref`.
@@ -10,7 +10,7 @@ import { useEffect, RefObject } from "react";
 export function useClickOutside<T extends HTMLElement = HTMLElement>(
   ref: RefObject<T | null>,
   handler: (e: MouseEvent | TouchEvent) => void,
-  { enabled = true }: { enabled?: boolean } = {},
+  { enabled = true }: { enabled?: boolean } = {}
 ) {
   useEffect(() => {
     if (!enabled) return;
