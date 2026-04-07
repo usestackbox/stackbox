@@ -20,33 +20,55 @@ pub fn strip_ansi(s: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '\x1b' {
             match chars.peek() {
-                Some('[') => { chars.next(); for c2 in chars.by_ref() { if c2.is_ascii_alphabetic() { break; } } }
+                Some('[') => {
+                    chars.next();
+                    for c2 in chars.by_ref() {
+                        if c2.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
                 Some(']') | Some('P') | Some('X') | Some('^') | Some('_') => {
                     chars.next();
                     loop {
                         match chars.next() {
                             None | Some('\x07') | Some('\u{9C}') => break,
-                            Some('\x1b') => { chars.next(); break; }
+                            Some('\x1b') => {
+                                chars.next();
+                                break;
+                            }
                             _ => {}
                         }
                     }
                 }
                 _ => {}
             }
-        } else { out.push(c); }
+        } else {
+            out.push(c);
+        }
     }
     out
 }
 
 pub fn on_command_entered(db: &Db, runbox_id: &str, session_id: &str, cwd: &str, line: &str) {
     let t = line.trim();
-    if t.is_empty() || t.len() < 2 { return; }
+    if t.is_empty() || t.len() < 2 {
+        return;
+    }
     let lower = t.to_lowercase();
-    if lower == "ls" || lower == "pwd" || lower == "clear" || lower == "cls" { return; }
+    if lower == "ls" || lower == "pwd" || lower == "clear" || lower == "cls" {
+        return;
+    }
     record_command_executed(db, runbox_id, session_id, t, cwd);
 }
 
-pub fn on_command_result(db: &Db, runbox_id: &str, session_id: &str, exit_code: i32, duration_ms: i64) {
+pub fn on_command_result(
+    db: &Db,
+    runbox_id: &str,
+    session_id: &str,
+    exit_code: i32,
+    duration_ms: i64,
+) {
     record_command_result(db, runbox_id, session_id, exit_code, duration_ms);
 }
 

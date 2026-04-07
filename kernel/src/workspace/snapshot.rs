@@ -8,14 +8,9 @@ use crate::{db::Db, workspace::events::record_workspace_snapshot};
 
 /// Read current git HEAD and create a WorkspaceSnapshot event.
 /// Returns the short hash, or empty string if not a git repo.
-pub fn snapshot_from_git(
-    db:         &Db,
-    runbox_id:  &str,
-    session_id: &str,
-    cwd:        &str,
-) -> String {
+pub fn snapshot_from_git(db: &Db, runbox_id: &str, session_id: &str, cwd: &str) -> String {
     let head = git_head(cwd);
-    let msg  = git_last_message(cwd);
+    let msg = git_last_message(cwd);
 
     if !head.is_empty() {
         record_workspace_snapshot(db, runbox_id, session_id, &head, &msg);
@@ -25,13 +20,7 @@ pub fn snapshot_from_git(
 }
 
 /// Create a snapshot with an explicit message (auto-snapshot, user action).
-pub fn snapshot_manual(
-    db:         &Db,
-    runbox_id:  &str,
-    session_id: &str,
-    cwd:        &str,
-    message:    &str,
-) {
+pub fn snapshot_manual(db: &Db, runbox_id: &str, session_id: &str, cwd: &str, message: &str) {
     let head = git_head(cwd);
     record_workspace_snapshot(db, runbox_id, session_id, &head, message);
 }

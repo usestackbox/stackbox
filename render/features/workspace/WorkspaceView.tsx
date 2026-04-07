@@ -55,6 +55,8 @@ export interface TermPaneCallbacks {
   onResizeStart:   (e: React.MouseEvent, dir: string) => void;
   onSplitDown:     () => void;
   onSplitLeft:     () => void;
+  /** Called when an agent is detected as running (or null when it exits). */
+  onAgentDetected: (agent: string | null) => void;
 }
 
 export function WorkspaceView({
@@ -476,6 +478,13 @@ export function WorkspaceView({
                       onResizeStart: (e, dir) => handleResizeStart(e, win.id, dir),
                       onSplitDown: () => splitWin(win.id, "down"),
                       onSplitLeft: () => splitWin(win.id, "left"),
+                      onAgentDetected: agent => {
+                        setWins(prev => prev.map(w =>
+                          w.id === win.id
+                            ? { ...w, detectedAgent: agent ?? undefined }
+                            : w
+                        ));
+                      },
                     })
                 }
               </div>

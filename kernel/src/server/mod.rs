@@ -23,38 +23,52 @@ pub async fn start(
     let memory_routes = routes::memory::router(db.clone(), sessions.clone());
 
     let mcp_state = mcp::McpState {
-        db:        db.clone(),
-        sessions:  Some(sessions.clone()),
+        db: db.clone(),
+        sessions: Some(sessions.clone()),
         app_state: app_state.clone(),
     };
 
-    let app_url     = app_handle.clone();
+    let app_url = app_handle.clone();
     let app_changed = app_handle.clone();
 
     let router = axum::Router::new()
         .merge(memory_routes)
         .nest("/mcp", mcp::router(mcp_state))
-        .route("/open-url", axum::routing::post({
-            let h = app_url.clone();
-            move |body: String| {
-                let h = h.clone();
-                async move { let _ = h.emit("browser-open-url", body); "ok" }
-            }
-        }))
-        .route("/url-changed", axum::routing::get({
-            let h = app_changed.clone();
-            move |axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>| {
-                let h = h.clone();
-                async move {
-                    if let (Some(id), Some(url)) = (params.get("id"), params.get("url")) {
-                        let _ = h.emit("browser-url-changed", serde_json::json!({
-                            "id": id, "url": url
-                        }));
+        .route(
+            "/open-url",
+            axum::routing::post({
+                let h = app_url.clone();
+                move |body: String| {
+                    let h = h.clone();
+                    async move {
+                        let _ = h.emit("browser-open-url", body);
+                        "ok"
                     }
-                    "ok"
                 }
-            }
-        }));
+            }),
+        )
+        .route(
+            "/url-changed",
+            axum::routing::get({
+                let h = app_changed.clone();
+                move |axum::extract::Query(params): axum::extract::Query<
+                    std::collections::HashMap<String, String>,
+                >| {
+                    let h = h.clone();
+                    async move {
+                        if let (Some(id), Some(url)) = (params.get("id"), params.get("url")) {
+                            let _ = h.emit(
+                                "browser-url-changed",
+                                serde_json::json!({
+                                    "id": id, "url": url
+                                }),
+                            );
+                        }
+                        "ok"
+                    }
+                }
+            }),
+        );
 
     // FIX (Bug #cors): Wildcard CORS allowed any page (including agent-opened
     // external sites) to read/write memory at localhost:7547. Restrict to the
@@ -84,7 +98,8 @@ pub async fn start(
         .allow_headers(tower_http::cors::Any);
 
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", MEMORY_PORT))
-        .await.expect("failed to bind server port");
+        .await
+        .expect("failed to bind server port");
 
     eprintln!("[server] listening on 127.0.0.1:{}", MEMORY_PORT);
     axum::serve(listener, router.layer(cors)).await.unwrap();

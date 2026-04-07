@@ -9,7 +9,11 @@ interface Props {
   lastUsed?:     number;
   onSelect:      () => void;
   onRename:      (name: string) => void;
+  onEditDir?:    (cwd: string) => void;
   onContextMenu: (e: React.MouseEvent) => void;
+  /** Externally trigger editing from the context menu */
+  externalEdit?: "name" | "dir" | null;
+  onExternalEditDone?: () => void;
 }
 
 function formatRelativeTime(ts?: number): string {
@@ -26,30 +30,51 @@ function formatRelativeTime(ts?: number): string {
 
 export function WorkspaceItem({
   workspace, isActive, lastUsed,
-  onSelect, onRename, onContextMenu,
+  onSelect, onRename, onEditDir, onContextMenu,
+  externalEdit, onExternalEditDone,
 }: Props) {
-  const [renaming,  setRenaming]  = useState(false);
-  const [renameVal, setRenameVal] = useState(workspace.name);
-  const [hovered,   setHovered]   = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [editing, setEditing] = useState(false);
+  const [nameVal, setNameVal] = useState(workspace.name);
+  const [dirVal,  setDirVal]  = useState(workspace.cwd);
+  const [hovered, setHovered] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const dirRef  = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { setRenameVal(workspace.name); }, [workspace.name]);
+  useEffect(() => { setNameVal(workspace.name); }, [workspace.name]);
+  useEffect(() => { setDirVal(workspace.cwd);   }, [workspace.cwd]);
+
+  // Focus the right input once editing panel opens
   useEffect(() => {
-    if (renaming) setTimeout(() => inputRef.current?.select(), 20);
-  }, [renaming]);
+    if (!editing) return;
+    const target = externalEdit === "dir" ? dirRef : nameRef;
+    setTimeout(() => target.current?.select(), 20);
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // React to external trigger from context menu
+  useEffect(() => {
+    if (!externalEdit) return;
+    setNameVal(workspace.name);
+    setDirVal(workspace.cwd);
+    setEditing(true);
+  }, [externalEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = () => {
-    if (renameVal.trim() && renameVal.trim() !== workspace.name) onRename(renameVal.trim());
-    setRenaming(false);
+    if (nameVal.trim() && nameVal.trim() !== workspace.name) onRename(nameVal.trim());
+    if (dirVal.trim()  && dirVal.trim()  !== workspace.cwd)  onEditDir?.(dirVal.trim());
+    setEditing(false);
+    onExternalEditDone?.();
   };
 
-  // Strip leading ~/ before extracting the last segment, then re-apply ~/
-  // This prevents "~/foo" → rawDir="foo" → dirName="~/foo" looking like a duplicate
-  // when the workspace name is already "foo".
+  const cancel = () => {
+    setNameVal(workspace.name);
+    setDirVal(workspace.cwd);
+    setEditing(false);
+    onExternalEditDone?.();
+  };
+
   const normalized = workspace.cwd.replace(/\\/g, "/").replace(/^~\//, "");
   const rawDir  = normalized.split("/").filter(Boolean).pop() ?? normalized;
   const dirName = `~/${normalized}`;
-  // Hide the path row when it adds no information (name already equals last segment)
   const showPath = rawDir.toLowerCase() !== workspace.name.toLowerCase();
 
   const bg = isActive
@@ -60,71 +85,88 @@ export function WorkspaceItem({
 
   return (
     <div
-      onClick={onSelect}
-      onDoubleClick={() => { setRenaming(true); setRenameVal(workspace.name); }}
+      onClick={editing ? undefined : onSelect}
       onContextMenu={onContextMenu}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
         width: "100%", boxSizing: "border-box",
-        padding: "9px 14px 9px 16px",
-        cursor: "pointer", userSelect: "none",
+        padding: editing ? "10px 14px 10px 16px" : "9px 14px 9px 16px",
+        cursor: editing ? "default" : "pointer", userSelect: "none",
         background: bg,
         borderLeft: `2px solid ${isActive ? C.borderHi ?? "#3b82f6" : "transparent"}`,
         transition: "background .1s, border-color .1s",
         position: "relative",
       }}
     >
-      {/* Title row */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-        {renaming ? (
-          <input
-            ref={inputRef}
-            value={renameVal}
-            onChange={e => setRenameVal(e.target.value)}
-            onBlur={submit}
-            onKeyDown={e => {
-              if (e.key === "Enter")  { e.preventDefault(); submit(); }
-              if (e.key === "Escape") { setRenaming(false); setRenameVal(workspace.name); }
-            }}
-            onClick={e => e.stopPropagation()}
-            style={{
-              flex: 1, background: C.bg0, border: `1px solid ${C.borderHi}`,
-              borderRadius: C.r1, color: C.t0, fontSize: FS.base,
-              padding: "2px 6px", outline: "none", fontFamily: MONO,
-            }}
-          />
-        ) : (
-          <span style={{
-            fontSize: 14, fontFamily: MONO, fontWeight: 500,
-            color: isActive ? C.t0 : C.t1,
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-            flex: 1, minWidth: 0,
-          }}>
-            {workspace.name}
-          </span>
-        )}
-      </div>
+      {editing ? (
+        <div onClick={e => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontSize: 9, fontFamily: MONO, color: C.t3, letterSpacing: ".06em", textTransform: "uppercase" as const }}>Name</span>
+            <input
+              ref={nameRef}
+              value={nameVal}
+              onChange={e => setNameVal(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter")  { e.preventDefault(); submit(); }
+                if (e.key === "Escape") { e.preventDefault(); cancel(); }
+              }}
+              style={{
+                background: C.bg0, border: `1px solid ${C.borderHi}`,
+                borderRadius: C.r1, color: C.t0, fontSize: FS.base,
+                padding: "4px 7px", outline: "none", fontFamily: MONO,
+                width: "100%", boxSizing: "border-box" as const,
+              }}
+            />
+          </div>
 
-      {/* Meta row: folder path + time */}
-      {!renaming && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{
-            fontSize: 12, fontFamily: MONO, color: C.t3,
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-            flex: 1, minWidth: 0,
-          }}>
-            {showPath ? dirName : normalized.includes("/") ? dirName : "~/"}
-          </span>
-          {lastUsed !== undefined && lastUsed > 0 && (
-            <span style={{
-              fontSize: 11, fontFamily: MONO, color: C.t3,
-              flexShrink: 0, marginLeft: 8, opacity: 0.7,
-            }}>
-              {formatRelativeTime(lastUsed)}
-            </span>
-          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontSize: 9, fontFamily: MONO, color: C.t3, letterSpacing: ".06em", textTransform: "uppercase" as const }}>Directory</span>
+            <input
+              ref={dirRef}
+              value={dirVal}
+              onChange={e => setDirVal(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter")  { e.preventDefault(); submit(); }
+                if (e.key === "Escape") { e.preventDefault(); cancel(); }
+              }}
+              style={{
+                background: C.bg0, border: `1px solid ${C.border}`,
+                borderRadius: C.r1, color: C.t1, fontSize: FS.sm,
+                padding: "4px 7px", outline: "none", fontFamily: MONO,
+                width: "100%", boxSizing: "border-box" as const,
+              }}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+            <button onClick={submit} style={{ flex: 1, padding: "4px 0", border: "none", borderRadius: C.r1, background: C.borderHi ?? "#3b82f6", color: "#fff", fontSize: FS.xs, fontFamily: MONO, cursor: "pointer" }}>
+              Save
+            </button>
+            <button onClick={cancel} style={{ flex: 1, padding: "4px 0", border: `1px solid ${C.border}`, borderRadius: C.r1, background: "transparent", color: C.t2, fontSize: FS.xs, fontFamily: MONO, cursor: "pointer" }}>
+              Cancel
+            </button>
+          </div>
         </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 4 }}>
+            <span style={{ fontSize: 14, fontFamily: MONO, fontWeight: 500, color: isActive ? C.t0 : C.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 }}>
+              {workspace.name}
+            </span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 12, fontFamily: MONO, color: C.t3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 }}>
+              {showPath ? dirName : normalized.includes("/") ? dirName : "~/"}
+            </span>
+            {lastUsed !== undefined && lastUsed > 0 && (
+              <span style={{ fontSize: 11, fontFamily: MONO, color: C.t3, flexShrink: 0, marginLeft: 8, opacity: 0.7 }}>
+                {formatRelativeTime(lastUsed)}
+              </span>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

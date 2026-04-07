@@ -17,8 +17,8 @@
 
 use crate::{
     db::Db,
-    memory::{self, LEVEL_LOCKED, LEVEL_PREFERRED, LEVEL_SESSION, now_ms},
     memory::filesystem,
+    memory::{self, now_ms, LEVEL_LOCKED, LEVEL_PREFERRED, LEVEL_SESSION},
 };
 
 // ── Boot init ──────────────────────────────────────────────────────────────────
@@ -131,7 +131,9 @@ fn detect_project_name(cwd: &str) -> String {
     if let Ok(s) = std::fs::read_to_string(p.join("package.json")) {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
             if let Some(n) = v.get("name").and_then(|n| n.as_str()) {
-                if !n.is_empty() { return n.to_string(); }
+                if !n.is_empty() {
+                    return n.to_string();
+                }
             }
         }
     }
@@ -140,12 +142,19 @@ fn detect_project_name(cwd: &str) -> String {
     if let Ok(s) = std::fs::read_to_string(p.join("Cargo.toml")) {
         let mut in_pkg = false;
         for line in s.lines() {
-            if line.trim() == "[package]" { in_pkg = true; continue; }
-            if in_pkg && line.trim().starts_with('[') { break; }
+            if line.trim() == "[package]" {
+                in_pkg = true;
+                continue;
+            }
+            if in_pkg && line.trim().starts_with('[') {
+                break;
+            }
             if in_pkg {
                 if let Some(rest) = line.strip_prefix("name") {
                     let v = rest.trim_start_matches([' ', '=']).trim().trim_matches('"');
-                    if !v.is_empty() { return v.to_string(); }
+                    if !v.is_empty() {
+                        return v.to_string();
+                    }
                 }
             }
         }
@@ -156,7 +165,9 @@ fn detect_project_name(cwd: &str) -> String {
         for line in s.lines() {
             if let Some(rest) = line.strip_prefix("name") {
                 let v = rest.trim_start_matches([' ', '=']).trim().trim_matches('"');
-                if !v.is_empty() { return v.to_string(); }
+                if !v.is_empty() {
+                    return v.to_string();
+                }
             }
         }
     }
@@ -169,13 +180,24 @@ fn detect_project_name(cwd: &str) -> String {
 
 fn detect_project_type(cwd: &str) -> &'static str {
     let p = std::path::Path::new(cwd);
-    if p.join("Cargo.toml").exists()                       { return "rust"; }
-    if p.join("package.json").exists()                     { return "node"; }
+    if p.join("Cargo.toml").exists() {
+        return "rust";
+    }
+    if p.join("package.json").exists() {
+        return "node";
+    }
     if p.join("pyproject.toml").exists()
         || p.join("setup.py").exists()
-        || p.join("requirements.txt").exists()             { return "python"; }
-    if p.join("go.mod").exists()                           { return "go"; }
-    if p.join("pom.xml").exists()                          { return "java"; }
+        || p.join("requirements.txt").exists()
+    {
+        return "python";
+    }
+    if p.join("go.mod").exists() {
+        return "go";
+    }
+    if p.join("pom.xml").exists() {
+        return "java";
+    }
     "unknown"
 }
 
@@ -188,7 +210,9 @@ fn scan_env_config(cwd: &str) -> String {
         if let Ok(s) = std::fs::read_to_string(p.join(env_file)) {
             for line in s.lines().take(30) {
                 let t = line.trim();
-                if t.starts_with('#') || t.is_empty() { continue; }
+                if t.starts_with('#') || t.is_empty() {
+                    continue;
+                }
                 if let Some(eq) = t.find('=') {
                     let key = t[..eq].trim();
                     if !key.is_empty() {
@@ -196,7 +220,9 @@ fn scan_env_config(cwd: &str) -> String {
                     }
                 }
             }
-            if !out.is_empty() { break; }
+            if !out.is_empty() {
+                break;
+            }
         }
     }
 
@@ -209,17 +235,17 @@ fn scan_file_structure(cwd: &str) -> String {
 
     // Key entry points
     let entry_points = [
-        ("src/main.rs",    "entry point"),
-        ("src/lib.rs",     "library root"),
-        ("src/main.ts",    "entry point"),
-        ("src/main.js",    "entry point"),
-        ("src/index.ts",   "module root"),
-        ("src/index.js",   "module root"),
-        ("src/app.ts",     "app root"),
-        ("src/app.js",     "app root"),
-        ("main.py",        "entry point"),
-        ("app.py",         "app root"),
-        ("src/main.py",    "entry point"),
+        ("src/main.rs", "entry point"),
+        ("src/lib.rs", "library root"),
+        ("src/main.ts", "entry point"),
+        ("src/main.js", "entry point"),
+        ("src/index.ts", "module root"),
+        ("src/index.js", "module root"),
+        ("src/app.ts", "app root"),
+        ("src/app.js", "app root"),
+        ("main.py", "entry point"),
+        ("app.py", "app root"),
+        ("src/main.py", "entry point"),
     ];
     for (f, role) in &entry_points {
         if p.join(f).exists() {
@@ -229,11 +255,11 @@ fn scan_file_structure(cwd: &str) -> String {
 
     // Config files
     for (f, role) in &[
-        ("tauri.conf.json",  "Tauri config"),
-        ("next.config.js",   "Next.js config"),
-        ("vite.config.ts",   "Vite config"),
-        ("tsconfig.json",    "TypeScript config"),
-        (".env",             "environment variables"),
+        ("tauri.conf.json", "Tauri config"),
+        ("next.config.js", "Next.js config"),
+        ("vite.config.ts", "Vite config"),
+        ("tsconfig.json", "TypeScript config"),
+        (".env", "environment variables"),
     ] {
         if p.join(f).exists() {
             out.push_str(&format!("  {f}: {role}\n"));
@@ -277,17 +303,24 @@ fn scan_dependencies(cwd: &str) -> String {
     // Cargo.toml — [dependencies] section, capped at 12
     if let Ok(s) = std::fs::read_to_string(p.join("Cargo.toml")) {
         let mut in_deps = false;
-        let mut count   = 0usize;
+        let mut count = 0usize;
         for line in s.lines() {
-            if line.trim() == "[dependencies]" { in_deps = true; continue; }
-            if in_deps && line.trim().starts_with('[') { break; }
+            if line.trim() == "[dependencies]" {
+                in_deps = true;
+                continue;
+            }
+            if in_deps && line.trim().starts_with('[') {
+                break;
+            }
             if in_deps && !line.trim().is_empty() && !line.trim().starts_with('#') {
                 if let Some(eq) = line.find('=') {
                     let name = line[..eq].trim();
                     if !name.is_empty() {
                         out.push_str(&format!("  {name}: crate\n"));
                         count += 1;
-                        if count >= 12 { break; }
+                        if count >= 12 {
+                            break;
+                        }
                     }
                 }
             }
@@ -308,9 +341,13 @@ fn scan_arch_docs(cwd: &str) -> String {
             for line in s.lines().take(60) {
                 let lower = line.to_lowercase();
                 // Detect sections that contain architectural decisions
-                if lower.contains("constraint") || lower.contains("never ") ||
-                   lower.contains("always ") || lower.contains("must ") ||
-                   lower.contains("arch") || lower.contains("decision") {
+                if lower.contains("constraint")
+                    || lower.contains("never ")
+                    || lower.contains("always ")
+                    || lower.contains("must ")
+                    || lower.contains("arch")
+                    || lower.contains("decision")
+                {
                     in_constraints = true;
                 }
                 if in_constraints && !line.trim().is_empty() && out.len() < 600 {
@@ -319,9 +356,13 @@ fn scan_arch_docs(cwd: &str) -> String {
                         out.push_str(&format!("  - \"{escaped}\"\n"));
                     }
                 }
-                if out.len() > 500 { break; }
+                if out.len() > 500 {
+                    break;
+                }
             }
-            if !out.is_empty() { break; }
+            if !out.is_empty() {
+                break;
+            }
         }
     }
 
@@ -335,14 +376,19 @@ fn scan_arch_docs(cwd: &str) -> String {
 /// and persists them as PREFERRED memories for future agents.
 /// No-op if the session produced no session_log entries.
 pub async fn reflection(runbox_id: &str, cwd: &str, session_id: &str) {
-    let all = memory::memories_for_runbox(runbox_id).await.unwrap_or_default();
+    let all = memory::memories_for_runbox(runbox_id)
+        .await
+        .unwrap_or_default();
 
     // Only process logs from the just-ended session
-    let logs: Vec<_> = all.iter()
+    let logs: Vec<_> = all
+        .iter()
         .filter(|m| m.session_id == session_id && m.tags.contains("session_log"))
         .collect();
 
-    if logs.is_empty() { return; }
+    if logs.is_empty() {
+        return;
+    }
 
     eprintln!("[sleep] reflection runbox={runbox_id} logs={}", logs.len());
 
@@ -351,15 +397,13 @@ pub async fn reflection(runbox_id: &str, cwd: &str, session_id: &str) {
     let mut seen_tools: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for log in &logs {
-        let c     = &log.content;
+        let c = &log.content;
         let lower = c.to_lowercase();
 
         // Port facts — extract any port number mentioned
         if lower.contains("port") || lower.contains(":300") || lower.contains(":800") {
             for word in c.split_whitespace() {
-                let digits: String = word.chars()
-                    .filter(|ch| ch.is_ascii_digit())
-                    .collect();
+                let digits: String = word.chars().filter(|ch| ch.is_ascii_digit()).collect();
                 if let Ok(port) = digits.parse::<u16>() {
                     if port >= 3000 && port < 9000 && !seen_ports.contains(&port) {
                         seen_ports.insert(port);
@@ -370,14 +414,17 @@ pub async fn reflection(runbox_id: &str, cwd: &str, session_id: &str) {
         }
 
         // Tool not available — capture for future agents
-        if lower.contains("not found") || lower.contains("not available")
-            || lower.contains("not recognized") || lower.contains("command not found")
+        if lower.contains("not found")
+            || lower.contains("not available")
+            || lower.contains("not recognized")
+            || lower.contains("command not found")
         {
             for word in c.split_whitespace() {
-                let tool = word.trim_matches(|ch: char| {
-                    !ch.is_alphanumeric() && ch != '-' && ch != '_'
-                }).to_lowercase();
-                if tool.len() >= 2 && tool.len() <= 20
+                let tool = word
+                    .trim_matches(|ch: char| !ch.is_alphanumeric() && ch != '-' && ch != '_')
+                    .to_lowercase();
+                if tool.len() >= 2
+                    && tool.len() <= 20
                     && !seen_tools.contains(&tool)
                     && !tool.chars().all(|c| c.is_ascii_digit())
                 {
@@ -391,7 +438,9 @@ pub async fn reflection(runbox_id: &str, cwd: &str, session_id: &str) {
         for keyword in &["node=", "python=", "npm=", "rust=", "go="] {
             if lower.contains(keyword) {
                 for part in c.split_whitespace() {
-                    if part.to_lowercase().starts_with(keyword.trim_end_matches('='))
+                    if part
+                        .to_lowercase()
+                        .starts_with(keyword.trim_end_matches('='))
                         && part.contains('=')
                     {
                         insights.push(part.trim().to_string());
@@ -406,19 +455,25 @@ pub async fn reflection(runbox_id: &str, cwd: &str, session_id: &str) {
     let mut written = 0usize;
     for insight in insights.into_iter().take(5) {
         if memory::remember(
-            runbox_id, session_id,
+            runbox_id,
+            session_id,
             &format!("reflection:{}", &session_id[..session_id.len().min(8)]),
             "stackbox-reflection",
             &insight,
             memory::LEVEL_PREFERRED,
-        ).await.is_ok() {
+        )
+        .await
+        .is_ok()
+        {
             written += 1;
         }
     }
 
     if written > 0 {
         // Sync updated state to filesystem
-        let updated = memory::memories_for_runbox(runbox_id).await.unwrap_or_default();
+        let updated = memory::memories_for_runbox(runbox_id)
+            .await
+            .unwrap_or_default();
         filesystem::sync_to_fs(runbox_id, cwd, &updated).await;
         filesystem::commit_memory_async(
             cwd,
@@ -440,23 +495,27 @@ pub async fn reflection(runbox_id: &str, cwd: &str, session_id: &str) {
 pub async fn defrag(runbox_id: &str, cwd: &str) {
     eprintln!("[sleep] defrag starting runbox={runbox_id}");
 
-    let all    = memory::memories_for_runbox(runbox_id).await.unwrap_or_default();
-    let now    = now_ms();
+    let all = memory::memories_for_runbox(runbox_id)
+        .await
+        .unwrap_or_default();
+    let now = now_ms();
     let mut deleted = 0usize;
-    let mut merged  = 0usize;
+    let mut merged = 0usize;
 
     // 1. Delete time-expired memories (not LOCKED)
-    for m in all.iter().filter(|m| {
-        m.effective_level() != LEVEL_LOCKED
-            && m.decay_at > 0
-            && m.decay_at < now
-    }) {
-        if memory::memory_delete(&m.id).await.is_ok() { deleted += 1; }
+    for m in all
+        .iter()
+        .filter(|m| m.effective_level() != LEVEL_LOCKED && m.decay_at > 0 && m.decay_at < now)
+    {
+        if memory::memory_delete(&m.id).await.is_ok() {
+            deleted += 1;
+        }
     }
 
     // 2. Dedup PREFERRED by key — keep newest per key, delete older
     {
-        let preferred: Vec<_> = all.iter()
+        let preferred: Vec<_> = all
+            .iter()
             .filter(|m| m.effective_level() == LEVEL_PREFERRED)
             .collect();
 
@@ -472,20 +531,27 @@ pub async fn defrag(runbox_id: &str, cwd: &str) {
         }
 
         for (_, mut mems) in by_key {
-            if mems.len() <= 1 { continue; }
+            if mems.len() <= 1 {
+                continue;
+            }
             mems.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
             for old in &mems[1..] {
-                if memory::memory_delete(&old.id).await.is_ok() { merged += 1; }
+                if memory::memory_delete(&old.id).await.is_ok() {
+                    merged += 1;
+                }
             }
         }
     }
 
     // Reload after deletions for cap enforcement
-    let remaining = memory::memories_for_runbox(runbox_id).await.unwrap_or_default();
+    let remaining = memory::memories_for_runbox(runbox_id)
+        .await
+        .unwrap_or_default();
 
     // 3. Cap PREFERRED at 200 — prune lowest-scored
     {
-        let mut preferred: Vec<_> = remaining.iter()
+        let mut preferred: Vec<_> = remaining
+            .iter()
             .filter(|m| m.effective_level() == LEVEL_PREFERRED)
             .collect();
 
@@ -496,19 +562,24 @@ pub async fn defrag(runbox_id: &str, cwd: &str) {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             for m in &preferred[200..] {
-                if memory::memory_delete(&m.id).await.is_ok() { deleted += 1; }
+                if memory::memory_delete(&m.id).await.is_ok() {
+                    deleted += 1;
+                }
             }
         }
     }
 
     // 4. Cap SESSION at 10 per runbox — keep most recent
     {
-        let mut sessions: Vec<_> = remaining.iter()
+        let mut sessions: Vec<_> = remaining
+            .iter()
             .filter(|m| m.effective_level() == LEVEL_SESSION)
             .collect();
         sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         for m in sessions.iter().skip(10) {
-            if memory::memory_delete(&m.id).await.is_ok() { deleted += 1; }
+            if memory::memory_delete(&m.id).await.is_ok() {
+                deleted += 1;
+            }
         }
     }
 
@@ -517,7 +588,8 @@ pub async fn defrag(runbox_id: &str, cwd: &str) {
     if let Ok(entries) = std::fs::read_dir(&insights_dir) {
         let cutoff = now_ms() - 90 * 86_400_000i64;
         for entry in entries.filter_map(|e| e.ok()) {
-            let mtime_ms = entry.metadata()
+            let mtime_ms = entry
+                .metadata()
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -530,14 +602,13 @@ pub async fn defrag(runbox_id: &str, cwd: &str) {
     }
 
     // 6. Full sync + commit after cleanup
-    let final_mems = memory::memories_for_runbox(runbox_id).await.unwrap_or_default();
+    let final_mems = memory::memories_for_runbox(runbox_id)
+        .await
+        .unwrap_or_default();
     filesystem::sync_to_fs(runbox_id, cwd, &final_mems).await;
 
     if deleted + merged > 0 {
-        filesystem::commit_memory_async(
-            cwd,
-            format!("defrag: deleted={deleted} merged={merged}"),
-        );
+        filesystem::commit_memory_async(cwd, format!("defrag: deleted={deleted} merged={merged}"));
         eprintln!("[sleep] defrag complete — deleted={deleted} merged={merged}");
     } else {
         eprintln!("[sleep] defrag complete — nothing to clean");
@@ -549,7 +620,9 @@ pub async fn defrag(runbox_id: &str, cwd: &str) {
 /// Returns true if defrag hasn't run in the last 7 days.
 pub fn is_defrag_due(cwd: &str) -> bool {
     let sentinel = filesystem::memory_dir(cwd).join(".last_defrag");
-    if !sentinel.exists() { return true; }
+    if !sentinel.exists() {
+        return true;
+    }
     std::fs::metadata(&sentinel)
         .and_then(|m| m.modified())
         .ok()

@@ -10,9 +10,9 @@
 //   /memory/ directory for filesystem sync without changing every function
 //   signature. Registered on every pty::spawn() call.
 
-use std::sync::OnceLock;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 
 // ── App handle ────────────────────────────────────────────────────────────────
@@ -25,7 +25,10 @@ pub fn set_app_handle(handle: AppHandle) {
 
 pub fn emit_memory_added(runbox_id: &str) {
     if let Some(handle) = APP_HANDLE.get() {
-        let _ = handle.emit("memory-added", serde_json::json!({ "runbox_id": runbox_id }));
+        let _ = handle.emit(
+            "memory-added",
+            serde_json::json!({ "runbox_id": runbox_id }),
+        );
     }
 }
 

@@ -19,6 +19,10 @@ interface Props {
   onRename:      (id: string, name: string) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   onNew:         () => void;
+  /** Which workspace is being externally edited + which field */
+  editingId?:    string | null;
+  editField?:    "name" | "dir" | null;
+  onExternalEditDone?: () => void;
 }
 
 export function WorkspaceList({
@@ -26,6 +30,7 @@ export function WorkspaceList({
   wsName, wsEditing, wsVal, wsInputRef,
   onWsClick, onWsChange, onWsKeyDown, onWsBlur,
   onSelect, onRename, onContextMenu, onNew,
+  editingId, editField, onExternalEditDone,
 }: Props) {
   return (
     <div style={{
@@ -72,6 +77,8 @@ export function WorkspaceList({
             onSelect={() => onSelect(ws.id)}
             onRename={name => onRename(ws.id, name)}
             onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, ws.id); }}
+            externalEdit={editingId === ws.id ? editField : null}
+            onExternalEditDone={onExternalEditDone}
           />
         ))}
 
@@ -82,17 +89,6 @@ export function WorkspaceList({
             </div>
           </div>
         )}
-      </div>
-
-      {/* Footer */}
-      <div style={{
-        padding: "6px 16px",
-        borderTop: `1px solid ${C.border}`,
-        fontSize: FS.xs, color: C.t3, fontFamily: SANS,
-        background: C.bg1, flexShrink: 0,
-        letterSpacing: ".02em", textAlign: "center",
-      }}>
-        double-click to rename · right-click for options
       </div>
     </div>
   );

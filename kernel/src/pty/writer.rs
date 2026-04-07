@@ -40,11 +40,7 @@ impl PtyWriter {
 
     /// Register a PTY when it spawns.
     /// `sender` forwards bytes into the PTY's stdin via an async forwarder task.
-    pub fn register(
-        &self,
-        runbox_id: &str,
-        sender: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
-    ) {
+    pub fn register(&self, runbox_id: &str, sender: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) {
         self.senders
             .lock()
             .unwrap()

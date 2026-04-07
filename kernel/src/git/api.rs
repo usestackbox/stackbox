@@ -19,14 +19,14 @@
 use serde::Deserialize;
 
 pub struct GithubApi {
-    token:  String,
+    token: String,
     client: reqwest::Client,
 }
 
 impl GithubApi {
     pub fn new(token: &str) -> Self {
         Self {
-            token:  token.to_string(),
+            token: token.to_string(),
             client: reqwest::Client::new(),
         }
     }
@@ -40,14 +40,13 @@ impl GithubApi {
     /// Fetch all inline code review comments on a PR.
     pub async fn get_review_comments(
         &self,
-        repo:   &str,   // "owner/repo"
+        repo: &str, // "owner/repo"
         pr_num: u64,
     ) -> Result<Vec<ReviewComment>, String> {
-        let url = format!(
-            "https://api.github.com/repos/{repo}/pulls/{pr_num}/comments"
-        );
+        let url = format!("https://api.github.com/repos/{repo}/pulls/{pr_num}/comments");
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .header("Authorization", self.auth_header())
             .header("Accept", "application/vnd.github+json")
@@ -77,7 +76,7 @@ impl GithubApi {
             .split('/')
             .last()
             .ok_or("cannot parse id from check run url")?
-            .split('?')      // strip ?check_suite_focus=true etc.
+            .split('?') // strip ?check_suite_focus=true etc.
             .next()
             .unwrap_or("");
 
@@ -96,11 +95,10 @@ impl GithubApi {
         }
         let repo = format!("{}/{}", parts[0], parts[1]);
 
-        let url = format!(
-            "https://api.github.com/repos/{repo}/actions/jobs/{last_segment}/logs"
-        );
+        let url = format!("https://api.github.com/repos/{repo}/actions/jobs/{last_segment}/logs");
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .header("Authorization", self.auth_header())
             .header("Accept", "application/vnd.github+json")
@@ -148,10 +146,9 @@ impl GithubApi {
         let repo = format!("{}/{}", parts[0], parts[1]);
 
         // Step 1: get jobs for this workflow run
-        let jobs_url = format!(
-            "https://api.github.com/repos/{repo}/actions/runs/{run_id}/jobs"
-        );
-        let jobs_resp = self.client
+        let jobs_url = format!("https://api.github.com/repos/{repo}/actions/runs/{run_id}/jobs");
+        let jobs_resp = self
+            .client
             .get(&jobs_url)
             .header("Authorization", self.auth_header())
             .header("Accept", "application/vnd.github+json")
@@ -161,7 +158,10 @@ impl GithubApi {
             .map_err(|e| e.to_string())?;
 
         if !jobs_resp.status().is_success() {
-            return Err(format!("GitHub jobs API {}: {jobs_url}", jobs_resp.status()));
+            return Err(format!(
+                "GitHub jobs API {}: {jobs_url}",
+                jobs_resp.status()
+            ));
         }
 
         let jobs: WorkflowJobsResponse = jobs_resp
@@ -176,7 +176,8 @@ impl GithubApi {
                 "https://api.github.com/repos/{repo}/actions/jobs/{}/logs",
                 job.id
             );
-            if let Ok(resp) = self.client
+            if let Ok(resp) = self
+                .client
                 .get(&log_url)
                 .header("Authorization", self.auth_header())
                 .header("Accept", "application/vnd.github+json")
@@ -202,11 +203,11 @@ impl GithubApi {
 
 #[derive(Debug, Deserialize)]
 pub struct ReviewComment {
-    pub path:      String,
-    pub line:      Option<u64>,
-    pub body:      String,
+    pub path: String,
+    pub line: Option<u64>,
+    pub body: String,
     pub diff_hunk: Option<String>,
-    pub html_url:  String,
+    pub html_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -216,6 +217,6 @@ struct WorkflowJobsResponse {
 
 #[derive(Debug, Deserialize)]
 struct WorkflowJob {
-    id:   u64,
+    id: u64,
     name: String,
 }

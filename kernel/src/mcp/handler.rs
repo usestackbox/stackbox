@@ -4,19 +4,23 @@
 //   being computed and immediately discarded (prefixed with _). Memories and
 //   status writes triggered via MCP will be tagged with the correct agent name.
 
-use axum::{extract::{Path, State}, http::HeaderMap, Json};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
 
-use super::{McpState, JsonRpcRequest, JsonRpcResponse, tools};
+use super::{tools, JsonRpcRequest, JsonRpcResponse, McpState};
 
 pub async fn mcp_handler(
     Path(_runbox_id): Path<String>,
-    State(state):    State<McpState>,
-    headers:         HeaderMap,
-    Json(req):       Json<JsonRpcRequest>,
+    State(state): State<McpState>,
+    headers: HeaderMap,
+    Json(req): Json<JsonRpcRequest>,
 ) -> Json<JsonRpcResponse> {
     let session_id = extract_session_id(&headers);
     let agent_name = resolve_agent_name(&session_id, &state);
-    let id         = req.id.clone();
+    let id = req.id.clone();
 
     let resp = match tools::dispatch(
         &req.method,
@@ -24,9 +28,11 @@ pub async fn mcp_handler(
         &state.app_state,
         &state.db,
         &agent_name,
-    ).await {
+    )
+    .await
+    {
         Ok(result) => JsonRpcResponse::ok(id, result),
-        Err(msg)   => JsonRpcResponse::err(id, -32603, msg),
+        Err(msg) => JsonRpcResponse::err(id, -32603, msg),
     };
 
     Json(resp)

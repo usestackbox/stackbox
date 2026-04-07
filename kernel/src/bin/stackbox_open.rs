@@ -10,7 +10,7 @@ fn main() {
 
     // ── 1. POST to the embedded server → triggers "browser-open-url" Tauri event
     let port = 7547u16;
-    let body  = url.as_bytes();
+    let body = url.as_bytes();
     let req   = format!(
         "POST /open-url HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nContent-Length: {}\r\nContent-Type: text/plain\r\n\r\n{}",
         body.len(),
@@ -66,6 +66,9 @@ fn normalize_to_url(raw: &str) -> String {
 
 fn has_web_extension(s: &str) -> bool {
     let lower = s.to_lowercase();
-    lower.ends_with(".html") || lower.ends_with(".htm")
-        || lower.ends_with(".svg") || lower.ends_with(".pdf") || lower.ends_with(".xhtml")
+    lower.ends_with(".html")
+        || lower.ends_with(".htm")
+        || lower.ends_with(".svg")
+        || lower.ends_with(".pdf")
+        || lower.ends_with(".xhtml")
 }

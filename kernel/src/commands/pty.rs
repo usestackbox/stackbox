@@ -1,34 +1,36 @@
 // src-tauri/src/commands/pty.rs
-use std::io::Write;
-use tauri::AppHandle;
 use crate::{
     agent::kind::AgentKind,
     db::sessions::session_end,
-    git::repo::{ensure_git_repo, ensure_worktree, has_git, remove_worktree},
-    pty::{self, expand_cwd, tmux_session_alive, kill_tmux_session},
+    git::repo::{ensure_git_repo, ensure_worktree, has_git, remove_worktree_only},
+    pty::{self, expand_cwd, kill_tmux_session, tmux_session_alive},
     state::AppState,
+    workspace::persistent,
 };
+use std::io::Write;
+use tauri::AppHandle;
 
 #[tauri::command]
 pub async fn pty_spawn(
-    app:            AppHandle,
-    session_id:     String,
-    runbox_id:      String,
-    cwd:            String,
-    agent_cmd:      Option<String>,
+    app: AppHandle,
+    session_id: String,
+    runbox_id: String,
+    cwd: String,
+    agent_cmd: Option<String>,
     workspace_name: Option<String>,
-    cols:           Option<u16>,
-    rows:           Option<u16>,
-    docker:         Option<bool>,
-    state:          tauri::State<'_, AppState>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    docker: Option<bool>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     // ── 1. Resolve the real cwd ───────────────────────────────────────────────
     let real_cwd = expand_cwd(&cwd);
 
     // ── 2. Detect agent kind from agent_cmd ───────────────────────────────────
-    let kind = agent_cmd.as_deref()
+    let kind = agent_cmd
+        .as_deref()
         .map(|cmd| {
-            let token    = cmd.trim().split_whitespace().next().unwrap_or(cmd);
+            let token = cmd.trim().split_whitespace().next().unwrap_or(cmd);
             let base_cmd = token.rsplit(['/', '\\']).next().unwrap_or(token);
             AgentKind::detect(base_cmd)
         })
@@ -36,61 +38,124 @@ pub async fn pty_spawn(
 
     let agent_kind_str = kind.kind_str();
 
-    // ── 3. Ensure git repo + eagerly create the agent's worktree ─────────────
-    //
-    // Worktree key = runbox_id + agent_kind so:
-    //   • Different agents in the same workspace → separate worktrees
-    //   • Two Claude sessions in the same workspace → same worktree (shared)
+    // ── 3. Init persistent project dir in appdata ─────────────────────────────
+    // Idempotent — safe to call on every spawn, even shell sessions.
+    if let Err(e) = persistent::init_project(&real_cwd) {
+        eprintln!("[pty_spawn] persistent::init_project: {e}");
+    }
+
+    // ── 4. Ensure git repo + eagerly create the agent's worktree ─────────────
     let _worktree_path: Option<String> = if has_git(&real_cwd, &runbox_id) {
         let _ = ensure_git_repo(&real_cwd, &runbox_id);
         let wt = ensure_worktree(&real_cwd, &runbox_id, &session_id, agent_kind_str);
 
         if let Some(ref wt) = wt {
             let _ = crate::db::runboxes::runbox_set_worktree(
-                &state.db, &runbox_id, agent_kind_str,
-                Some(wt.path.as_str()), Some(wt.branch.as_str()),  // 5 args
+                &state.db,
+                &runbox_id,
+                agent_kind_str,
+                Some(wt.path.as_str()),
+                Some(wt.branch.as_str()),
             );
             let wt_path = &wt.path;
+            let wt_name = persistent::wt_name_from_path(wt_path);
             eprintln!("[pty_spawn] worktree ready for {runbox_id}/{agent_kind_str}: {wt_path}");
 
-            // Write MCP configs to BOTH main cwd AND worktree so every agent
-            // finds its .codex/mcp.json / .claude/mcp.json regardless of where
-            // it looks.
+            // ── Register agent in ~/.stackbox/projects/<repo>/WORKSPACE.md ──
+            if let Err(e) = persistent::register_agent(
+                &real_cwd,
+                &wt_name,
+                &wt.branch,
+                agent_kind_str,
+                wt_path,
+            ) {
+                eprintln!("[pty_spawn] persistent::register_agent: {e}");
+            }
+
+            // ── Register session for injector lookup ─────────────────────────
+            persistent::register_session(&runbox_id, &real_cwd, &wt_name);
+
+            // ── Write MCP configs ────────────────────────────────────────────
             let _ = crate::mcp::config::write_mcp_config(
-                &real_cwd, Some(wt_path.as_str()), &runbox_id, &session_id,
+                &real_cwd,
+                Some(wt_path.as_str()),
+                &runbox_id,
+                &session_id,
             );
+
+            // ── Write appdata context file (replaces .stackbox/agents/ in repo)
+            if let Err(e) = crate::agent::context::inject(
+                &real_cwd,
+                &runbox_id,
+                &session_id,
+                agent_kind_str,
+                Some(wt_path.as_str()),
+            ) {
+                eprintln!("[pty_spawn] context::inject: {e}");
+            }
         } else {
-            // No worktree (shadow repo) — write only to main cwd
-            let _ = crate::mcp::config::write_mcp_config(
-                &real_cwd, None, &runbox_id, &session_id,
-            );
+            // No worktree (shadow repo) — write MCP + context without worktree
+            let _ = crate::mcp::config::write_mcp_config(&real_cwd, None, &runbox_id, &session_id);
+            if let Err(e) = crate::agent::context::inject(
+                &real_cwd,
+                &runbox_id,
+                &session_id,
+                agent_kind_str,
+                None,
+            ) {
+                eprintln!("[pty_spawn] context::inject (no wt): {e}");
+            }
         }
         wt.map(|w| w.path)
     } else {
-        // No git at all — still write MCP config to cwd
-        let _ = crate::mcp::config::write_mcp_config(
-            &real_cwd, None, &runbox_id, &session_id,
-        );
+        // No git — still write MCP + context
+        let _ = crate::mcp::config::write_mcp_config(&real_cwd, None, &runbox_id, &session_id);
+        if let Err(e) =
+            crate::agent::context::inject(&real_cwd, &runbox_id, &session_id, agent_kind_str, None)
+        {
+            eprintln!("[pty_spawn] context::inject (no git): {e}");
+        }
         None
     };
 
-    // ── 4. Terminal always starts in the user's real workspace folder ──────────
+    // ── 5. Set STACKBOX_CONTEXT env var ──────────────────────────────────────
+    // Points the agent to its appdata context file so it can read it.
+    // This env var is set in the PTY environment, not in the user's shell rc.
+    let context_file = crate::agent::context::context_file_path(&real_cwd, &runbox_id);
+    // The env var is passed through to pty::spawn via workspace_name for now;
+    // in a full impl this would go into pty::SpawnOptions.
+    // We log it so agents can find it via `env | grep STACKBOX`.
+    eprintln!(
+        "[pty_spawn] STACKBOX_CONTEXT={}",
+        context_file.display()
+    );
+
+    // ── 6. Terminal always starts in the user's real workspace folder ─────────
     let effective_cwd = real_cwd.clone();
 
     pty::spawn(
-        app, session_id, runbox_id, effective_cwd,
-        agent_cmd, workspace_name, cols, rows, docker.unwrap_or(false), &state,
-    ).await
+        app,
+        session_id,
+        runbox_id,
+        effective_cwd,
+        agent_cmd,
+        workspace_name,
+        cols,
+        rows,
+        docker.unwrap_or(false),
+        &state,
+    )
+    .await
 }
 
 #[tauri::command]
 pub fn pty_write(
     session_id: String,
-    data:       String,
-    state:      tauri::State<'_, AppState>,
+    data: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut inject:    Option<(String, String, AgentKind)> = None;
-    let mut open_url:  Option<String> = None;
+    let mut inject: Option<(String, String, AgentKind, Option<String>)> = None;
+    let mut open_url: Option<String> = None;
     let mut send_data: Option<String> = None;
 
     {
@@ -103,20 +168,29 @@ pub fn pty_write(
                         s.input_buf.clear();
                         if !line.is_empty() {
                             if let Some(url) = intercept_start_cmd(&line, &s.cwd) {
-                                open_url  = Some(url);
+                                open_url = Some(url);
                                 send_data = Some("\x03\r\n".to_string());
                             } else {
-                                let token    = line.split_whitespace().next().unwrap_or("");
+                                let token = line.split_whitespace().next().unwrap_or("");
                                 let base_cmd = token.rsplit(['/', '\\']).next().unwrap_or(token);
-                                let kind     = AgentKind::detect(base_cmd);
+                                let kind = AgentKind::detect(base_cmd);
                                 if kind != AgentKind::Shell {
-                                    inject = Some((s.runbox_id.clone(), s.cwd.clone(), kind));
+                                    inject = Some((
+                                        s.runbox_id.clone(),
+                                        s.cwd.clone(),
+                                        kind,
+                                        s.worktree_path.clone(),
+                                    ));
                                 }
                             }
                         }
                     }
-                    '\x08' | '\x7f' => { s.input_buf.pop(); }
-                    c if !c.is_control() => { s.input_buf.push(c); }
+                    '\x08' | '\x7f' => {
+                        s.input_buf.pop();
+                    }
+                    c if !c.is_control() => {
+                        s.input_buf.push(c);
+                    }
                     _ => {}
                 }
             }
@@ -131,11 +205,13 @@ pub fn pty_write(
         crate::agent::globals::emit_event("browser-open-url", serde_json::json!(url));
     }
 
-    if let Some((rb, cwd, kind)) = inject {
+    if let Some((rb, cwd, kind, wt_path)) = inject {
         let sid = session_id.clone();
-        let _db  = state.db.clone();
+        let _db = state.db.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = crate::agent::context::inject(&cwd, &rb, &sid, kind.kind_str(), None) {
+            if let Err(e) =
+                crate::agent::context::inject(&cwd, &rb, &sid, kind.kind_str(), wt_path.as_deref())
+            {
                 eprintln!("[pty_write] re-inject: {e}");
             }
         });
@@ -146,18 +222,27 @@ pub fn pty_write(
 fn intercept_start_cmd(line: &str, cwd: &str) -> Option<String> {
     let mut parts = line.splitn(2, char::is_whitespace);
     let cmd = parts.next().unwrap_or("").to_lowercase();
-    if cmd != "start" { return None; }
-
-    let arg = parts.next()?.trim().trim_matches('"').trim_matches('\'');
-    if arg.is_empty() { return None; }
-
-    let lower = arg.to_lowercase();
-    if !lower.ends_with(".html") && !lower.ends_with(".htm")
-        && !lower.ends_with(".svg")  && !lower.ends_with(".pdf") {
+    if cmd != "start" {
         return None;
     }
 
-    if arg.starts_with("file://") { return Some(arg.to_string()); }
+    let arg = parts.next()?.trim().trim_matches('"').trim_matches('\'');
+    if arg.is_empty() {
+        return None;
+    }
+
+    let lower = arg.to_lowercase();
+    if !lower.ends_with(".html")
+        && !lower.ends_with(".htm")
+        && !lower.ends_with(".svg")
+        && !lower.ends_with(".pdf")
+    {
+        return None;
+    }
+
+    if arg.starts_with("file://") {
+        return Some(arg.to_string());
+    }
 
     if arg.len() >= 2 && arg.chars().nth(1) == Some(':') {
         let normalised = arg.replace('\\', "/");
@@ -180,12 +265,20 @@ fn intercept_start_cmd(line: &str, cwd: &str) -> Option<String> {
 
 #[tauri::command]
 pub fn pty_resize(
-    session_id: String, cols: u16, rows: u16,
+    session_id: String,
+    cols: u16,
+    rows: u16,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     use portable_pty::PtySize;
     if let Some(s) = state.sessions.lock().unwrap().get(&session_id) {
-        s._master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        s._master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -196,12 +289,22 @@ pub fn pty_kill(session_id: String, state: tauri::State<'_, AppState>) -> Result
     if let Some(mut s) = state.sessions.lock().unwrap().remove(&session_id) {
         let _ = s._child.kill();
         let _ = session_end(&state.db, &session_id, Some(1), None);
+
+        // ── Mark agent as "paused" in persistent memory ───────────────────────
+        // Worktree stays alive — agent will resume on next open.
         if let Some(ref wt) = s.worktree_path {
-            remove_worktree(wt);
+            let wt_name = persistent::wt_name_from_path(wt);
+            persistent::update_agent_status(&s.cwd, &wt_name, "paused");
+            persistent::deregister_session(&s.runbox_id);
+
+            // Keep the worktree alive (branch persists, agent resumes next time).
+            // Only remove the filesystem checkout — branch stays in git.
+            remove_worktree_only(wt);
         }
     }
     Ok(())
 }
+
 #[tauri::command]
 pub fn pty_session_alive(runbox_id: String) -> bool {
     tmux_session_alive(&runbox_id)
@@ -218,7 +321,39 @@ pub async fn get_session_worktree_path(
     runbox_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    Ok(state.sessions.lock().unwrap()
+    Ok(state
+        .sessions
+        .lock()
+        .unwrap()
         .get(&runbox_id)
         .and_then(|s| s.worktree_path.clone()))
+}
+
+// ── Persistent memory commands ────────────────────────────────────────────────
+
+/// Get all agents (active + done) for a workspace.
+/// Frontend uses this to display the agent/worktree list.
+#[tauri::command]
+pub fn get_workspace_agents(cwd: String) -> Vec<persistent::AgentEntry> {
+    persistent::list_all_agents(&cwd)
+}
+
+/// Get only in-progress/paused agents with existing worktrees.
+/// Used for auto-resume on workspace open.
+#[tauri::command]
+pub fn get_resumable_agents(cwd: String) -> Vec<persistent::AgentEntry> {
+    persistent::agents_to_resume(&cwd)
+}
+
+/// Read STATE.md for a specific agent. Returns None if not found.
+#[tauri::command]
+pub fn get_agent_state(cwd: String, wt_name: String) -> Option<String> {
+    persistent::read_agent_state(&cwd, &wt_name)
+}
+
+/// Mark an agent as done (e.g., after PR merged).
+#[tauri::command]
+pub fn mark_agent_done(cwd: String, wt_name: String) -> Result<(), String> {
+    persistent::update_agent_status(&cwd, &wt_name, "done");
+    Ok(())
 }

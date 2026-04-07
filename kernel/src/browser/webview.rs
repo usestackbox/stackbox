@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use tauri::{AppHandle, Manager, WebviewBuilder, WebviewUrl, LogicalPosition, LogicalSize};
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
 
 static BROWSERS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
@@ -16,40 +16,54 @@ fn label(id: &str) -> String {
 
 #[tauri::command]
 pub async fn browser_create(
-    app: AppHandle, id: String, url: String,
-    x: f64, y: f64, width: f64, height: f64,
+    app: AppHandle,
+    id: String,
+    url: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
     runbox_id: Option<String>,
 ) -> Result<(), String> {
     let lbl = label(&id);
-    if let Some(wv) = app.get_webview(&lbl) { let _ = wv.close(); }
+    if let Some(wv) = app.get_webview(&lbl) {
+        let _ = wv.close();
+    }
 
-    let main_window = app.get_window("main")
+    let main_window = app
+        .get_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
 
     let webview = WebviewBuilder::new(
         &lbl,
         WebviewUrl::External(url.parse().map_err(|e: url::ParseError| e.to_string())?),
-    ).auto_resize();
+    )
+    .auto_resize();
 
     main_window
-        .add_child(webview, LogicalPosition::new(x, y), LogicalSize::new(width, height))
+        .add_child(
+            webview,
+            LogicalPosition::new(x, y),
+            LogicalSize::new(width, height),
+        )
         .map_err(|e| e.to_string())?;
 
     browsers().lock().unwrap().insert(id.clone(), lbl.clone());
 
     // Injection thread — URL tracking + link interception
-    let app2      = app.clone();
-    let id2       = id.clone();
-    let lbl2      = lbl.clone();
+    let app2 = app.clone();
+    let id2 = id.clone();
+    let lbl2 = lbl.clone();
     let runbox_id2 = runbox_id.unwrap_or_else(|| id.clone());
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(800));
         loop {
             let wv = match app2.get_webview(&lbl2) {
                 Some(w) => w,
-                None    => break,
+                None => break,
             };
-            let script = format!(r#"(function(){{
+            let script = format!(
+                r#"(function(){{
                 // ── URL tracking ──────────────────────────────────────────────
                 if (!window._sbxTracking) {{
                     window._sbxTracking = true;
@@ -110,7 +124,10 @@ pub async fn browser_create(
                         _report('unhandled promise rejection', e.reason);
                     }});
                 }}
-            }})();"#, id = id2, runbox_id = runbox_id2);
+            }})();"#,
+                id = id2,
+                runbox_id = runbox_id2
+            );
             let _ = wv.eval(&script);
             std::thread::sleep(std::time::Duration::from_millis(600));
         }
@@ -137,7 +154,9 @@ pub fn browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), S
     // navigate() for file:// only; for http/https keep using eval (more reliable
     // on Windows child webviews created via add_child).
     if url.starts_with("file://") {
-        let parsed = url.parse::<url::Url>().map_err(|e: url::ParseError| e.to_string())?;
+        let parsed = url
+            .parse::<url::Url>()
+            .map_err(|e: url::ParseError| e.to_string())?;
         return wv.navigate(parsed).map_err(|e| e.to_string());
     }
 
@@ -148,34 +167,52 @@ pub fn browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), S
 
 #[tauri::command]
 pub fn browser_set_bounds(
-    app: AppHandle, id: String, x: f64, y: f64, width: f64, height: f64,
+    app: AppHandle,
+    id: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 ) -> Result<(), String> {
     let wv = app.get_webview(&label(&id)).ok_or("webview not found")?;
-    wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
-    wv.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())
+    wv.set_position(LogicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
+    wv.set_size(LogicalSize::new(width, height))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn browser_go_back(app: AppHandle, id: String) -> Result<(), String> {
-    app.get_webview(&label(&id)).ok_or("webview not found")?
-        .eval("window.history.back()").map_err(|e| e.to_string())
+    app.get_webview(&label(&id))
+        .ok_or("webview not found")?
+        .eval("window.history.back()")
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn browser_go_forward(app: AppHandle, id: String) -> Result<(), String> {
-    app.get_webview(&label(&id)).ok_or("webview not found")?
-        .eval("window.history.forward()").map_err(|e| e.to_string())
+    app.get_webview(&label(&id))
+        .ok_or("webview not found")?
+        .eval("window.history.forward()")
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn browser_reload(app: AppHandle, id: String) -> Result<(), String> {
-    app.get_webview(&label(&id)).ok_or("webview not found")?
-        .eval("window.location.reload()").map_err(|e| e.to_string())
+    app.get_webview(&label(&id))
+        .ok_or("webview not found")?
+        .eval("window.location.reload()")
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn browser_show(
-    app: AppHandle, id: String, x: f64, y: f64, width: f64, height: f64,
+    app: AppHandle,
+    id: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 ) -> Result<(), String> {
     if let Some(wv) = app.get_webview(&label(&id)) {
         let _ = wv.set_position(LogicalPosition::new(x, y));

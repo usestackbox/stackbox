@@ -12,35 +12,36 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::memory::{
-    self, Memory,
-    LEVEL_LOCKED, LEVEL_PREFERRED, LEVEL_TEMPORARY, LEVEL_SESSION,
-    MT_GOAL, MT_SESSION, MT_BLOCKER, MT_FAILURE,
-    now_ms,
-};
 use crate::agent::embedder;
+use crate::memory::{
+    self, now_ms, Memory, LEVEL_LOCKED, LEVEL_PREFERRED, LEVEL_SESSION, LEVEL_TEMPORARY,
+    MT_BLOCKER, MT_FAILURE, MT_GOAL, MT_SESSION,
+};
 
 // ── Token budgets ─────────────────────────────────────────────────────────────
-const BUDGET_LOCKED:    usize = 120;
-const BUDGET_SESSION:   usize = 120;
+const BUDGET_LOCKED: usize = 120;
+const BUDGET_SESSION: usize = 120;
 const BUDGET_PREFERRED: usize = 160;
 const BUDGET_TEMPORARY: usize = 80;
-const BUDGET_TOTAL_V3:  usize = 480;
+const BUDGET_TOTAL_V3: usize = 480;
 
 // V2 budgets (legacy)
-const BUDGET_GOAL:        usize = 600;
-const BUDGET_SESSION_V2:  usize = 400;
-const BUDGET_BLOCKERS:    usize = 400;
-const BUDGET_FAILURES:    usize = 700;
+const BUDGET_GOAL: usize = 600;
+const BUDGET_SESSION_V2: usize = 400;
+const BUDGET_BLOCKERS: usize = 400;
+const BUDGET_FAILURES: usize = 700;
 const BUDGET_ENV_MACHINE: usize = 300;
-const BUDGET_ENV_LOCAL:   usize = 300;
-const BUDGET_CODEBASE:    usize = 500;
-const BUDGET_TOTAL:       usize = 3000;
+const BUDGET_ENV_LOCAL: usize = 300;
+const BUDGET_CODEBASE: usize = 500;
+const BUDGET_TOTAL: usize = 3000;
 
-fn est_tokens(s: &str) -> usize { (s.len() / 4).max(1) }
+fn est_tokens(s: &str) -> usize {
+    (s.len() / 4).max(1)
+}
 
 fn compress(content: &str, max_lines: usize) -> String {
-    content.lines()
+    content
+        .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .take(max_lines)
@@ -49,17 +50,22 @@ fn compress(content: &str, max_lines: usize) -> String {
 }
 
 fn keyword_relevance(content: &str, task: &str) -> f32 {
-    if task.is_empty() { return 0.0; }
+    if task.is_empty() {
+        return 0.0;
+    }
     let cl = content.to_lowercase();
     let words: Vec<&str> = task.split_whitespace().collect();
-    let hits = words.iter()
+    let hits = words
+        .iter()
         .filter(|w| w.len() > 3 && cl.contains(w.to_lowercase().as_str()))
         .count();
     hits as f32 / words.len().max(1) as f32
 }
 
 fn ann_rank<'a>(memories: &mut Vec<&'a Memory>, task: &str) {
-    if task.is_empty() { return; }
+    if task.is_empty() {
+        return;
+    }
     if let Some(task_vec) = embedder::try_embed(task) {
         memories.sort_by(|a, b| {
             let sa = embedder::try_embed(&a.content)
@@ -81,7 +87,10 @@ fn ann_rank<'a>(memories: &mut Vec<&'a Memory>, task: &str) {
 
 // ── Session cache ─────────────────────────────────────────────────────────────
 
-struct CacheEntry { output: String, ts: i64 }
+struct CacheEntry {
+    output: String,
+    ts: i64,
+}
 type Cache = Arc<Mutex<HashMap<String, CacheEntry>>>;
 
 static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
@@ -90,7 +99,12 @@ fn cache() -> &'static Cache {
 }
 
 fn cache_key(runbox_id: &str, task: &str, agent_id: &str) -> String {
-    format!("{}:{}:{}", runbox_id, &agent_id[..agent_id.len().min(20)], &task[..task.len().min(30)])
+    format!(
+        "{}:{}:{}",
+        runbox_id,
+        &agent_id[..agent_id.len().min(20)],
+        &task[..task.len().min(30)]
+    )
 }
 
 const CACHE_TTL_MS: i64 = 60_000;
@@ -103,12 +117,17 @@ pub async fn invalidate_cache(runbox_id: &str) {
 // ── Startup: LOCKED-only injection ────────────────────────────────────────────
 
 pub async fn build_locked_only(runbox_id: &str) -> String {
-    let all = memory::memories_for_runbox(runbox_id).await.unwrap_or_default();
-    let locked: Vec<_> = all.iter()
+    let all = memory::memories_for_runbox(runbox_id)
+        .await
+        .unwrap_or_default();
+    let locked: Vec<_> = all
+        .iter()
         .filter(|m| m.effective_level() == LEVEL_LOCKED && !m.resolved)
         .collect();
 
-    if locked.is_empty() { return String::new(); }
+    if locked.is_empty() {
+        return String::new();
+    }
 
     let mut block = String::from("LOCKED (absolute rules — these override everything):\n");
     for l in locked.iter().take(5) {
@@ -136,21 +155,30 @@ pub async fn build_context_v3(runbox_id: &str, task: &str, agent_id: &str) -> St
 
     {
         let mut c = cache().lock().await;
-        c.insert(key, CacheEntry { output: result.clone(), ts: now_ms() });
+        c.insert(
+            key,
+            CacheEntry {
+                output: result.clone(),
+                ts: now_ms(),
+            },
+        );
     }
 
     result
 }
 
 async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> String {
-    let all = memory::memories_for_runbox(runbox_id).await.unwrap_or_default();
+    let all = memory::memories_for_runbox(runbox_id)
+        .await
+        .unwrap_or_default();
     let cwd = crate::agent::globals::get_runbox_cwd(runbox_id);
 
     let mut sections: Vec<String> = Vec::new();
     let mut used: usize = 0;
 
     // ── 1. LOCKED — always first, always full ─────────────────────────────────
-    let locked: Vec<_> = all.iter()
+    let locked: Vec<_> = all
+        .iter()
         .filter(|m| m.effective_level() == LEVEL_LOCKED && !m.resolved)
         .collect();
 
@@ -163,7 +191,8 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
             sections.push(block.clone());
             used += est_tokens(&block);
         } else {
-            let capped = locked.iter()
+            let capped = locked
+                .iter()
                 .take(5)
                 .map(|l| format!("• {}", l.content.trim()))
                 .collect::<Vec<_>>()
@@ -178,7 +207,8 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
     if !cwd.is_empty() && used < BUDGET_TOTAL_V3 {
         let main_md = crate::memory::filesystem::read_main_md(&cwd);
         if !main_md.trim().is_empty() {
-            let trimmed: String = main_md.lines()
+            let trimmed: String = main_md
+                .lines()
                 .filter(|l| !l.trim_start().starts_with('#'))
                 .filter(|l| !l.trim().is_empty())
                 .filter(|l| !l.trim().starts_with('_'))
@@ -189,7 +219,7 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
 
             if !trimmed.is_empty() {
                 let block = format!("ROADMAP:\n{trimmed}\n");
-                let room  = 60usize.min(BUDGET_TOTAL_V3.saturating_sub(used));
+                let room = 60usize.min(BUDGET_TOTAL_V3.saturating_sub(used));
                 if est_tokens(&block) <= room {
                     sections.push(block.clone());
                     used += est_tokens(&block);
@@ -199,7 +229,8 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
     }
 
     // ── 2. SESSION — last 2 summaries, any agent ─────────────────────────────
-    let mut sessions: Vec<_> = all.iter()
+    let mut sessions: Vec<_> = all
+        .iter()
         .filter(|m| m.effective_level() == LEVEL_SESSION && !m.resolved)
         .collect();
     sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -209,8 +240,8 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
         let mut block = String::from("RECENT SESSIONS:\n");
         for s in &sessions {
             let agent_label = s.agent_id.split(':').next().unwrap_or("agent").to_string();
-            let age         = s.age_label();
-            let line        = compress(&s.content, 5);
+            let age = s.age_label();
+            let line = compress(&s.content, 5);
             block.push_str(&format!("• [{agent_label} {age}] {line}\n"));
         }
         // FIX: was `used + est_tokens(&block) <= used + BUDGET_SESSION`
@@ -220,8 +251,10 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
             used += est_tokens(&block);
         } else {
             // Trim to one session if over budget
-            let one = format!("RECENT SESSIONS:\n• {}\n",
-                compress(&sessions[0].content, 3));
+            let one = format!(
+                "RECENT SESSIONS:\n• {}\n",
+                compress(&sessions[0].content, 3)
+            );
             if used + est_tokens(&one) <= BUDGET_TOTAL_V3 {
                 sections.push(one.clone());
                 used += est_tokens(&one);
@@ -234,7 +267,7 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
         let meta = crate::memory::filesystem::read_metadata_yaml(&cwd);
         if !meta.trim().is_empty() {
             let block = format!("PROJECT META:\n{}\n", meta.trim());
-            let room  = 80usize.min(BUDGET_TOTAL_V3.saturating_sub(used));
+            let room = 80usize.min(BUDGET_TOTAL_V3.saturating_sub(used));
             if est_tokens(&block) <= room {
                 sections.push(block.clone());
                 used += est_tokens(&block);
@@ -243,21 +276,27 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
     }
 
     // ── 3. PREFERRED — recency ranked, dedup by key ───────────────────────────
-    let mut preferred: Vec<_> = all.iter()
+    let mut preferred: Vec<_> = all
+        .iter()
         .filter(|m| m.effective_level() == LEVEL_PREFERRED && !m.resolved && m.is_active())
         .collect();
 
     // Machine-scope first, then ANN rank
     preferred.sort_by(|a, b| {
-        b.scope.contains("machine").cmp(&a.scope.contains("machine"))
+        b.scope
+            .contains("machine")
+            .cmp(&a.scope.contains("machine"))
     });
     ann_rank(&mut preferred, task);
 
     // Dedup by key
     let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let preferred: Vec<_> = preferred.into_iter()
+    let preferred: Vec<_> = preferred
+        .into_iter()
         .filter(|m| {
-            if m.key.is_empty() { return true; }
+            if m.key.is_empty() {
+                return true;
+            }
             seen_keys.insert(m.key.clone())
         })
         .collect();
@@ -267,11 +306,11 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
         let mut block = String::from("CONTEXT:\n");
         let mut block_tokens = est_tokens(&block);
         for p in &preferred {
-            let line = format!("• [{}] {}\n",
-                p.effective_type(),
-                compress(&p.content, 3));
+            let line = format!("• [{}] {}\n", p.effective_type(), compress(&p.content, 3));
             let lt = est_tokens(&line);
-            if block_tokens + lt > budget_p { break; }
+            if block_tokens + lt > budget_p {
+                break;
+            }
             block.push_str(&line);
             block_tokens += lt;
         }
@@ -282,7 +321,8 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
     }
 
     // ── 4. TEMPORARY — this agent's own active notes ──────────────────────────
-    let mut temporary: Vec<_> = all.iter()
+    let mut temporary: Vec<_> = all
+        .iter()
         .filter(|m| {
             m.effective_level() == LEVEL_TEMPORARY
                 && m.agent_id == agent_id
@@ -299,7 +339,9 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
         for t in temporary.iter().take(5) {
             let line = format!("• {}\n", compress(&t.content, 2));
             let lt = est_tokens(&line);
-            if block_tokens + lt > budget_t { break; }
+            if block_tokens + lt > budget_t {
+                break;
+            }
             block.push_str(&line);
             block_tokens += lt;
         }
@@ -308,7 +350,54 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
         }
     }
 
-    if sections.is_empty() { return String::new(); }
+    // ── 5. PERSISTENT MEMORY — STATE.md + skill instructions ─────────────────
+    // Injected only when this runbox has a registered worktree (agent sessions).
+    // Kept last so it doesn't eat budget from LOCKED/SESSION/PREFERRED.
+    if used < BUDGET_TOTAL_V3 {
+        if let Some((wt_cwd, wt_name)) =
+            crate::workspace::persistent::get_session_info(runbox_id)
+        {
+            // Read only the first 20 lines of STATE.md — enough to resume (~80 tokens)
+            let state_snippet = crate::workspace::persistent::read_agent_state(&wt_cwd, &wt_name)
+                .map(|s| {
+                    s.lines()
+                        .take(20)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+
+            let sp = crate::workspace::persistent::state_path(&wt_cwd, &wt_name);
+            let lp = crate::workspace::persistent::log_path(&wt_cwd, &wt_name);
+            let gp = crate::workspace::persistent::graph_md_path(&wt_cwd);
+
+            let mut block = format!(
+                "PERSISTENT MEMORY:\nstate: {state}\nlog:   {log}\ngraph: {graph}\n",
+                state = sp.display(),
+                log = lp.display(),
+                graph = gp.display(),
+            );
+
+            if !state_snippet.is_empty() {
+                block.push_str(&format!("last state:\n{state_snippet}\n"));
+            }
+
+            block.push_str(
+                "rules: read state on start · update state + append log during work · \
+                 set status=done on finish · never write these files into user repo\n",
+            );
+
+            let bt = est_tokens(&block);
+            if used + bt <= BUDGET_TOTAL_V3 {
+                sections.push(block);
+                used += bt;
+            }
+        }
+    }
+
+    if sections.is_empty() {
+        return String::new();
+    }
 
     format!(
         "<!-- stackbox context: ~{used} tokens -->\n{}\n<!-- end context -->",
@@ -319,7 +408,9 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
 // ── V2 legacy build_context ───────────────────────────────────────────────────
 
 pub async fn build_context(runbox_id: &str, _task: &str) -> String {
-    let all = memory::memories_for_runbox(runbox_id).await.unwrap_or_default();
+    let all = memory::memories_for_runbox(runbox_id)
+        .await
+        .unwrap_or_default();
     let mut sections: Vec<String> = Vec::new();
     let mut used = 0usize;
 
@@ -333,7 +424,9 @@ pub async fn build_context(runbox_id: &str, _task: &str) -> String {
                 for item in &items {
                     let line = $fmt(item);
                     let lt = est_tokens(&line);
-                    if bt + lt > budget { break; }
+                    if bt + lt > budget {
+                        break;
+                    }
                     block.push_str(&line);
                     bt += lt;
                 }
@@ -346,7 +439,8 @@ pub async fn build_context(runbox_id: &str, _task: &str) -> String {
     }
 
     // Goals
-    let goals: Vec<_> = all.iter()
+    let goals: Vec<_> = all
+        .iter()
         .filter(|m| m.effective_type() == MT_GOAL && !m.resolved)
         .collect();
     add_section!("GOALS:\n", goals, BUDGET_GOAL, |m: &&Memory| {
@@ -354,16 +448,21 @@ pub async fn build_context(runbox_id: &str, _task: &str) -> String {
     });
 
     // Session summaries
-    let mut sess: Vec<_> = all.iter()
+    let mut sess: Vec<_> = all
+        .iter()
         .filter(|m| m.effective_type() == MT_SESSION)
         .collect();
     sess.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    add_section!("RECENT SESSIONS:\n", sess.into_iter().take(3).collect::<Vec<_>>(), BUDGET_SESSION_V2, |m: &&Memory| {
-        format!("• [{}] {}\n", m.age_label(), compress(&m.content, 5))
-    });
+    add_section!(
+        "RECENT SESSIONS:\n",
+        sess.into_iter().take(3).collect::<Vec<_>>(),
+        BUDGET_SESSION_V2,
+        |m: &&Memory| { format!("• [{}] {}\n", m.age_label(), compress(&m.content, 5)) }
+    );
 
     // Blockers
-    let blockers: Vec<_> = all.iter()
+    let blockers: Vec<_> = all
+        .iter()
         .filter(|m| m.effective_type() == MT_BLOCKER && !m.resolved)
         .collect();
     add_section!("BLOCKERS:\n", blockers, BUDGET_BLOCKERS, |m: &&Memory| {
@@ -371,13 +470,22 @@ pub async fn build_context(runbox_id: &str, _task: &str) -> String {
     });
 
     // Failures
-    let failures: Vec<_> = all.iter()
+    let failures: Vec<_> = all
+        .iter()
         .filter(|m| m.effective_type() == MT_FAILURE && !m.resolved)
         .collect();
-    add_section!("KNOWN FAILURES:\n", failures, BUDGET_FAILURES, |m: &&Memory| {
-        format!("• {}\n", m.content.trim())
-    });
+    add_section!(
+        "KNOWN FAILURES:\n",
+        failures,
+        BUDGET_FAILURES,
+        |m: &&Memory| { format!("• {}\n", m.content.trim()) }
+    );
 
-    if sections.is_empty() { return String::new(); }
-    format!("<!-- context ~{used}t -->\n{}\n<!-- /context -->", sections.join("\n"))
+    if sections.is_empty() {
+        return String::new();
+    }
+    format!(
+        "<!-- context ~{used}t -->\n{}\n<!-- /context -->",
+        sections.join("\n")
+    )
 }

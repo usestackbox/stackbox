@@ -36,9 +36,9 @@ pub fn docker_available() -> bool {
 // ── docker_status ─────────────────────────────────────────────────────────────
 #[derive(serde::Serialize)]
 pub struct DockerStatus {
-    pub running:        bool,
+    pub running: bool,
     pub container_name: String,
-    pub image:          String,
+    pub image: String,
 }
 
 #[tauri::command]
@@ -66,7 +66,7 @@ pub fn docker_ensure(runbox_id: String, cwd: String) -> Result<String, String> {
         return Err("Docker daemon not available".to_string());
     }
 
-    let name    = container_name(&runbox_id);
+    let name = container_name(&runbox_id);
     let vol_dir = workspace_volume_path(&runbox_id);
 
     // Create volume dir if missing
@@ -89,14 +89,22 @@ pub fn docker_ensure(runbox_id: String, cwd: String) -> Result<String, String> {
     // Run new container — mounts cwd + per-workspace storage
     let out = Command::new("docker")
         .args([
-            "run", "-d",
-            "--name", &name,
-            "-v", &format!("{cwd}:/workspace"),
-            "-v", &format!("{vol_dir}:/stackbox-storage"),
-            "-w", "/workspace",
-            "--restart", "unless-stopped",
+            "run",
+            "-d",
+            "--name",
+            &name,
+            "-v",
+            &format!("{cwd}:/workspace"),
+            "-v",
+            &format!("{vol_dir}:/stackbox-storage"),
+            "-w",
+            "/workspace",
+            "--restart",
+            "unless-stopped",
             "node:20-alpine",
-            "tail", "-f", "/dev/null",   // keep alive
+            "tail",
+            "-f",
+            "/dev/null", // keep alive
         ])
         .output()
         .map_err(|e| e.to_string())?;

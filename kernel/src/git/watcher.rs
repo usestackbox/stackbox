@@ -1,12 +1,12 @@
+use crate::git::diff::diff_live;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
-use crate::git::diff::diff_live;
 
 struct WatchEntry {
-    _watcher:      RecommendedWatcher,
+    _watcher: RecommendedWatcher,
     last_scheduled: Arc<Mutex<Option<Instant>>>,
 }
 
@@ -20,11 +20,13 @@ pub fn start_watch(app: AppHandle, cwd: String, runbox_id: String) {
     let map = guard.get_or_insert_with(HashMap::new);
 
     // Already watching this path — do nothing
-    if map.contains_key(&cwd) { return; }
+    if map.contains_key(&cwd) {
+        return;
+    }
 
-    let cwd_clone    = cwd.clone();
+    let cwd_clone = cwd.clone();
     let runbox_clone = runbox_id.clone();
-    let app_clone    = app.clone();
+    let app_clone = app.clone();
 
     // Tracks when we last scheduled a diff emission
     let last_scheduled: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
@@ -35,10 +37,13 @@ pub fn start_watch(app: AppHandle, cwd: String, runbox_id: String) {
             let Ok(ev) = res else { return };
 
             // Skip pure .git internal writes (HEAD updates, index, etc.)
-            let all_git = ev.paths.iter().all(|p| {
-                p.components().any(|c| c.as_os_str() == ".git")
-            });
-            if all_git { return; }
+            let all_git = ev
+                .paths
+                .iter()
+                .all(|p| p.components().any(|c| c.as_os_str() == ".git"));
+            if all_git {
+                return;
+            }
 
             let now = Instant::now();
 
@@ -49,10 +54,10 @@ pub fn start_watch(app: AppHandle, cwd: String, runbox_id: String) {
             }
 
             // Spawn a debounce thread — only the LAST one will actually emit
-            let cwd2   = cwd_clone.clone();
-            let rid2   = runbox_clone.clone();
-            let app2   = app_clone.clone();
-            let lsc    = Arc::clone(&last_scheduled_clone);
+            let cwd2 = cwd_clone.clone();
+            let rid2 = runbox_clone.clone();
+            let app2 = app_clone.clone();
+            let lsc = Arc::clone(&last_scheduled_clone);
 
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(DEBOUNCE_MS));
@@ -60,7 +65,9 @@ pub fn start_watch(app: AppHandle, cwd: String, runbox_id: String) {
                 // If another change came in after us, bail — let that thread emit
                 let scheduled = lsc.lock().unwrap();
                 if let Some(t) = *scheduled {
-                    if t > now { return; }
+                    if t > now {
+                        return;
+                    }
                 }
                 drop(scheduled);
 
@@ -77,9 +84,17 @@ pub fn start_watch(app: AppHandle, cwd: String, runbox_id: String) {
 
     match watcher {
         Ok(mut w) => {
-            if w.watch(std::path::Path::new(&cwd), RecursiveMode::Recursive).is_ok() {
+            if w.watch(std::path::Path::new(&cwd), RecursiveMode::Recursive)
+                .is_ok()
+            {
                 eprintln!("[watcher] watching {cwd}");
-                map.insert(cwd, WatchEntry { _watcher: w, last_scheduled });
+                map.insert(
+                    cwd,
+                    WatchEntry {
+                        _watcher: w,
+                        last_scheduled,
+                    },
+                );
             } else {
                 eprintln!("[watcher] failed to watch path: {cwd}");
             }

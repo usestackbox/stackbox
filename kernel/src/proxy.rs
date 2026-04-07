@@ -16,16 +16,21 @@ const PROXY_BASE: &str = "proxy://localhost/fetch?url=";
 pub fn handle(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     let uri = request.uri().to_string();
     let url = if let Some(pos) = uri.find("?url=") {
-        urlencoding::decode(&uri[pos + 5..]).unwrap_or_default().into_owned()
+        urlencoding::decode(&uri[pos + 5..])
+            .unwrap_or_default()
+            .into_owned()
     } else {
-        return Response::builder().status(400).body(b"missing url param".to_vec()).unwrap();
+        return Response::builder()
+            .status(400)
+            .body(b"missing url param".to_vec())
+            .unwrap();
     };
 
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
     {
-        Ok(r)  => r,
+        Ok(r) => r,
         Err(e) => {
             return Response::builder()
                 .status(500)
@@ -35,8 +40,10 @@ pub fn handle(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     };
 
     rt.block_on(async move {
-        let is_local = url.contains("localhost") || url.contains("127.0.0.1")
-            || url.contains("0.0.0.0") || url.starts_with("file://");
+        let is_local = url.contains("localhost")
+            || url.contains("127.0.0.1")
+            || url.contains("0.0.0.0")
+            || url.starts_with("file://");
 
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(is_local)
@@ -46,22 +53,29 @@ pub fn handle(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
             .unwrap_or_default();
 
         let resp = match client.get(&url).send().await {
-            Ok(r)  => r,
-            Err(e) => return Response::builder().status(502).body(e.to_string().into_bytes()).unwrap(),
+            Ok(r) => r,
+            Err(e) => {
+                return Response::builder()
+                    .status(502)
+                    .body(e.to_string().into_bytes())
+                    .unwrap()
+            }
         };
 
-        let status      = resp.status().as_u16();
+        let status = resp.status().as_u16();
         let mut is_html = false;
-        let mut ct      = "application/octet-stream".to_string();
+        let mut ct = "application/octet-stream".to_string();
 
         for (k, v) in resp.headers() {
             if k.as_str().to_lowercase() == "content-type" {
                 ct = v.to_str().unwrap_or("").to_string();
-                if ct.contains("text/html") { is_html = true; }
+                if ct.contains("text/html") {
+                    is_html = true;
+                }
             }
         }
 
-        let bytes      = resp.bytes().await.unwrap_or_default();
+        let bytes = resp.bytes().await.unwrap_or_default();
         let final_body = if is_html {
             rewrite_urls(&String::from_utf8_lossy(&bytes), &url).into_bytes()
         } else {
@@ -85,9 +99,9 @@ fn rewrite_urls(body: &str, base_url: &str) -> String {
     for attr in &["src", "href", "action"] {
         // Handle double-quoted and single-quoted variants in two passes.
         for quote in &['"', '\''] {
-            let mut result    = String::new();
+            let mut result = String::new();
             let mut remaining = out.as_str();
-            let pattern       = format!("{}={}", attr, quote);
+            let pattern = format!("{}={}", attr, quote);
 
             while let Some(start) = remaining.find(&pattern) {
                 result.push_str(&remaining[..start + pattern.len()]);
@@ -103,7 +117,11 @@ fn rewrite_urls(body: &str, base_url: &str) -> String {
                         result.push_str(original);
                     } else {
                         let resolved = resolve_url(base_url, original);
-                        result.push_str(&format!("{}{}", PROXY_BASE, urlencoding::encode(&resolved)));
+                        result.push_str(&format!(
+                            "{}{}",
+                            PROXY_BASE,
+                            urlencoding::encode(&resolved)
+                        ));
                     }
                     remaining = &remaining[end..];
                 }
@@ -113,8 +131,13 @@ fn rewrite_urls(body: &str, base_url: &str) -> String {
         }
     }
 
-    let base_tag  = format!("<base href=\"{}{}\">", PROXY_BASE, urlencoding::encode(base_url));
-    let form_shim = format!(r#"<script>
+    let base_tag = format!(
+        "<base href=\"{}{}\">",
+        PROXY_BASE,
+        urlencoding::encode(base_url)
+    );
+    let form_shim = format!(
+        r#"<script>
 (function(){{
     const P={:?};
     document.addEventListener('submit',function(e){{
@@ -125,7 +148,9 @@ fn rewrite_urls(body: &str, base_url: &str) -> String {
         window.location.href=P+encodeURIComponent((f.action||location.href).split('?')[0]+'?'+qs);
     }},true);
 }})();
-</script>"#, PROXY_BASE);
+</script>"#,
+        PROXY_BASE
+    );
 
     if let Some(pos) = out.find("</head>") {
         out.insert_str(pos, &(base_tag + &form_shim));
@@ -146,15 +171,19 @@ fn resolve_url(base: &str, href: &str) -> String {
         return href.to_string();
     }
     if href.starts_with("//") {
-        let scheme = if base.starts_with("https") { "https:" } else { "http:" };
+        let scheme = if base.starts_with("https") {
+            "https:"
+        } else {
+            "http:"
+        };
         return format!("{}{}", scheme, href);
     }
 
     // Extract origin and base-directory from `base`.
     if let Some(idx) = base.find("://") {
-        let after      = &base[idx + 3..];
+        let after = &base[idx + 3..];
         let origin_end = after.find('/').map(|i| idx + 3 + i).unwrap_or(base.len());
-        let origin     = &base[..origin_end];
+        let origin = &base[..origin_end];
 
         if href.starts_with('/') {
             return format!("{}{}", origin, href);
@@ -162,7 +191,7 @@ fn resolve_url(base: &str, href: &str) -> String {
 
         // Build the base directory (everything up to the last '/')
         let base_dir = &base[..base.rfind('/').unwrap_or(base.len())];
-        let raw      = format!("{}/{}", base_dir, href);
+        let raw = format!("{}/{}", base_dir, href);
 
         // Normalise path segments: collapse . and ..
         return normalise_url_path(&raw);
@@ -175,7 +204,8 @@ fn resolve_url(base: &str, href: &str) -> String {
 /// Preserves the scheme+authority prefix unchanged.
 fn normalise_url_path(url: &str) -> String {
     // Split at the first '/' after the authority (after "://host")
-    let path_start = url.find("://")
+    let path_start = url
+        .find("://")
         .and_then(|i| url[i + 3..].find('/').map(|j| i + 3 + j))
         .unwrap_or(0);
 
@@ -185,8 +215,10 @@ fn normalise_url_path(url: &str) -> String {
     for seg in path.split('/') {
         match seg {
             "" | "." => {}
-            ".."     => { segments.pop(); }
-            s        => segments.push(s),
+            ".." => {
+                segments.pop();
+            }
+            s => segments.push(s),
         }
     }
 

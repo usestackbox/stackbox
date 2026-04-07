@@ -67,11 +67,16 @@ export function Sidebar({
     const t = setInterval(() => setTick(n => n + 1), 60_000);
     return () => clearInterval(t);
   }, []);
-  const [ctxMenu,     setCtxMenu]     = useState<{ x: number; y: number; id: string } | null>(null);
-  const [wsName,      setWsName]      = useState("WORKSPACE");
-  const [wsEditing,   setWsEditing]   = useState(false);
-  const [wsVal,       setWsVal]       = useState("WORKSPACE");
+
+  const [ctxMenu,   setCtxMenu]   = useState<{ x: number; y: number; id: string } | null>(null);
+  const [wsName,    setWsName]    = useState("WORKSPACE");
+  const [wsEditing, setWsEditing] = useState(false);
+  const [wsVal,     setWsVal]     = useState("WORKSPACE");
   const wsInputRef = useRef<HTMLInputElement>(null);
+
+  /** Which workspace item is open for inline editing, and which field */
+  const [editingId,  setEditingId]  = useState<string | null>(null);
+  const [editField,  setEditField]  = useState<"name" | "dir" | null>(null);
 
   useEffect(() => { if (wsEditing) setTimeout(() => wsInputRef.current?.select(), 20); }, [wsEditing]);
 
@@ -90,7 +95,6 @@ export function Sidebar({
     });
   }, [activeId]);
 
-  // Record timestamp whenever a workspace is activated
   const handleSelect = (id: string) => {
     setLastUsedMap(prev => {
       const next = { ...prev, [id]: Date.now() };
@@ -104,12 +108,7 @@ export function Sidebar({
     <>
       {showModal && (
         <CreateWorkspaceModal
-          onSubmit={(n, c) => {
-            onCreate(n, c);
-            // Stamp the new workspace — we don't have its ID here, so we stamp
-            // on the next render cycle once activeId changes to the new one.
-            setShowModal(false);
-          }}
+          onSubmit={(n, c) => { onCreate(n, c); setShowModal(false); }}
           onClose={() => setShowModal(false)}
         />
       )}
@@ -122,7 +121,16 @@ export function Sidebar({
             const ws = runboxes.find(r => r.id === ctxMenu.id);
             if (ws && confirm(`Delete "${ws.name}"?`)) onDelete(ctxMenu.id);
           }}
-          onChangeIcon={() => {}}
+          onChangeName={() => {
+            setEditingId(ctxMenu.id);
+            setEditField("name");
+            setCtxMenu(null);
+          }}
+          onChangeDir={() => {
+            setEditingId(ctxMenu.id);
+            setEditField("dir");
+            setCtxMenu(null);
+          }}
           onClose={() => setCtxMenu(null)}
         />
       )}
@@ -169,6 +177,9 @@ export function Sidebar({
             onRename={onRename}
             onContextMenu={(e, id) => setCtxMenu({ x: e.clientX, y: e.clientY, id })}
             onNew={() => setShowModal(true)}
+            editingId={editingId}
+            editField={editField}
+            onExternalEditDone={() => { setEditingId(null); setEditField(null); }}
           />
         )}
       </div>

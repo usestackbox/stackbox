@@ -13,18 +13,26 @@ pub const EMBED_DIM: usize = 768;
 pub async fn init_embedder() {}
 
 /// Always false — embedder is not available.
-pub fn is_ready() -> bool { false }
+pub fn is_ready() -> bool {
+    false
+}
 
 /// Always None — callers fall back to keyword search.
-pub fn try_embed(_text: &str) -> Option<Vec<f32>> { None }
+pub fn try_embed(_text: &str) -> Option<Vec<f32>> {
+    None
+}
 
 /// Not called when embedder is disabled, but kept for API compatibility.
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() || a.is_empty() { return 0.0; }
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
     let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
-    let na: f32  = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let nb: f32  = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if na == 0.0 || nb == 0.0 { return 0.0; }
+    let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if na == 0.0 || nb == 0.0 {
+        return 0.0;
+    }
     (dot / (na * nb)).clamp(-1.0, 1.0)
 }
 

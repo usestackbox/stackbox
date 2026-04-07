@@ -37,14 +37,24 @@ impl DbInner {
         let task: Box<dyn FnOnce(&Connection) + Send> = Box::new(move |conn| {
             let _ = tx.send(f(conn));
         });
-        self.writer.send(task).map_err(|e| rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error { code: rusqlite::ffi::ErrorCode::InternalMalfunction, extended_code: 0 },
-            Some(e.to_string()),
-        ))?;
-        rx.recv().map_err(|e| rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error { code: rusqlite::ffi::ErrorCode::InternalMalfunction, extended_code: 0 },
-            Some(e.to_string()),
-        ))?
+        self.writer.send(task).map_err(|e| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::InternalMalfunction,
+                    extended_code: 0,
+                },
+                Some(e.to_string()),
+            )
+        })?;
+        rx.recv().map_err(|e| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::InternalMalfunction,
+                    extended_code: 0,
+                },
+                Some(e.to_string()),
+            )
+        })?
     }
 
     /// Fire-and-forget write. Does not wait for execution.
@@ -59,36 +69,36 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Session {
-    pub id:         String,
-    pub runbox_id:  String,
-    pub pane_id:    String,
-    pub agent:      String,
-    pub cwd:        String,
+    pub id: String,
+    pub runbox_id: String,
+    pub pane_id: String,
+    pub agent: String,
+    pub cwd: String,
     pub started_at: i64,
-    pub ended_at:   Option<i64>,
-    pub exit_code:  Option<i32>,
-    pub log_path:   Option<String>,
+    pub ended_at: Option<i64>,
+    pub exit_code: Option<i32>,
+    pub log_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PaneLayout {
-    pub runbox_id:   String,
+    pub runbox_id: String,
     pub layout_json: String,
     pub active_pane: String,
-    pub updated_at:  i64,
+    pub updated_at: i64,
 }
 
 /// Workspace event row — the core primitive of the system.
 /// Append-only. Never update rows.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkspaceEvent {
-    pub id:           String,
-    pub runbox_id:    String,
-    pub session_id:   String,
-    pub event_type:   String,   // AgentSpawned | CommandExecuted | CommandResult | FileChanged | WorkspaceSnapshot
-    pub source:       String,   // "pty" | "watcher" | "git" | "user"
-    pub payload_json: String,   // flat JSON, no nesting
-    pub timestamp:    i64,
+    pub id: String,
+    pub runbox_id: String,
+    pub session_id: String,
+    pub event_type: String, // AgentSpawned | CommandExecuted | CommandResult | FileChanged | WorkspaceSnapshot
+    pub source: String,     // "pty" | "watcher" | "git" | "user"
+    pub payload_json: String, // flat JSON, no nesting
+    pub timestamp: i64,
 }
 
 // ── Open ──────────────────────────────────────────────────────────────────────
@@ -116,11 +126,16 @@ pub fn open() -> rusqlite::Result<Db> {
     std::thread::Builder::new()
         .name("stackbox-db-writer".into())
         .spawn(move || {
-            while let Ok(f) = rx.recv() { f(&writer_conn); }
+            while let Ok(f) = rx.recv() {
+                f(&writer_conn);
+            }
         })
         .expect("failed to spawn db writer thread");
 
-    Ok(Arc::new(DbInner { reader: Mutex::new(reader_conn), writer: tx }))
+    Ok(Arc::new(DbInner {
+        reader: Mutex::new(reader_conn),
+        writer: tx,
+    }))
 }
 
 // ── Shared time helper ────────────────────────────────────────────────────────

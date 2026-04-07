@@ -10,8 +10,8 @@
 //
 // Schema DDL lives in db/schema.rs::migrate().
 
+use super::{now_ms, Db};
 use rusqlite::{params, Result};
-use super::{Db, now_ms};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -19,36 +19,36 @@ use super::{Db, now_ms};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentBranch {
-    pub id:            String,
-    pub runbox_id:     String,
-    pub session_id:    String,
-    pub agent_kind:    String,
+    pub id: String,
+    pub runbox_id: String,
+    pub session_id: String,
+    pub agent_kind: String,
     /// e.g. "stackbox/a1b2c3d4/codex"
-    pub branch:        String,
+    pub branch: String,
     /// None once PTY exits; branch still lives.
     pub worktree_path: Option<String>,
     /// working | done | merged | deleted
-    pub status:        String,
-    pub commit_count:  i64,
-    pub created_at:    i64,
-    pub updated_at:    i64,
+    pub status: String,
+    pub commit_count: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
     /// None until user merges.
-    pub merged_at:     Option<i64>,
+    pub merged_at: Option<i64>,
 }
 
 fn row_to_branch(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentBranch> {
     Ok(AgentBranch {
-        id:            row.get(0)?,
-        runbox_id:     row.get(1)?,
-        session_id:    row.get(2)?,
-        agent_kind:    row.get(3)?,
-        branch:        row.get(4)?,
+        id: row.get(0)?,
+        runbox_id: row.get(1)?,
+        session_id: row.get(2)?,
+        agent_kind: row.get(3)?,
+        branch: row.get(4)?,
         worktree_path: row.get(5)?,
-        status:        row.get(6)?,
-        commit_count:  row.get(7)?,
-        created_at:    row.get(8)?,
-        updated_at:    row.get(9)?,
-        merged_at:     row.get(10)?,
+        status: row.get(6)?,
+        commit_count: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        merged_at: row.get(10)?,
     })
 }
 
@@ -58,20 +58,20 @@ fn row_to_branch(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentBranch> {
 
 /// Called at PTY spawn: create the branch record with worktree_path set.
 pub fn record_branch_start(
-    db:            &Db,
-    runbox_id:     &str,
-    session_id:    &str,
-    agent_kind:    &str,
-    branch:        &str,
+    db: &Db,
+    runbox_id: &str,
+    session_id: &str,
+    agent_kind: &str,
+    branch: &str,
     worktree_path: &str,
 ) -> Result<()> {
-    let id   = format!("{runbox_id}-{session_id}");
-    let rb   = runbox_id.to_string();
-    let sid  = session_id.to_string();
-    let ak   = agent_kind.to_string();
-    let br   = branch.to_string();
-    let wt   = worktree_path.to_string();
-    let ts   = now_ms();
+    let id = format!("{runbox_id}-{session_id}");
+    let rb = runbox_id.to_string();
+    let sid = session_id.to_string();
+    let ak = agent_kind.to_string();
+    let br = branch.to_string();
+    let wt = worktree_path.to_string();
+    let ts = now_ms();
 
     db.write_async(move |conn| {
         let _ = conn.execute(
@@ -168,10 +168,10 @@ pub fn list_for_runbox(db: &Db, runbox_id: &str) -> Result<Vec<AgentBranch>> {
 /// Used by cleanup to detect orphans.
 pub fn list_active_worktrees(db: &Db) -> Vec<String> {
     let conn = db.read();
-    let mut stmt = match conn.prepare(
-        "SELECT worktree_path FROM agent_branches WHERE worktree_path IS NOT NULL",
-    ) {
-        Ok(s)  => s,
+    let mut stmt = match conn
+        .prepare("SELECT worktree_path FROM agent_branches WHERE worktree_path IS NOT NULL")
+    {
+        Ok(s) => s,
         Err(_) => return vec![],
     };
     stmt.query_map([], |row| row.get::<_, String>(0))
@@ -197,7 +197,4 @@ pub fn get_by_branch(db: &Db, branch: &str) -> Option<AgentBranch> {
 // Legacy compatibility — keep runbox_set_worktree working for callers not yet migrated
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub use super::runboxes::{
-    runbox_set_branch,
-    runbox_delete,
-};
+pub use super::runboxes::{runbox_delete, runbox_set_branch};

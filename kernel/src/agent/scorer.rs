@@ -18,9 +18,7 @@
 //   Combines recency + importance + agent_bonus into 0.0-1.0 score.
 
 use crate::memory::{
-    self, Memory,
-    MT_GOAL, MT_FAILURE, MT_BLOCKER, MT_ENVIRONMENT, MT_SESSION, MT_GENERAL,
-    now_ms,
+    self, now_ms, Memory, MT_BLOCKER, MT_ENVIRONMENT, MT_FAILURE, MT_GENERAL, MT_GOAL, MT_SESSION,
 };
 
 // ── Composite injection score ─────────────────────────────────────────────────
@@ -33,8 +31,12 @@ pub fn inject_score(mem: &Memory, current_agent_type: &str) -> f64 {
 
     // Goal and failure are always full weight — recency doesn't matter
     if mem.effective_type() == MT_GOAL || mem.effective_type() == MT_FAILURE {
-        let agent_bonus = if !current_agent_type.is_empty()
-            && mem.agent_type == current_agent_type { 0.15 } else { 0.0 };
+        let agent_bonus = if !current_agent_type.is_empty() && mem.agent_type == current_agent_type
+        {
+            0.15
+        } else {
+            0.0
+        };
         return (importance_norm + agent_bonus).min(1.0);
     }
 
@@ -54,7 +56,11 @@ pub fn inject_score(mem: &Memory, current_agent_type: &str) -> f64 {
     let agent_bonus = if !current_agent_type.is_empty()
         && mem.agent_type == current_agent_type
         && (mem.effective_type() == MT_FAILURE || mem.effective_type() == MT_BLOCKER)
-    { 0.15 } else { 0.0 };
+    {
+        0.15
+    } else {
+        0.0
+    };
 
     // Pinned memories get full weight
     let pin_bonus = if mem.pinned { 0.3 } else { 0.0 };
@@ -65,10 +71,10 @@ pub fn inject_score(mem: &Memory, current_agent_type: &str) -> f64 {
 fn half_life_for_type(memory_type: &str) -> f64 {
     match memory_type {
         MT_GOAL | MT_FAILURE => 0.0, // never decays — recency = 1.0 always
-        MT_BLOCKER           => 14.0,
-        MT_ENVIRONMENT       => 60.0,
-        MT_SESSION           => 7.0,
-        _                    => 30.0, // codebase, git, general
+        MT_BLOCKER => 14.0,
+        MT_ENVIRONMENT => 60.0,
+        MT_SESSION => 7.0,
+        _ => 30.0, // codebase, git, general
     }
 }
 
@@ -94,7 +100,7 @@ pub async fn decay_prune() {
 
     let now = now_ms();
     let thirty_days = 30 * 86_400_000i64;
-    let seven_days  =  7 * 86_400_000i64;
+    let seven_days = 7 * 86_400_000i64;
 
     // Pull all memories (all runboxes via global scan)
     // We iterate runboxes via __global__ + a full scan
@@ -103,13 +109,15 @@ pub async fn decay_prune() {
         Err(_) => {
             // Empty runbox_id returns nothing — do per-known-runbox scan instead.
             // Fallback: scan via search_global with empty query
-            memory::memories_search_global("", 5000).await.unwrap_or_default()
+            memory::memories_search_global("", 5000)
+                .await
+                .unwrap_or_default()
         }
     };
 
-    let mut deleted      = 0usize;
-    let mut demoted      = 0usize;
-    let mut flagged      = 0usize;
+    let mut deleted = 0usize;
+    let mut demoted = 0usize;
+    let mut flagged = 0usize;
 
     for mem in &all {
         // 1. Delete expired (decay_at > 0 and past)
@@ -165,7 +173,8 @@ pub async fn decay_prune() {
 
 /// Confirm an env fact (resets unverified flag + updates timestamp via re-tag).
 pub async fn confirm_env_fact(id: &str) -> Result<(), String> {
-    let tags_result = memory::memories_search_global(id, 1).await
+    let tags_result = memory::memories_search_global(id, 1)
+        .await
         .ok()
         .and_then(|v| v.into_iter().next())
         .map(|m| m.tags);

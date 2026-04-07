@@ -57,18 +57,7 @@ export function DragHandle({ dir, onResize }: DragHandleProps) {
         background: "transparent",
       }}
     >
-      {/* 1px visible divider line */}
-      <div style={{
-        position:  "absolute",
-        top:       isH ? 0 : "50%",
-        left:      isH ? "50%" : 0,
-        transform: isH ? "translateX(-50%)" : "translateY(-50%)",
-        width:     isH ? 1 : "100%",
-        height:    isH ? "100%" : 1,
-        background: lit ? "rgba(255,255,255,.20)" : "rgba(255,255,255,.07)",
-        transition: "background .2s",
-        pointerEvents: "none",
-      }} />
+
 
       {/* Grip dots */}
       <div style={{

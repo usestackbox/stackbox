@@ -3,15 +3,17 @@ import { useState, useRef, useEffect } from "react";
 import { C, FS, MONO, SANS } from "../design";
 
 interface Props {
-  x:            number;
-  y:            number;
-  wsName:       string;
-  onDelete:     () => void;
-  onChangeIcon: () => void;
-  onClose:      () => void;
+  x:          number;
+  y:          number;
+  wsName:     string;
+  onDelete:   () => void;
+  onChangeName: () => void;
+  onChangeDir:  () => void;
+  onChangeIcon?: () => void;
+  onClose:    () => void;
 }
 
-export function WorkspaceContextMenu({ x, y, wsName, onDelete, onChangeIcon, onClose }: Props) {
+export function WorkspaceContextMenu({ x, y, wsName, onDelete, onChangeName, onChangeDir, onClose }: Props) {
   const ref     = useRef<HTMLDivElement>(null);
   const [vis, setVis] = useState(false);
 
@@ -31,23 +33,29 @@ export function WorkspaceContextMenu({ x, y, wsName, onDelete, onChangeIcon, onC
   }, [onClose]);
 
   const left = Math.min(x, window.innerWidth  - 200 - 12);
-  const top  = Math.min(y, window.innerHeight - 130);
+  const top  = Math.min(y, window.innerHeight - 180);
 
   const items = [
     {
-      label: "Change icon", danger: false,
-      action: () => { onChangeIcon(); onClose(); },
+      label: "Change Name",
+      danger: false,
+      action: () => { onChangeName(); onClose(); },
       icon: (
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
-          <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
-          <circle cx="8.5"  cy="7.5"  r=".5" fill="currentColor"/>
-          <circle cx="6.5"  cy="12.5" r=".5" fill="currentColor"/>
-          <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688
-            0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125
-            a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503
-            5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      ),
+    },
+    {
+      label: "Change Directory",
+      danger: false,
+      action: () => { onChangeDir(); onClose(); },
+      icon: (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
         </svg>
       ),
     },

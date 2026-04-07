@@ -23,8 +23,8 @@
 //   - write_metadata_yaml() is called from workspace::context on spawn
 //   - write_main_md() is called when user sets a goal or hits a milestone
 
-use std::path::{Path, PathBuf};
 use crate::memory::{Memory, LEVEL_LOCKED, LEVEL_PREFERRED, LEVEL_SESSION};
+use std::path::{Path, PathBuf};
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
@@ -39,11 +39,12 @@ pub fn memory_dir(cwd: &str) -> PathBuf {
 /// Idempotent — safe to call on every agent spawn.
 pub fn ensure_memory_repo(cwd: &str) -> Result<(), String> {
     let dir = memory_dir(cwd);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("mkdir memory: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir memory: {e}"))?;
 
     // Already initialised
-    if dir.join(".git").exists() { return Ok(()); }
+    if dir.join(".git").exists() {
+        return Ok(());
+    }
 
     let out = std::process::Command::new("git")
         .args(["init"])
@@ -76,10 +77,10 @@ pub fn ensure_memory_repo(cwd: &str) -> Result<(), String> {
     let _ = std::process::Command::new("git")
         .args(["commit", "-m", "stackbox: init memory repo"])
         .current_dir(&dir)
-        .env("GIT_AUTHOR_NAME",    "Stackbox")
-        .env("GIT_AUTHOR_EMAIL",   "memory@stackbox.local")
+        .env("GIT_AUTHOR_NAME", "Stackbox")
+        .env("GIT_AUTHOR_EMAIL", "memory@stackbox.local")
         .env("GIT_COMMITTER_NAME", "Stackbox")
-        .env("GIT_COMMITTER_EMAIL","memory@stackbox.local")
+        .env("GIT_COMMITTER_EMAIL", "memory@stackbox.local")
         .output();
 
     eprintln!("[memory::fs] init memory repo at {}", dir.display());
@@ -91,18 +92,23 @@ pub fn ensure_memory_repo(cwd: &str) -> Result<(), String> {
 /// Sync a snapshot of all memories for a runbox to flat files in /memory/.
 /// Called after every remember() write. Purely additive file writes — fast.
 pub async fn sync_to_fs(runbox_id: &str, cwd: &str, memories: &[Memory]) {
-    if cwd.is_empty() { return; }
+    if cwd.is_empty() {
+        return;
+    }
     let dir = memory_dir(cwd);
-    if std::fs::create_dir_all(&dir).is_err() { return; }
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+
+    // ── Build all content strings on the async side (no blocking) ────────────
 
     // ── structured.toml — PREFERRED key=value facts ───────────────────────────
-    {
-        let preferred: Vec<_> = memories.iter()
-            .filter(|m| m.effective_level() == LEVEL_PREFERRED
-                && m.is_active() && !m.resolved)
+    let structured_toml = {
+        let preferred: Vec<_> = memories
+            .iter()
+            .filter(|m| m.effective_level() == LEVEL_PREFERRED && m.is_active() && !m.resolved)
             .collect();
 
-        // Last-write-wins per key (higher timestamp wins)
         let mut key_map: std::collections::BTreeMap<String, (i64, String)> =
             std::collections::BTreeMap::new();
         for m in &preferred {
@@ -120,67 +126,42 @@ pub async fn sync_to_fs(runbox_id: &str, cwd: &str, memories: &[Memory]) {
         let mut toml = String::from(
             "# Stackbox structured facts\n\
              # Auto-generated — agents and humans may edit this file\n\
-             # Key-versioned: writing a new value for an existing key replaces it\n\n"
+             # Key-versioned: writing a new value for an existing key replaces it\n\n",
         );
         for (k, (_, v)) in &key_map {
             let v_clean = v.replace('\\', "\\\\").replace('"', "\\\"");
             toml.push_str(&format!("{k} = \"{v_clean}\"\n"));
         }
-        let _ = std::fs::write(dir.join("structured.toml"), &toml);
-    }
+        toml
+    };
 
     // ── locked.toml — LOCKED rules, priority-ranked ───────────────────────────
-    {
-        let mut locked: Vec<_> = memories.iter()
+    let locked_toml = {
+        let mut locked: Vec<_> = memories
+            .iter()
             .filter(|m| m.effective_level() == LEVEL_LOCKED && !m.resolved)
             .collect();
         locked.sort_by(|a, b| b.importance.cmp(&a.importance));
 
         let mut toml = String::from(
             "# LOCKED rules — never violate these\n\
-             # Set by the user only. Agents must obey unconditionally.\n\n"
+             # Set by the user only. Agents must obey unconditionally.\n\n",
         );
         for (i, l) in locked.iter().enumerate() {
             let v = l.content.trim().replace('\\', "\\\\").replace('"', "\\\"");
             toml.push_str(&format!("rule_{i} = \"{v}\"\n"));
         }
-        let _ = std::fs::write(dir.join("locked.toml"), &toml);
-    }
+        toml
+    };
 
-    // ── sessions/ — SESSION summaries as {agent}-{ts}.md ─────────────────────
-    {
-        let sessions_dir = dir.join("sessions");
-        std::fs::create_dir_all(&sessions_dir).ok();
-
-        // Prune old session files beyond cap (keep 10)
-        let mut session_files: Vec<_> = std::fs::read_dir(&sessions_dir)
-            .ok()
-            .map(|rd| {
-                rd.filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
-                    .collect()
-            })
-            .unwrap_or_default();
-        session_files.sort_by_key(|e: &std::fs::DirEntry| {
-            e.metadata().and_then(|m| m.modified()).ok()
-        });
-        if session_files.len() > 10 {
-            for old in &session_files[..session_files.len() - 10] {
-                std::fs::remove_file(old.path()).ok();
-            }
-        }
-
-        // Write current session summaries
-        let sessions: Vec<_> = memories.iter()
-            .filter(|m| m.effective_level() == LEVEL_SESSION && !m.resolved)
-            .collect();
-        for s in &sessions {
+    // ── sessions/ content ─────────────────────────────────────────────────────
+    let session_files: Vec<(String, String)> = memories
+        .iter()
+        .filter(|m| m.effective_level() == LEVEL_SESSION && !m.resolved)
+        .map(|s| {
             let agent_type = s.agent_id.split(':').next().unwrap_or("agent");
-            let ts         = s.timestamp;
-            let filename   = format!("{agent_type}-{ts}.md");
-            let path       = sessions_dir.join(&filename);
-            if path.exists() { continue; } // don't overwrite existing
-
+            let ts = s.timestamp;
+            let filename = format!("{agent_type}-{ts}.md");
             let content = format!(
                 "# Session Summary\n\nagent: {}\nrunbox: {}\ntime: {} ({})\n\n{}\n",
                 agent_type,
@@ -189,22 +170,20 @@ pub async fn sync_to_fs(runbox_id: &str, cwd: &str, memories: &[Memory]) {
                 s.age_label(),
                 s.content.trim()
             );
-            let _ = std::fs::write(&path, &content);
-        }
-    }
+            (filename, content)
+        })
+        .collect();
 
-    // ── insights/ — long PREFERRED facts as {key}.md ─────────────────────────
-    {
-        let insights_dir = dir.join("insights");
-        std::fs::create_dir_all(&insights_dir).ok();
-
-        let preferred_long: Vec<_> = memories.iter()
-            .filter(|m| m.effective_level() == LEVEL_PREFERRED
-                && m.is_active() && !m.resolved
-                && m.content.len() > 80)
-            .collect();
-
-        for m in &preferred_long {
+    // ── insights/ content ─────────────────────────────────────────────────────
+    let insight_files: Vec<(String, String)> = memories
+        .iter()
+        .filter(|m| {
+            m.effective_level() == LEVEL_PREFERRED
+                && m.is_active()
+                && !m.resolved
+                && m.content.len() > 80
+        })
+        .map(|m| {
             let k = if m.key.is_empty() {
                 crate::memory::extract_key(&m.content)
             } else {
@@ -217,9 +196,51 @@ pub async fn sync_to_fs(runbox_id: &str, cwd: &str, memories: &[Memory]) {
                 m.age_label(),
                 m.content.trim()
             );
-            let _ = std::fs::write(insights_dir.join(&filename), &content);
+            (filename, content)
+        })
+        .collect();
+
+    // ── Flush to disk off the executor thread ─────────────────────────────────
+    tokio::task::spawn_blocking(move || {
+        let _ = std::fs::write(dir.join("structured.toml"), structured_toml);
+        let _ = std::fs::write(dir.join("locked.toml"), locked_toml);
+
+        // sessions/
+        let sessions_dir = dir.join("sessions");
+        std::fs::create_dir_all(&sessions_dir).ok();
+
+        // Prune old session files beyond cap (keep 10)
+        let mut existing: Vec<_> = std::fs::read_dir(&sessions_dir)
+            .ok()
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
+                    .collect()
+            })
+            .unwrap_or_default();
+        existing.sort_by_key(|e: &std::fs::DirEntry| {
+            e.metadata().and_then(|m| m.modified()).ok()
+        });
+        if existing.len() > 10 {
+            for old in &existing[..existing.len() - 10] {
+                std::fs::remove_file(old.path()).ok();
+            }
         }
-    }
+
+        for (filename, content) in session_files {
+            let path = sessions_dir.join(&filename);
+            if !path.exists() {
+                let _ = std::fs::write(path, content);
+            }
+        }
+
+        // insights/
+        let insights_dir = dir.join("insights");
+        std::fs::create_dir_all(&insights_dir).ok();
+        for (filename, content) in insight_files {
+            let _ = std::fs::write(insights_dir.join(filename), content);
+        }
+    });
 }
 
 // ── Git commit ─────────────────────────────────────────────────────────────────
@@ -228,12 +249,16 @@ pub async fn sync_to_fs(runbox_id: &str, cwd: &str, memories: &[Memory]) {
 /// Fires in a background thread — never blocks the caller.
 /// Message convention: "{agent_name}: {content_preview}"
 pub fn commit_memory_async(cwd: &str, message: String) {
-    if cwd.is_empty() { return; }
+    if cwd.is_empty() {
+        return;
+    }
     let dir = memory_dir(cwd);
 
     // Lazy init — ensures the repo exists before committing
     if !dir.join(".git").exists() {
-        if ensure_memory_repo(cwd).is_err() { return; }
+        if ensure_memory_repo(cwd).is_err() {
+            return;
+        }
     }
 
     std::thread::spawn(move || {
@@ -245,7 +270,9 @@ pub fn commit_memory_async(cwd: &str, message: String) {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_default();
 
-        if status.is_empty() { return; }
+        if status.is_empty() {
+            return;
+        }
 
         let _ = std::process::Command::new("git")
             .args(["add", "-A"])
@@ -261,10 +288,10 @@ pub fn commit_memory_async(cwd: &str, message: String) {
         let result = std::process::Command::new("git")
             .args(["commit", "-m", &msg])
             .current_dir(&dir)
-            .env("GIT_AUTHOR_NAME",    "Stackbox")
-            .env("GIT_AUTHOR_EMAIL",   "memory@stackbox.local")
+            .env("GIT_AUTHOR_NAME", "Stackbox")
+            .env("GIT_AUTHOR_EMAIL", "memory@stackbox.local")
             .env("GIT_COMMITTER_NAME", "Stackbox")
-            .env("GIT_COMMITTER_EMAIL","memory@stackbox.local")
+            .env("GIT_COMMITTER_EMAIL", "memory@stackbox.local")
             .output();
 
         match result {
@@ -287,7 +314,7 @@ pub fn commit_memory_async(cwd: &str, message: String) {
 /// Write/update main.md — the global project roadmap shared across all agents.
 /// Called on COMMIT (milestone reached) or when user sets a new goal via LOCKED.
 pub fn write_main_md(cwd: &str, content: &str) -> Result<(), String> {
-    let dir  = memory_dir(cwd);
+    let dir = memory_dir(cwd);
     std::fs::create_dir_all(&dir).ok();
 
     let full = format!(
@@ -296,8 +323,7 @@ pub fn write_main_md(cwd: &str, content: &str) -> Result<(), String> {
          {}\n",
         content.trim()
     );
-    std::fs::write(dir.join("main.md"), &full)
-        .map_err(|e| format!("write main.md: {e}"))
+    std::fs::write(dir.join("main.md"), &full).map_err(|e| format!("write main.md: {e}"))
 }
 
 /// Read main.md. Returns empty string if the file doesn't exist yet.

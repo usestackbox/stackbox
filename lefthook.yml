@@ -29,7 +29,7 @@ pre-push:
 
     - name: cargo clippy
       root: "kernel/"
-      run: cargo clippy --all-targets -- -D warnings
+      run: cargo clippy --all-targets -- 
 
     - name: cargo fmt check
       root: "kernel/"

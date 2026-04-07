@@ -16,12 +16,12 @@ use crate::workspace::context::MEMORY_PORT;
 /// - `runbox_id`  — used to build the MCP server URL
 /// - `session_id` — used as the Bearer auth token
 pub fn write_mcp_config(
-    cwd:        &str,
-    worktree:   Option<&str>,
-    runbox_id:  &str,
+    cwd: &str,
+    worktree: Option<&str>,
+    runbox_id: &str,
     session_id: &str,
 ) -> Result<(), String> {
-    let url  = format!("http://127.0.0.1:{}/mcp/{}", MEMORY_PORT, runbox_id);
+    let url = format!("http://127.0.0.1:{}/mcp/{}", MEMORY_PORT, runbox_id);
     let auth = format!("Bearer {}", session_id);
 
     // Collect all directories that need configs written.
@@ -46,57 +46,75 @@ fn write_configs_to_dir(dir: &str, url: &str, auth: &str) -> Result<(), String> 
     let base = std::path::Path::new(dir);
 
     // ── Claude Code (.claude/mcp.json) ───────────────────────────────────────
-    write_json(base.join(".claude").join("mcp.json"), serde_json::json!({
-        "mcpServers": {
-            "stackbox": {
-                "type": "http", "url": url,
-                "headers": { "Authorization": auth },
-                "description": "Stackbox workspace — call workspace_read before starting any task"
+    write_json(
+        base.join(".claude").join("mcp.json"),
+        serde_json::json!({
+            "mcpServers": {
+                "stackbox": {
+                    "type": "http", "url": url,
+                    "headers": { "Authorization": auth },
+                    "description": "Stackbox workspace — call workspace_read before starting any task"
+                }
             }
-        }
-    }))?;
+        }),
+    )?;
 
     // ── Codex (.codex/mcp.json) ───────────────────────────────────────────────
-    write_json(base.join(".codex").join("mcp.json"), serde_json::json!({
-        "mcpServers": {
-            "stackbox": { "type": "http", "url": url, "headers": { "Authorization": auth } }
-        }
-    }))?;
+    write_json(
+        base.join(".codex").join("mcp.json"),
+        serde_json::json!({
+            "mcpServers": {
+                "stackbox": { "type": "http", "url": url, "headers": { "Authorization": auth } }
+            }
+        }),
+    )?;
 
     // ── Gemini CLI (.gemini/mcp.json) ─────────────────────────────────────────
-    write_json(base.join(".gemini").join("mcp.json"), serde_json::json!({
-        "mcpServers": [{
-            "name": "stackbox",
-            "transport": { "type": "http", "url": url },
-            "headers": { "Authorization": auth }
-        }]
-    }))?;
+    write_json(
+        base.join(".gemini").join("mcp.json"),
+        serde_json::json!({
+            "mcpServers": [{
+                "name": "stackbox",
+                "transport": { "type": "http", "url": url },
+                "headers": { "Authorization": auth }
+            }]
+        }),
+    )?;
 
     // ── OpenCode (.opencode/mcp.json) ─────────────────────────────────────────
-    write_json(base.join(".opencode").join("mcp.json"), serde_json::json!({
-        "providers": [{ "name": "stackbox", "type": "http", "url": url,
-            "headers": { "Authorization": auth } }]
-    }))?;
+    write_json(
+        base.join(".opencode").join("mcp.json"),
+        serde_json::json!({
+            "providers": [{ "name": "stackbox", "type": "http", "url": url,
+                "headers": { "Authorization": auth } }]
+        }),
+    )?;
 
     // ── Cursor Agent (.cursor/mcp.json) ───────────────────────────────────────
-    write_json(base.join(".cursor").join("mcp.json"), serde_json::json!({
-        "mcpServers": {
-            "stackbox": {
-                "command": "npx", "args": ["-y", "mcp-remote", url],
-                "env": { "MCP_REMOTE_HEADER_AUTHORIZATION": auth }
+    write_json(
+        base.join(".cursor").join("mcp.json"),
+        serde_json::json!({
+            "mcpServers": {
+                "stackbox": {
+                    "command": "npx", "args": ["-y", "mcp-remote", url],
+                    "env": { "MCP_REMOTE_HEADER_AUTHORIZATION": auth }
+                }
             }
-        }
-    }))?;
+        }),
+    )?;
 
     // ── GitHub Copilot (.github/mcp.json) ─────────────────────────────────────
-    write_json(base.join(".github").join("mcp.json"), serde_json::json!({
-        "mcpServers": {
-            "stackbox": {
-                "type": "http", "url": url,
-                "headers": { "Authorization": auth }
+    write_json(
+        base.join(".github").join("mcp.json"),
+        serde_json::json!({
+            "mcpServers": {
+                "stackbox": {
+                    "type": "http", "url": url,
+                    "headers": { "Authorization": auth }
+                }
             }
-        }
-    }))?;
+        }),
+    )?;
 
     Ok(())
 }

@@ -5,17 +5,17 @@
 // Schema DDL lives entirely in db/schema.rs::migrate(), which is called once
 // at startup from db::open(). No DDL here — only reads and writes.
 
+use super::{now_ms, Db};
 use rusqlite::{params, Result};
-use super::{Db, now_ms};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Branch helper
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn runbox_set_branch(db: &Db, runbox_id: &str, branch: Option<&str>) -> Result<()> {
-    let id     = runbox_id.to_string();
+    let id = runbox_id.to_string();
     let branch = branch.map(str::to_string);
-    let ts     = now_ms();
+    let ts = now_ms();
     db.write_async(move |conn| {
         let _ = conn.execute(
             "UPDATE runboxes SET branch=?1, updated_at=?2 WHERE id=?3",
@@ -30,17 +30,17 @@ pub fn runbox_set_branch(db: &Db, runbox_id: &str, branch: Option<&str>) -> Resu
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn runbox_set_worktree(
-    db:            &Db,
-    runbox_id:     &str,
-    agent_kind:    &str,
+    db: &Db,
+    runbox_id: &str,
+    agent_kind: &str,
     worktree_path: Option<&str>,
-    branch:        Option<&str>,
+    branch: Option<&str>,
 ) -> Result<()> {
-    let id            = runbox_id.to_string();
-    let agent_kind    = agent_kind.to_string();
+    let id = runbox_id.to_string();
+    let agent_kind = agent_kind.to_string();
     let worktree_path = worktree_path.map(str::to_string);
-    let branch        = branch.map(str::to_string);
-    let ts            = now_ms();
+    let branch = branch.map(str::to_string);
+    let ts = now_ms();
 
     db.write_async(move |conn| {
         // schema::migrate() guarantees the table and all columns exist.
@@ -67,9 +67,9 @@ pub fn runbox_set_worktree(
 }
 
 pub fn runbox_set_pr(db: &Db, runbox_id: &str, pr_url: &str) -> Result<()> {
-    let id     = runbox_id.to_string();
+    let id = runbox_id.to_string();
     let pr_url = pr_url.to_string();
-    let ts     = now_ms();
+    let ts = now_ms();
     db.write_async(move |conn| {
         let _ = conn.execute(
             "UPDATE agent_worktrees SET pr_url=?1, status='pr_open', updated_at=?2
@@ -83,9 +83,9 @@ pub fn runbox_set_pr(db: &Db, runbox_id: &str, pr_url: &str) -> Result<()> {
 /// Update lifecycle status.
 /// Valid values: working | pr_open | approved | changes_requested | merged | cancelled | error
 pub fn runbox_set_status(db: &Db, runbox_id: &str, status: &str) -> Result<()> {
-    let id     = runbox_id.to_string();
+    let id = runbox_id.to_string();
     let status = status.to_string();
-    let ts     = now_ms();
+    let ts = now_ms();
     db.write_async(move |conn| {
         let _ = conn.execute(
             "UPDATE agent_worktrees SET status=?1, updated_at=?2 WHERE runbox_id=?3",
@@ -124,26 +124,26 @@ pub fn runbox_delete(db: &Db, runbox_id: &str) -> Result<()> {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WorktreeRecord {
-    pub runbox_id:     String,
-    pub agent_kind:    String,
+    pub runbox_id: String,
+    pub agent_kind: String,
     pub worktree_path: Option<String>,
-    pub branch:        Option<String>,
-    pub pr_url:        Option<String>,
-    pub status:        String,
-    pub created_at:    i64,
-    pub updated_at:    i64,
+    pub branch: Option<String>,
+    pub pr_url: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorktreeRecord> {
     Ok(WorktreeRecord {
-        runbox_id:     row.get(0)?,
-        agent_kind:    row.get(1)?,
+        runbox_id: row.get(0)?,
+        agent_kind: row.get(1)?,
         worktree_path: row.get(2)?,
-        branch:        row.get(3)?,
-        pr_url:        row.get(4)?,
-        status:        row.get(5)?,
-        created_at:    row.get(6)?,
-        updated_at:    row.get(7)?,
+        branch: row.get(3)?,
+        pr_url: row.get(4)?,
+        status: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 
@@ -193,7 +193,7 @@ pub fn runbox_all_with_worktrees(db: &Db) -> Vec<WorktreeRecord> {
                 created_at, updated_at
          FROM agent_worktrees WHERE worktree_path IS NOT NULL",
     ) {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(_) => return vec![],
     };
     stmt.query_map([], row_to_record)
@@ -222,7 +222,7 @@ pub fn workspace_list_worktrees(db: &Db, workspace_cwd: &str) -> Vec<WorktreeRec
          WHERE worktree_path LIKE ?1 ESCAPE '\\'
          ORDER BY updated_at DESC",
     ) {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(_) => return vec![],
     };
     stmt.query_map(rusqlite::params![prefix], row_to_record)

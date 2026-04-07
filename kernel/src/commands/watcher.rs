@@ -9,13 +9,19 @@ use crate::{
 
 #[tauri::command]
 pub fn watch_runbox(
-    app:       AppHandle,
+    app: AppHandle,
     runbox_id: String,
-    cwd:       String,
-    state:     tauri::State<'_, AppState>,
+    cwd: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let cwd_expanded = expand_cwd(&cwd);
-    watcher::start(app, state.db.clone(), runbox_id, cwd_expanded, state.watchers.clone())
+    watcher::start(
+        app,
+        state.db.clone(),
+        runbox_id,
+        cwd_expanded,
+        state.watchers.clone(),
+    )
 }
 
 #[tauri::command]

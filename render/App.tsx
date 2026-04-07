@@ -199,6 +199,7 @@ export default function App() {
             onMaximize={callbacks.onMaximize}
             onSplitDown={callbacks.onSplitDown}
             onSplitLeft={callbacks.onSplitLeft}
+            onAgentDetected={callbacks.onAgentDetected}
           />
         );
         return (

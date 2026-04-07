@@ -20,13 +20,10 @@ pub fn prune_orphan_worktrees(db: &Db) {
             Err(_) => return,
         };
         let x = match stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-            ))
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         }) {
             Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
-            Err(_)     => return,
+            Err(_) => return,
         };
         x
     };
@@ -34,23 +31,23 @@ pub fn prune_orphan_worktrees(db: &Db) {
     // Collect known active worktree paths from agent_branches
     let known_wt_paths: std::collections::HashSet<String> = {
         let conn = db.read();
-        let mut stmt = match conn.prepare(
-            "SELECT worktree_path FROM agent_branches WHERE worktree_path IS NOT NULL"
-        ) {
+        let mut stmt = match conn
+            .prepare("SELECT worktree_path FROM agent_branches WHERE worktree_path IS NOT NULL")
+        {
             Ok(s) => s,
             Err(_) => {
                 // Fall back to legacy table
                 let conn2 = db.read();
                 let mut stmt2 = match conn2.prepare(
-                    "SELECT worktree_path FROM agent_worktrees WHERE worktree_path IS NOT NULL"
+                    "SELECT worktree_path FROM agent_worktrees WHERE worktree_path IS NOT NULL",
                 ) {
-                    Ok(s)  => s,
+                    Ok(s) => s,
                     Err(_) => return,
                 };
                 let paths: std::collections::HashSet<String> =
                     match stmt2.query_map([], |row| row.get::<_, String>(0)) {
                         Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
-                        Err(_)     => std::collections::HashSet::new(),
+                        Err(_) => std::collections::HashSet::new(),
                     };
                 return prune_with_known_paths(&runbox_rows, paths);
             }
@@ -58,7 +55,7 @@ pub fn prune_orphan_worktrees(db: &Db) {
         let x: std::collections::HashSet<String> =
             match stmt.query_map([], |row| row.get::<_, String>(0)) {
                 Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
-                Err(_)     => std::collections::HashSet::new(),
+                Err(_) => std::collections::HashSet::new(),
             };
         x
     };
@@ -67,7 +64,7 @@ pub fn prune_orphan_worktrees(db: &Db) {
 }
 
 fn prune_with_known_paths(
-    runbox_rows:    &[(String, String)],
+    runbox_rows: &[(String, String)],
     known_wt_paths: std::collections::HashSet<String>,
 ) {
     let known_short_ids: std::collections::HashSet<String> = runbox_rows
@@ -88,15 +85,22 @@ fn prune_with_known_paths(
             if let Ok(entries) = std::fs::read_dir(&wt_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if !name.starts_with("stackbox-wt-") { continue; }
+                    if !name.starts_with("stackbox-wt-") {
+                        continue;
+                    }
 
-                    let path     = entry.path();
+                    let path = entry.path();
                     let path_str = path.to_string_lossy().to_string();
 
-                    if known_wt_paths.contains(&path_str) { continue; }
+                    if known_wt_paths.contains(&path_str) {
+                        continue;
+                    }
 
                     let suffix = &name["stackbox-wt-".len()..];
-                    if known_short_ids.iter().any(|id| suffix.starts_with(id.as_str())) {
+                    if known_short_ids
+                        .iter()
+                        .any(|id| suffix.starts_with(id.as_str()))
+                    {
                         continue;
                     }
 
@@ -113,28 +117,37 @@ fn prune_with_known_paths(
         // ── Legacy layout: scan parent dir for sibling stackbox-wt-* ─────────
         let parent = match Path::new(cwd).parent() {
             Some(p) => p.to_path_buf(),
-            None    => continue,
+            None => continue,
         };
         let parent_str = parent.to_string_lossy().to_string();
-        if scanned.contains(&parent_str) { continue; }
+        if scanned.contains(&parent_str) {
+            continue;
+        }
         scanned.insert(parent_str.clone());
 
         let entries = match std::fs::read_dir(&parent) {
-            Ok(e)  => e,
+            Ok(e) => e,
             Err(_) => continue,
         };
 
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_string();
-            if !name.starts_with("stackbox-wt-") { continue; }
+            if !name.starts_with("stackbox-wt-") {
+                continue;
+            }
 
-            let path     = entry.path();
+            let path = entry.path();
             let path_str = path.to_string_lossy().to_string();
 
-            if known_wt_paths.contains(&path_str) { continue; }
+            if known_wt_paths.contains(&path_str) {
+                continue;
+            }
 
             let suffix = &name["stackbox-wt-".len()..];
-            if known_short_ids.iter().any(|id| suffix.starts_with(id.as_str())) {
+            if known_short_ids
+                .iter()
+                .any(|id| suffix.starts_with(id.as_str()))
+            {
                 continue;
             }
 

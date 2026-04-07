@@ -8,17 +8,16 @@
 // ADDED: git_merge_branch, git_delete_branch, git_branch_log,
 //        git_branch_status, git_agent_branches
 
-use tauri::Emitter;
 use super::{
-    diff::{diff_for_commit, diff_live, clear_cache_for, LiveDiffFile},
+    diff::{clear_cache_for, diff_for_commit, diff_live, LiveDiffFile},
     log::{log_for_runbox, log_range, GitCommit},
     repo::{
-        delete_branch, ensure_git_repo, ensure_worktree, expand_home, git, git_dir_opt,
-        has_git, init_real_repo, list_worktrees, remove_worktree_only,
-        WorktreeEntry,
+        delete_branch, ensure_git_repo, ensure_worktree, expand_home, git, git_dir_opt, has_git,
+        init_real_repo, list_worktrees, remove_worktree_only, WorktreeEntry,
     },
 };
 use crate::{db, state::AppState};
+use tauri::Emitter;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Result types
@@ -26,16 +25,16 @@ use crate::{db, state::AppState};
 
 #[derive(serde::Serialize)]
 pub struct GitEnsureResult {
-    pub is_new:        bool,
+    pub is_new: bool,
     pub worktree_path: Option<String>,
-    pub branch:        Option<String>,
-    pub worktree_new:  bool,
+    pub branch: Option<String>,
+    pub worktree_new: bool,
 }
 
 #[derive(serde::Serialize)]
 pub struct BranchStatus {
-    pub ahead:         usize,
-    pub behind:        usize,
+    pub ahead: usize,
+    pub behind: usize,
     pub has_conflicts: bool,
 }
 
@@ -47,55 +46,54 @@ pub struct BranchStatus {
 /// Persists branch record to the database.
 #[tauri::command]
 pub async fn git_ensure(
-    cwd:        String,
-    runbox_id:  String,
+    cwd: String,
+    runbox_id: String,
     session_id: Option<String>,
     agent_kind: Option<String>,
-    state:      tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<GitEnsureResult, String> {
-    let cwd      = expand_home(&cwd);
-    let is_new   = !has_git(&cwd, &runbox_id);
+    let cwd = expand_home(&cwd);
+    let is_new = !has_git(&cwd, &runbox_id);
     ensure_git_repo(&cwd, &runbox_id)?;
 
     let kind = agent_kind.as_deref().unwrap_or("shell");
-    let sid  = session_id.as_deref().unwrap_or(&runbox_id);
+    let sid = session_id.as_deref().unwrap_or(&runbox_id);
 
     let wt = ensure_worktree(&cwd, &runbox_id, sid, kind);
 
     let worktree_path = wt.as_ref().map(|w| w.path.clone());
-    let branch        = wt.as_ref().map(|w| w.branch.clone());
-    let worktree_new  = wt.as_ref().map(|w| w.is_new).unwrap_or(false);
+    let branch = wt.as_ref().map(|w| w.branch.clone());
+    let worktree_new = wt.as_ref().map(|w| w.is_new).unwrap_or(false);
 
     if let Some(ref w) = wt {
-        let _ = db::branches::record_branch_start(
-            &state.db,
-            &runbox_id,
-            sid,
-            kind,
-            &w.branch,
-            &w.path,
-        );
+        let _ =
+            db::branches::record_branch_start(&state.db, &runbox_id, sid, kind, &w.branch, &w.path);
     }
 
     let short = &runbox_id[..runbox_id.len().min(8)];
     match &worktree_path {
         Some(p) => eprintln!("[git_ensure] {kind}/{short} → worktree: {p}"),
-        None    => eprintln!("[git_ensure] {kind}/{short} → no worktree"),
+        None => eprintln!("[git_ensure] {kind}/{short} → no worktree"),
     }
 
-    Ok(GitEnsureResult { is_new, worktree_path, branch, worktree_new })
+    Ok(GitEnsureResult {
+        is_new,
+        worktree_path,
+        branch,
+        worktree_new,
+    })
 }
 
 /// Lightweight query — get the worktree path for an already-running agent.
 #[tauri::command]
 pub async fn git_agent_worktree(
-    cwd:        String,
-    runbox_id:  String,
+    cwd: String,
+    runbox_id: String,
     session_id: Option<String>,
     agent_kind: Option<String>,
 ) -> Result<Option<String>, String> {
     let kind = agent_kind.as_deref().unwrap_or("shell");
-    let sid  = session_id.as_deref().unwrap_or(&runbox_id);
+    let sid = session_id.as_deref().unwrap_or(&runbox_id);
     Ok(ensure_worktree(&cwd, &runbox_id, sid, kind).map(|w| w.path))
 }
 
@@ -104,10 +102,7 @@ pub async fn git_agent_worktree(
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn git_commit(
-    worktree_path: String,
-    message:       String,
-) -> Result<String, String> {
+pub async fn git_commit(worktree_path: String, message: String) -> Result<String, String> {
     commit_direct(&worktree_path, &message)
 }
 
@@ -148,10 +143,9 @@ pub fn commit_direct(worktree_path: &str, message: &str) -> Result<String, Strin
 #[tauri::command]
 pub async fn git_agent_branches(
     runbox_id: String,
-    state:     tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<db::branches::AgentBranch>, String> {
-    db::branches::list_for_runbox(&state.db, &runbox_id)
-        .map_err(|e| e.to_string())
+    db::branches::list_for_runbox(&state.db, &runbox_id).map_err(|e| e.to_string())
 }
 
 /// Merge a stackbox agent branch into the current branch using --no-ff.
@@ -159,9 +153,9 @@ pub async fn git_agent_branches(
 /// Updates the branch status in the DB to 'merged'.
 #[tauri::command]
 pub async fn git_merge_branch(
-    cwd:    String,
+    cwd: String,
     branch: String,
-    state:  tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     if !branch.starts_with("stackbox/") {
         return Err(format!("can only merge stackbox/* branches, got: {branch}"));
@@ -189,8 +183,7 @@ pub async fn git_merge_branch(
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
 
-    db::branches::record_branch_merged(&state.db, &branch)
-        .map_err(|e| e.to_string())?;
+    db::branches::record_branch_merged(&state.db, &branch).map_err(|e| e.to_string())?;
 
     eprintln!("[git] merged branch: {branch}");
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
@@ -201,15 +194,14 @@ pub async fn git_merge_branch(
 /// Updates DB status to 'deleted'.
 #[tauri::command]
 pub async fn git_delete_branch(
-    cwd:    String,
+    cwd: String,
     branch: String,
-    force:  Option<bool>,
-    state:  tauri::State<'_, AppState>,
+    force: Option<bool>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     delete_branch(&cwd, &branch, force.unwrap_or(false))?;
 
-    db::branches::record_branch_deleted(&state.db, &branch)
-        .map_err(|e| e.to_string())?;
+    db::branches::record_branch_deleted(&state.db, &branch).map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -217,11 +209,11 @@ pub async fn git_delete_branch(
 /// Commits on an agent branch that are not yet on main.
 #[tauri::command]
 pub async fn git_branch_log(
-    cwd:    String,
+    cwd: String,
     branch: String,
-    base:   Option<String>,
+    base: Option<String>,
 ) -> Result<Vec<GitCommit>, String> {
-    let base  = base.as_deref().unwrap_or("main");
+    let base = base.as_deref().unwrap_or("main");
     let range = format!("{base}..{branch}");
     log_range(&cwd, &range)
 }
@@ -229,9 +221,9 @@ pub async fn git_branch_log(
 /// How many commits ahead/behind a branch is vs main, and whether it conflicts.
 #[tauri::command]
 pub async fn git_branch_status(
-    cwd:    String,
+    cwd: String,
     branch: String,
-    base:   Option<String>,
+    base: Option<String>,
 ) -> Result<BranchStatus, String> {
     let base = base.as_deref().unwrap_or("main");
 
@@ -246,7 +238,7 @@ pub async fn git_branch_status(
             .unwrap_or(0)
     };
 
-    let ahead  = count_commits(&format!("{base}..{branch}"));
+    let ahead = count_commits(&format!("{base}..{branch}"));
     let behind = count_commits(&format!("{branch}..{base}"));
 
     // Quick conflict check via merge-tree (no actual merge)
@@ -273,7 +265,11 @@ pub async fn git_branch_status(
         false
     };
 
-    Ok(BranchStatus { ahead, behind, has_conflicts })
+    Ok(BranchStatus {
+        ahead,
+        behind,
+        has_conflicts,
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -302,7 +298,9 @@ pub async fn git_log_for_runbox(cwd: String, runbox_id: String) -> Result<Vec<Gi
 
 #[tauri::command]
 pub async fn git_diff_for_commit(
-    cwd: String, runbox_id: String, hash: String,
+    cwd: String,
+    runbox_id: String,
+    hash: String,
 ) -> Result<String, String> {
     diff_for_commit(&cwd, &runbox_id, &hash)
 }
@@ -318,7 +316,9 @@ pub async fn git_diff_live(cwd: String, runbox_id: String) -> Result<Vec<LiveDif
 
 #[tauri::command]
 pub async fn git_worktree_create(
-    cwd: String, branch: String, wt_name: String,
+    cwd: String,
+    branch: String,
+    wt_name: String,
 ) -> Result<String, String> {
     let cwd = expand_home(&cwd);
     let cwd_path = std::path::Path::new(&cwd);
@@ -327,12 +327,14 @@ pub async fn git_worktree_create(
         init_real_repo(&cwd)?;
     }
 
-    let wt_dir  = cwd_path.join(".worktrees");
+    let wt_dir = cwd_path.join(".worktrees");
     std::fs::create_dir_all(&wt_dir).map_err(|e| e.to_string())?;
     let wt_path = wt_dir.join(&wt_name);
-    let wt_str  = wt_path.to_str().ok_or("non-UTF8 path")?;
+    let wt_str = wt_path.to_str().ok_or("non-UTF8 path")?;
 
-    if wt_path.exists() { return Ok(wt_str.to_string()); }
+    if wt_path.exists() {
+        return Ok(wt_str.to_string());
+    }
 
     let out = std::process::Command::new("git")
         .args(["worktree", "add", "-b", &branch, wt_str, "HEAD"])
@@ -340,7 +342,9 @@ pub async fn git_worktree_create(
         .output()
         .map_err(|e| e.to_string())?;
 
-    if out.status.success() { return Ok(wt_str.to_string()); }
+    if out.status.success() {
+        return Ok(wt_str.to_string());
+    }
 
     let out2 = std::process::Command::new("git")
         .args(["worktree", "add", wt_str, &branch])
@@ -348,7 +352,9 @@ pub async fn git_worktree_create(
         .output()
         .map_err(|e| e.to_string())?;
 
-    if out2.status.success() { return Ok(wt_str.to_string()); }
+    if out2.status.success() {
+        return Ok(wt_str.to_string());
+    }
 
     Err(String::from_utf8_lossy(&out2.stderr).trim().to_string())
 }
@@ -372,33 +378,53 @@ pub async fn git_worktree_list(cwd: String) -> Result<Vec<FullWorktreeEntry>, St
     }
 
     let text = String::from_utf8_lossy(&out.stdout);
-    let mut entries   = Vec::new();
-    let mut path      = String::new();
-    let mut branch    = String::new();
-    let mut head      = String::new();
-    let mut is_bare   = false;
+    let mut entries = Vec::new();
+    let mut path = String::new();
+    let mut branch = String::new();
+    let mut head = String::new();
+    let mut is_bare = false;
     let mut is_locked = false;
-    let mut first     = true;
+    let mut first = true;
 
     for line in text.lines() {
         if line.is_empty() {
             if !path.is_empty() {
                 entries.push(FullWorktreeEntry {
-                    path: path.clone(), branch: branch.clone(),
-                    head: head.clone(), is_main: first,
-                    is_bare, is_locked,
+                    path: path.clone(),
+                    branch: branch.clone(),
+                    head: head.clone(),
+                    is_main: first,
+                    is_bare,
+                    is_locked,
                 });
-                path.clear(); branch.clear(); head.clear();
-                is_bare = false; is_locked = false; first = false;
+                path.clear();
+                branch.clear();
+                head.clear();
+                is_bare = false;
+                is_locked = false;
+                first = false;
             }
-        } else if let Some(v) = line.strip_prefix("worktree ")          { path   = v.into(); }
-          else if let Some(v) = line.strip_prefix("HEAD ")              { head   = v.into(); }
-          else if let Some(v) = line.strip_prefix("branch refs/heads/") { branch = v.into(); }
-          else if line == "bare"   { is_bare   = true; }
-          else if line == "locked" { is_locked = true; }
+        } else if let Some(v) = line.strip_prefix("worktree ") {
+            path = v.into();
+        } else if let Some(v) = line.strip_prefix("HEAD ") {
+            head = v.into();
+        } else if let Some(v) = line.strip_prefix("branch refs/heads/") {
+            branch = v.into();
+        } else if line == "bare" {
+            is_bare = true;
+        } else if line == "locked" {
+            is_locked = true;
+        }
     }
     if !path.is_empty() {
-        entries.push(FullWorktreeEntry { path, branch, head, is_main: first, is_bare, is_locked });
+        entries.push(FullWorktreeEntry {
+            path,
+            branch,
+            head,
+            is_main: first,
+            is_bare,
+            is_locked,
+        });
     }
 
     Ok(entries)
@@ -411,11 +437,11 @@ pub async fn git_worktree_list_stackbox(cwd: String) -> Result<Vec<WorktreeEntry
 
 #[derive(serde::Serialize)]
 pub struct FullWorktreeEntry {
-    pub path:      String,
-    pub branch:    String,
-    pub head:      String,
-    pub is_main:   bool,
-    pub is_bare:   bool,
+    pub path: String,
+    pub branch: String,
+    pub head: String,
+    pub is_main: bool,
+    pub is_bare: bool,
     pub is_locked: bool,
 }
 
@@ -441,10 +467,10 @@ pub async fn git_current_branch(cwd: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn git_stage_and_commit(
-    app:       tauri::AppHandle,
-    cwd:       String,
+    app: tauri::AppHandle,
+    cwd: String,
     runbox_id: String,
-    message:   String,
+    message: String,
 ) -> Result<String, String> {
     if message.trim().is_empty() {
         return Err("commit message cannot be empty".into());
@@ -460,9 +486,9 @@ pub async fn git_stage_and_commit(
         return Err("nothing to commit — working tree clean".into());
     }
 
-    let out  = git(&["commit", "-m", message.trim()], &cwd, gdo)?;
+    let out = git(&["commit", "-m", message.trim()], &cwd, gdo)?;
     let hash = git(&["rev-parse", "--short", "HEAD"], &cwd, gdo).unwrap_or_default();
-    let short   = hash.trim();
+    let short = hash.trim();
     let summary = out.lines().next().unwrap_or("").trim().to_string();
 
     clear_cache_for(&cwd);
@@ -473,9 +499,7 @@ pub async fn git_stage_and_commit(
 }
 
 #[tauri::command]
-pub async fn git_stage_file(
-    cwd: String, runbox_id: String, path: String,
-) -> Result<(), String> {
+pub async fn git_stage_file(cwd: String, runbox_id: String, path: String) -> Result<(), String> {
     let gdo_owned = git_dir_opt(&cwd, &runbox_id);
     let gdo: Option<&str> = gdo_owned.as_deref();
     git(&["add", &path], &cwd, gdo)?;
@@ -483,9 +507,7 @@ pub async fn git_stage_file(
 }
 
 #[tauri::command]
-pub async fn git_unstage_file(
-    cwd: String, runbox_id: String, path: String,
-) -> Result<(), String> {
+pub async fn git_unstage_file(cwd: String, runbox_id: String, path: String) -> Result<(), String> {
     let gdo_owned = git_dir_opt(&cwd, &runbox_id);
     let gdo: Option<&str> = gdo_owned.as_deref();
     if git(&["restore", "--staged", &path], &cwd, gdo).is_err() {
@@ -495,9 +517,7 @@ pub async fn git_unstage_file(
 }
 
 #[tauri::command]
-pub async fn git_discard_file(
-    cwd: String, runbox_id: String, path: String,
-) -> Result<(), String> {
+pub async fn git_discard_file(cwd: String, runbox_id: String, path: String) -> Result<(), String> {
     let gdo_owned = git_dir_opt(&cwd, &runbox_id);
     let gdo: Option<&str> = gdo_owned.as_deref();
     if git(&["restore", "--worktree", "--", &path], &cwd, gdo).is_ok() {
@@ -513,7 +533,9 @@ pub async fn git_discard_file(
 
 #[tauri::command]
 pub async fn git_watch_start(
-    app: tauri::AppHandle, cwd: String, runbox_id: String,
+    app: tauri::AppHandle,
+    cwd: String,
+    runbox_id: String,
 ) -> Result<(), String> {
     crate::git::watcher::start_watch(app, cwd, runbox_id);
     Ok(())
@@ -527,7 +549,7 @@ pub async fn git_watch_stop(cwd: String) -> Result<(), String> {
 
 #[derive(serde::Serialize)]
 pub struct ConflictFile {
-    pub path:   String,
+    pub path: String,
     pub status: String,
 }
 
@@ -539,16 +561,25 @@ pub async fn git_conflicts(cwd: String) -> Result<Vec<ConflictFile>, String> {
         .output()
         .map_err(|e| e.to_string())?;
 
-    if !out.status.success() { return Ok(vec![]); }
+    if !out.status.success() {
+        return Ok(vec![]);
+    }
 
     Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|line| {
-            if line.len() < 4 { return None; }
+            if line.len() < 4 {
+                return None;
+            }
             let status = &line[..2];
-            let conflict = matches!(status, "UU"|"AA"|"DD"|"AU"|"UA"|"DU"|"UD");
-            if !conflict { return None; }
-            Some(ConflictFile { path: line[3..].trim().to_string(), status: status.to_string() })
+            let conflict = matches!(status, "UU" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD");
+            if !conflict {
+                return None;
+            }
+            Some(ConflictFile {
+                path: line[3..].trim().to_string(),
+                status: status.to_string(),
+            })
         })
         .collect())
 }
@@ -561,7 +592,9 @@ pub async fn git_branches(cwd: String) -> Result<Vec<String>, String> {
         .output()
         .map_err(|e| e.to_string())?;
 
-    if !out.status.success() { return Ok(vec![]); }
+    if !out.status.success() {
+        return Ok(vec![]);
+    }
 
     Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
@@ -578,7 +611,9 @@ pub async fn git_checkout(cwd: String, branch: String) -> Result<(), String> {
         .output()
         .map_err(|e| e.to_string())?;
 
-    if out.status.success() { return Ok(()); }
+    if out.status.success() {
+        return Ok(());
+    }
     let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
 
     let out2 = std::process::Command::new("git")
@@ -587,26 +622,32 @@ pub async fn git_checkout(cwd: String, branch: String) -> Result<(), String> {
         .output()
         .map_err(|e| e.to_string())?;
 
-    if out2.status.success() { return Ok(()); }
+    if out2.status.success() {
+        return Ok(());
+    }
     Err(err)
 }
 
 #[tauri::command]
-pub async fn git_rename_branch(cwd: String, old_name: String, new_name: String) -> Result<(), String> {
+pub async fn git_rename_branch(
+    cwd: String,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
     let out = std::process::Command::new("git")
         .args(["branch", "-m", &old_name, &new_name])
         .current_dir(&cwd)
         .output()
         .map_err(|e| e.to_string())?;
 
-    if out.status.success() { return Ok(()); }
+    if out.status.success() {
+        return Ok(());
+    }
     Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
 }
 
 #[tauri::command]
-pub async fn git_diff_between_worktrees(
-    cwd: String, other_cwd: String,
-) -> Result<String, String> {
+pub async fn git_diff_between_worktrees(cwd: String, other_cwd: String) -> Result<String, String> {
     let get_head = |dir: &str| -> Result<String, String> {
         let out = std::process::Command::new("git")
             .args(["rev-parse", "HEAD"])
@@ -620,7 +661,7 @@ pub async fn git_diff_between_worktrees(
         }
     };
 
-    let cur   = get_head(&cwd)?;
+    let cur = get_head(&cwd)?;
     let other = get_head(&other_cwd)?;
 
     if cur == other {
@@ -640,11 +681,14 @@ pub async fn git_diff_between_worktrees(
         .map_err(|e| e.to_string())?;
 
     let stat_str = String::from_utf8_lossy(&stat.stdout).trim().to_string();
-    let full     = String::from_utf8_lossy(&diff.stdout);
+    let full = String::from_utf8_lossy(&diff.stdout);
     let lines: Vec<&str> = full.lines().collect();
     let capped = if lines.len() > 200 {
-        format!("{}\n\n… ({} more lines)",
-            lines[..200].join("\n"), lines.len() - 200)
+        format!(
+            "{}\n\n… ({} more lines)",
+            lines[..200].join("\n"),
+            lines.len() - 200
+        )
     } else {
         full.to_string()
     };

@@ -22,6 +22,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::{
     agent::{context::inject, injector, kind::AgentKind},
+    db::sessions::{session_end, session_start},
     git::repo::{ensure_git_repo, remove_worktree_only},
     memory,
     state::{AppState, PtySession},
@@ -29,30 +30,37 @@ use crate::{
         events::{record_agent_spawned, record_command_result},
         snapshot::snapshot_from_git,
     },
-    db::sessions::{session_start, session_end},
 };
 
-use detection::{strip_ansi, on_command_result};
+use detection::{on_command_result, strip_ansi};
 
 pub fn expand_cwd(raw: &str) -> String {
     let s = raw.trim();
     let expanded = if s == "~" || s.starts_with("~/") || s.starts_with("~\\") {
         if let Some(home) = dirs::home_dir() {
             let rest = s[1..].trim_start_matches('/').trim_start_matches('\\');
-            if rest.is_empty() { home.to_string_lossy().to_string() }
-            else { home.join(rest).to_string_lossy().to_string() }
-        } else { s.to_string() }
-    } else { s.to_string() };
+            if rest.is_empty() {
+                home.to_string_lossy().to_string()
+            } else {
+                home.join(rest).to_string_lossy().to_string()
+            }
+        } else {
+            s.to_string()
+        }
+    } else {
+        s.to_string()
+    };
 
     #[cfg(windows)]
     if expanded.contains('%') {
         if let Ok(v) = std::env::var("USERPROFILE") {
-            return expanded.replace("%USERPROFILE%", &v).replace("%userprofile%", &v);
+            return expanded
+                .replace("%USERPROFILE%", &v)
+                .replace("%userprofile%", &v);
         }
     }
     expanded
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tmux session persistence (Unix only)
@@ -60,15 +68,26 @@ pub fn expand_cwd(raw: &str) -> String {
 
 #[cfg(not(windows))]
 fn tmux_available() -> bool {
-    std::process::Command::new("tmux").arg("-V")
-        .output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new("tmux")
+        .arg("-V")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 #[cfg(not(windows))]
 fn tmux_session_name(runbox_id: &str) -> String {
     // Use first 16 chars to keep name short; replace non-alphanumeric with -
-    let short: String = runbox_id.chars().take(16)
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+    let short: String = runbox_id
+        .chars()
+        .take(16)
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     format!("sb-{}", short)
 }
@@ -99,7 +118,9 @@ pub fn tmux_session_alive(runbox_id: &str) -> bool {
 #[cfg(windows)]
 pub fn kill_tmux_session(_runbox_id: &str) {}
 #[cfg(windows)]
-pub fn tmux_session_alive(_runbox_id: &str) -> bool { false }
+pub fn tmux_session_alive(_runbox_id: &str) -> bool {
+    false
+}
 
 fn clear_git_lock(cwd: &str) {
     let lock = std::path::Path::new(cwd).join(".git").join("index.lock");
@@ -137,7 +158,9 @@ fn detect_worktree(cwd: &str) -> Option<String> {
 }
 
 fn is_intentional_url(url: &str) -> bool {
-    if url.starts_with("file://") { return true; }
+    if url.starts_with("file://") {
+        return true;
+    }
     if url.contains("localhost") || url.contains("127.0.0.1") || url.contains("0.0.0.0") {
         return true;
     }
@@ -157,7 +180,10 @@ fn find_powershell() -> String {
         }
     }
     let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-    format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", sys_root)
+    format!(
+        "{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        sys_root
+    )
 }
 
 #[cfg(windows)]
@@ -165,23 +191,25 @@ fn which_exe(name: &str) -> bool {
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in path_var.split(';') {
             let candidate = std::path::Path::new(dir).join(name);
-            if candidate.exists() { return true; }
+            if candidate.exists() {
+                return true;
+            }
         }
     }
     false
 }
 
 pub async fn spawn(
-    app:            AppHandle,
-    session_id:     String,
-    runbox_id:      String,
-    cwd:            String,
-    agent_cmd:      Option<String>,
+    app: AppHandle,
+    session_id: String,
+    runbox_id: String,
+    cwd: String,
+    agent_cmd: Option<String>,
     workspace_name: Option<String>,
-    cols:           Option<u16>,
-    rows:           Option<u16>,
-    docker:         bool,
-    state:          &AppState,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    docker: bool,
+    state: &AppState,
 ) -> Result<(), String> {
     let pty_system = native_pty_system();
 
@@ -190,16 +218,16 @@ pub async fn spawn(
 
     let pair = pty_system
         .openpty(PtySize {
-            rows:         init_rows,
-            cols:         init_cols,
-            pixel_width:  0,
+            rows: init_rows,
+            cols: init_cols,
+            pixel_width: 0,
             pixel_height: 0,
         })
         .map_err(|e| e.to_string())?;
 
     let resolved_cwd = expand_cwd(&cwd);
-    let agent_str    = agent_cmd.as_deref().unwrap_or("shell");
-    let agent_kind   = AgentKind::detect(agent_str);
+    let agent_str = agent_cmd.as_deref().unwrap_or("shell");
+    let agent_kind = AgentKind::detect(agent_str);
 
     let ws_label: String = workspace_name
         .as_deref()
@@ -217,8 +245,10 @@ pub async fn spawn(
 
     let worktree_path = detect_worktree(&resolved_cwd);
     if worktree_path.is_none() {
-        ensure_git_repo(&resolved_cwd, &runbox_id)
-            .unwrap_or_else(|e| { eprintln!("[pty] ensure_git_repo: {e}"); String::new() });
+        ensure_git_repo(&resolved_cwd, &runbox_id).unwrap_or_else(|e| {
+            eprintln!("[pty] ensure_git_repo: {e}");
+            String::new()
+        });
     }
 
     // ── Create agent worktree for non-shell agents ────────────────────────────
@@ -231,7 +261,8 @@ pub async fn spawn(
     };
 
     let effective_cwd = agent_worktree
-        .as_ref().map(|w| w.path.clone())
+        .as_ref()
+        .map(|w| w.path.clone())
         .or_else(|| worktree_path.clone())
         .unwrap_or_else(|| resolved_cwd.clone());
 
@@ -249,26 +280,32 @@ pub async fn spawn(
         );
     }
 
-    record_agent_spawned(&state.db, &runbox_id, &session_id, agent_kind.display_name(), &effective_cwd);
+    record_agent_spawned(
+        &state.db,
+        &runbox_id,
+        &session_id,
+        agent_kind.display_name(),
+        &effective_cwd,
+    );
 
     crate::agent::globals::register_runbox_cwd(&runbox_id, &effective_cwd);
 
     if agent_kind != AgentKind::Shell {
-        let rb4  = runbox_id.clone();
+        let rb4 = runbox_id.clone();
         let cwd4 = effective_cwd.clone();
-        let db4  = state.db.clone();
+        let db4 = state.db.clone();
         tauri::async_runtime::spawn(async move {
             crate::memory::sleep::boot_init(&rb4, &cwd4, &db4).await;
         });
     }
 
     {
-        let rb       = runbox_id.clone();
-        let sid      = session_id.clone();
-        let cwd_c    = effective_cwd.clone();
-        let ak       = agent_kind.display_name().to_string();
+        let rb = runbox_id.clone();
+        let sid = session_id.clone();
+        let cwd_c = effective_cwd.clone();
+        let ak = agent_kind.display_name().to_string();
         // Pass the real worktree path so the context file has the correct `cd` target.
-        let wt_path  = agent_worktree.as_ref().map(|w| w.path.clone());
+        let wt_path = agent_worktree.as_ref().map(|w| w.path.clone());
         tauri::async_runtime::spawn(async move {
             if let Err(e) = inject(&cwd_c, &rb, &sid, &ak, wt_path.as_deref()) {
                 eprintln!("[pty] inject context: {e}");
@@ -285,8 +322,8 @@ pub async fn spawn(
         //   1. Set a proper prompt (shows just the folder name)
         //   2. Emit OSC 7 on every prompt so the titlebar CWD tracks correctly
         //   3. OSC 7 emitted immediately so titlebar CWD is correct on first render
-        let tmp_script = std::env::temp_dir()
-            .join(format!("stackbox-ps-init-{}.ps1", std::process::id()));
+        let tmp_script =
+            std::env::temp_dir().join(format!("stackbox-ps-init-{}.ps1", std::process::id()));
 
         // The prompt function:
         //   • Builds a file:// URL with forward slashes for the OSC 7 sequence
@@ -304,13 +341,14 @@ function prompt {
     [Console]::Write($osc7)
     return $leaf + '> '
 }
-# Emit CWD immediately so the titlebar is correct before the user types anything
+# Emit OSC 7 immediately so the titlebar CWD is correct on first render.
+# Do NOT call prompt() here — PowerShell renders its own first prompt after
+# the init script exits.  Calling it manually produces a second identical
+# prompt line (the double-prompt bug).
 $loc  = (Get-Location).Path
 $url  = $loc.Replace('\', '/').Replace(' ', '%20')
 if (-not $url.StartsWith('/')) { $url = '/' + $url }
 [Console]::Write([char]27 + ']7;file://' + $env:COMPUTERNAME + $url + [char]7)
-# Invoke prompt immediately so first render has no blank line
-[Console]::Write((prompt))
 "#;
         let _ = std::fs::write(&tmp_script, init_ps1);
 
@@ -323,9 +361,18 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
             tmp_script.to_str().unwrap_or(""),
         ]);
         for var in &[
-            "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
-            "PATH", "SystemRoot", "COMSPEC", "USERNAME", "USERDOMAIN",
-            "HOMEDRIVE", "HOMEPATH",
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "TEMP",
+            "TMP",
+            "PATH",
+            "SystemRoot",
+            "COMSPEC",
+            "USERNAME",
+            "USERDOMAIN",
+            "HOMEDRIVE",
+            "HOMEPATH",
         ] {
             if let Ok(val) = std::env::var(var) {
                 c.env(var, val);
@@ -337,15 +384,23 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
     #[cfg(not(windows))]
     let mut cmd = {
         let preferred_shell = std::env::var("SHELL").unwrap_or_default();
-        let shell = if !preferred_shell.is_empty() && std::path::Path::new(&preferred_shell).exists() {
-            preferred_shell
-        } else {
-            let candidates = ["/bin/zsh", "/usr/bin/zsh", "/bin/bash", "/usr/bin/bash", "/bin/sh"];
-            candidates.iter()
-                .find(|p| std::path::Path::new(*p).exists())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "/bin/sh".to_string())
-        };
+        let shell =
+            if !preferred_shell.is_empty() && std::path::Path::new(&preferred_shell).exists() {
+                preferred_shell
+            } else {
+                let candidates = [
+                    "/bin/zsh",
+                    "/usr/bin/zsh",
+                    "/bin/bash",
+                    "/usr/bin/bash",
+                    "/bin/sh",
+                ];
+                candidates
+                    .iter()
+                    .find(|p| std::path::Path::new(*p).exists())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "/bin/sh".to_string())
+            };
 
         let shell_name = std::path::Path::new(&shell)
             .file_name()
@@ -359,7 +414,7 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
         // On app reopen the shell reconnects to the existing session — CWD,
         // running processes, and scrollback are all preserved.
         let tmux_name = tmux_session_name(&runbox_id);
-        let use_tmux  = tmux_available();
+        let use_tmux = tmux_available();
 
         if use_tmux {
             // Create new session if it doesn't exist yet; attach if it does.
@@ -379,12 +434,11 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
             let stackbox_zsh_dir = format!("/tmp/stackbox-zsh-{}", std::process::id());
             let _ = std::fs::create_dir_all(&stackbox_zsh_dir);
             let zshrc = r#"
-[ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc" 2>/dev/null
-autoload -U colors && colors 2>/dev/null
-PROMPT="%B%F{cyan}%1~%f%b %% "
-chpwd() { printf '\e]7;file://%s%s\a' "$HOST" "$PWD" }
-chpwd
-"#;
+            [ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc" 2>/dev/null
+            autoload -U colors && colors 2>/dev/null
+            PROMPT="%B%F{cyan}%1~%f%b %% "
+            chpwd() { printf '\e]7;file://%s%s\a' "$HOST" "$PWD" }
+            "#;
             let _ = std::fs::write(format!("{stackbox_zsh_dir}/.zshrc"), zshrc);
             c.env("ZDOTDIR", &stackbox_zsh_dir);
             c
@@ -392,11 +446,11 @@ chpwd
             let stackbox_bash_dir = format!("/tmp/stackbox-bash-{}", std::process::id());
             let _ = std::fs::create_dir_all(&stackbox_bash_dir);
             let bashrc = r#"
-[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc" 2>/dev/null
-PS1='\[\033[01;36m\]\W\[\033[00m\] \$ '
-_stackbox_osc7() { printf '\e]7;file://%s%s\a' "$HOSTNAME" "$PWD"; }
-PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
-"#;
+            [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc" 2>/dev/null
+            PS1='\[\033[01;36m\]\W\[\033[00m\] \$ '
+            _stackbox_osc7() { printf '\e]7;file://%s%s\a' "$HOSTNAME" "$PWD"; }
+            PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+            "#;
             let bashrc_path = format!("{stackbox_bash_dir}/.bashrc");
             let _ = std::fs::write(&bashrc_path, bashrc);
             c = CommandBuilder::new(&shell);
@@ -411,13 +465,18 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 
     // ── Universal environment ─────────────────────────────────────────────────
     cmd.env("STACKBOX_WORKSPACE_NAME", &ws_label);
-    cmd.env("TERM",      "xterm-256color");
+    cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    cmd.env("LANG",      "en_US.UTF-8");
+    cmd.env("LANG", "en_US.UTF-8");
 
     {
-        let shim = if cfg!(windows) { "stackbox-open.exe" } else { "stackbox-open" };
-        if let Some(path) = std::env::current_exe().ok()
+        let shim = if cfg!(windows) {
+            "stackbox-open.exe"
+        } else {
+            "stackbox-open"
+        };
+        if let Some(path) = std::env::current_exe()
+            .ok()
             .and_then(|p| p.parent().map(|d| d.join(shim)))
             .filter(|p| p.exists())
         {
@@ -425,14 +484,20 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
         }
     }
 
-    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") { cmd.env("ANTHROPIC_API_KEY", key); }
-    if let Ok(key) = std::env::var("OPENAI_API_KEY")    { cmd.env("OPENAI_API_KEY",    key); }
-    if let Ok(key) = std::env::var("GEMINI_API_KEY")    { cmd.env("GEMINI_API_KEY",    key); }
+    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+        cmd.env("ANTHROPIC_API_KEY", key);
+    }
+    if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+        cmd.env("OPENAI_API_KEY", key);
+    }
+    if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+        cmd.env("GEMINI_API_KEY", key);
+    }
 
     if docker {
         if let Ok(prefix) = crate::docker::exec_prefix(&runbox_id) {
             cmd.env("STACKBOX_DOCKER_EXEC", &prefix);
-            cmd.env("STACKBOX_IN_DOCKER",   "1");
+            cmd.env("STACKBOX_IN_DOCKER", "1");
         }
     }
 
@@ -444,36 +509,55 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
         }
         3100u16 + (hash % 900) as u16
     };
-    cmd.env("PORT",               pane_port.to_string());
-    cmd.env("DEV_PORT",           pane_port.to_string());
-    cmd.env("VITE_PORT",          pane_port.to_string());
-    cmd.env("NEXT_PORT",          pane_port.to_string());
-    cmd.env("DEBUG_PORT",         (pane_port + 1000).to_string());
-    cmd.env("STACKBOX_PORT",      pane_port.to_string());
-    cmd.env("NODE_ENV",           "development");
+    cmd.env("PORT", pane_port.to_string());
+    cmd.env("DEV_PORT", pane_port.to_string());
+    cmd.env("VITE_PORT", pane_port.to_string());
+    cmd.env("NEXT_PORT", pane_port.to_string());
+    cmd.env("DEBUG_PORT", (pane_port + 1000).to_string());
+    cmd.env("STACKBOX_PORT", pane_port.to_string());
+    cmd.env("NODE_ENV", "development");
     cmd.env("STACKBOX_PANE_PORT", pane_port.to_string());
 
-    let port     = crate::workspace::context::MEMORY_PORT;
+    let port = crate::workspace::context::MEMORY_PORT;
     let ctx_file = format!("{effective_cwd}/.stackbox-context.md");
     cmd.env("STACKBOX_CONTEXT_FILE", &ctx_file);
-    cmd.env("STACKBOX_MEMORY_URL",   format!("http://localhost:{port}/memory"));
-    cmd.env("STACKBOX_RUNBOX_ID",    &runbox_id);
-    cmd.env("STACKBOX_SESSION_ID",   &session_id);
+    cmd.env(
+        "STACKBOX_MEMORY_URL",
+        format!("http://localhost:{port}/memory"),
+    );
+    cmd.env("STACKBOX_RUNBOX_ID", &runbox_id);
+    cmd.env("STACKBOX_SESSION_ID", &session_id);
     // STACKBOX_WORKTREE now points inside .worktrees/ — relative path for agent awareness
-    let wt_env = agent_worktree.as_ref().map(|w| w.path.as_str()).unwrap_or("");
-    cmd.env("STACKBOX_WORKTREE",     wt_env);
-    cmd.env("STACKBOX_EVENTS_URL",   format!("http://localhost:{port}/events?runbox_id={runbox_id}"));
+    let wt_env = agent_worktree
+        .as_ref()
+        .map(|w| w.path.as_str())
+        .unwrap_or("");
+    cmd.env("STACKBOX_WORKTREE", wt_env);
+    cmd.env(
+        "STACKBOX_EVENTS_URL",
+        format!("http://localhost:{port}/events?runbox_id={runbox_id}"),
+    );
 
     match &agent_kind {
-        AgentKind::ClaudeCode    => { cmd.env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"); }
-        AgentKind::Codex         => { cmd.env("CODEX_CONTEXT_FILE",   &ctx_file); }
-        AgentKind::CursorAgent   => { cmd.env("CURSOR_CONTEXT_FILE",  &ctx_file); }
-        AgentKind::GeminiCli     => { cmd.env("GEMINI_SYSTEM_MD",     &ctx_file); }
-        AgentKind::GitHubCopilot => { cmd.env("COPILOT_CONTEXT_FILE", &ctx_file); }
-        AgentKind::Shell         => {}
+        AgentKind::ClaudeCode => {
+            cmd.env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+        }
+        AgentKind::Codex => {
+            cmd.env("CODEX_CONTEXT_FILE", &ctx_file);
+        }
+        AgentKind::CursorAgent => {
+            cmd.env("CURSOR_CONTEXT_FILE", &ctx_file);
+        }
+        AgentKind::GeminiCli => {
+            cmd.env("GEMINI_SYSTEM_MD", &ctx_file);
+        }
+        AgentKind::GitHubCopilot => {
+            cmd.env("COPILOT_CONTEXT_FILE", &ctx_file);
+        }
+        AgentKind::Shell => {}
     }
 
-    let child      = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
@@ -506,65 +590,89 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
     struct ChannelWriter(tokio::sync::mpsc::UnboundedSender<Vec<u8>>);
     impl Write for ChannelWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.send(buf.to_vec()).map_err(|_| std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe, "PTY channel closed",
-            ))?;
+            self.0.send(buf.to_vec()).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "PTY channel closed")
+            })?;
             Ok(buf.len())
         }
-        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
-    let _ = session_start(&state.db, &session_id, &runbox_id, "", agent_str, &effective_cwd);
+    let _ = session_start(
+        &state.db,
+        &session_id,
+        &runbox_id,
+        "",
+        agent_str,
+        &effective_cwd,
+    );
 
     // Store the worktree path for cleanup on exit
     let wt_path_for_session = agent_worktree.as_ref().map(|w| w.path.clone());
 
-    state.sessions.lock().unwrap().insert(session_id.clone(), PtySession {
-        writer:        Box::new(ChannelWriter(tx)),
-        _master:       pair.master,
-        _child:        child,
-        input_buf:     String::new(),
-        runbox_id:     runbox_id.clone(),
-        cwd:           effective_cwd.clone(),
-        agent_kind:    agent_kind.clone(),
-        worktree_path: wt_path_for_session.clone(),
-        docker,
-    });
+    state.sessions.lock().unwrap().insert(
+        session_id.clone(),
+        PtySession {
+            writer: Box::new(ChannelWriter(tx)),
+            _master: pair.master,
+            _child: child,
+            input_buf: String::new(),
+            runbox_id: runbox_id.clone(),
+            cwd: effective_cwd.clone(),
+            agent_kind: agent_kind.clone(),
+            worktree_path: wt_path_for_session.clone(),
+            docker,
+        },
+    );
 
     // ── PTY reader thread ─────────────────────────────────────────────────────
-    let sid               = session_id.clone();
-    let rb_id             = runbox_id.clone();
-    let app_pty           = app.clone();
-    let db_arc            = state.db.clone();
-    let pty_writer_arc    = state.pty_writer.clone();
-    let conflict_reg_thr  = state.conflict_registry.clone();
+    let sid = session_id.clone();
+    let rb_id = runbox_id.clone();
+    let app_pty = app.clone();
+    let db_arc = state.db.clone();
+    let pty_writer_arc = state.pty_writer.clone();
+    let conflict_reg_thr = state.conflict_registry.clone();
     let worktree_path_thr = wt_path_for_session.clone();
-    let cwd_thr           = effective_cwd.clone();
-    let session_start_ts  = Instant::now();
+    let cwd_thr = effective_cwd.clone();
+    let session_start_ts = Instant::now();
 
     std::thread::spawn(move || {
-        let mut buf           = [0u8; 8192];
+        let mut buf = [0u8; 8192];
         let mut detected_kind = agent_kind.clone();
 
         while let Ok(n) = reader.read(&mut buf) {
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             let text = String::from_utf8_lossy(&buf[..n]).to_string();
 
             if detected_kind == AgentKind::Shell {
                 let stripped = strip_ansi(&text);
                 if let Some(upgraded) = AgentKind::infer_from_output(&stripped) {
                     detected_kind = upgraded.clone();
-                    let _ = app_pty.emit(&format!("pty://agent/{}", sid),
-                        upgraded.display_name().to_string());
+                    let _ = app_pty.emit(
+                        &format!("pty://agent/{}", sid),
+                        upgraded.display_name().to_string(),
+                    );
                 }
             }
 
             let text_clean = strip_ansi(&text);
             for word in text_clean.split_whitespace() {
                 let clean = word.trim_matches(|c: char| {
-                    !c.is_alphanumeric() && c != '/' && c != ':' && c != '.'
-                        && c != '-' && c != '_' && c != '?' && c != '='
-                        && c != '&' && c != '#' && c != '%'
+                    !c.is_alphanumeric()
+                        && c != '/'
+                        && c != ':'
+                        && c != '.'
+                        && c != '-'
+                        && c != '_'
+                        && c != '?'
+                        && c != '='
+                        && c != '&'
+                        && c != '#'
+                        && c != '%'
                 });
                 let looks_like_url = (clean.starts_with("https://")
                     || clean.starts_with("http://")
@@ -590,15 +698,20 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
                     if rest.ends_with(".html") || rest.ends_with(".htm") {
                         let resolved = if rest.starts_with('.') || rest.starts_with('\\') {
                             std::path::Path::new(&cwd_thr)
-                                .join(rest.trim_start_matches('.').trim_start_matches('\\')
-                                          .trim_start_matches('/'))
+                                .join(
+                                    rest.trim_start_matches('.')
+                                        .trim_start_matches('\\')
+                                        .trim_start_matches('/'),
+                                )
                                 .to_string_lossy()
                                 .to_string()
                         } else {
                             rest.to_string()
                         };
-                        let file_url = format!("file:///{}", resolved.replace('\\', "/")
-                            .trim_start_matches('/'));
+                        let file_url = format!(
+                            "file:///{}",
+                            resolved.replace('\\', "/").trim_start_matches('/')
+                        );
                         let _ = app_pty.emit("browser-open-url", file_url);
                     }
                 }
@@ -633,15 +746,15 @@ PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 
         // V3 session cleanup + sleep-time jobs
         if agent_kind != AgentKind::Shell {
-            let rb2  = rb_id.clone();
+            let rb2 = rb_id.clone();
             let sid2 = sid.clone();
             let cwd2 = cwd_thr.clone();
-            let db2  = db_arc.clone();
-            let an2  = detected_kind.display_name().to_string();
+            let db2 = db_arc.clone();
+            let an2 = detected_kind.display_name().to_string();
 
             tauri::async_runtime::spawn(async move {
                 let agent_type = memory::agent_type_from_name(&an2);
-                let agent_id   = memory::make_agent_id(&agent_type, &sid2);
+                let agent_id = memory::make_agent_id(&agent_type, &sid2);
 
                 if let Err(e) = memory::expire_temporary_for_agent(&rb2, &agent_id).await {
                     eprintln!("[pty] expire_temporary: {e}");

@@ -43,7 +43,9 @@ pub fn enforce_no_overwrite(proposed_key: &str, locked: &[Memory]) -> Result<(),
         return Ok(());
     }
     for m in locked {
-        if !is_locked(m) { continue; }
+        if !is_locked(m) {
+            continue;
+        }
         if m.key == proposed_key {
             return Err(format!(
                 "LOCKED rule already exists for key '{}': {}",
@@ -91,10 +93,12 @@ pub fn audit_locked_integrity(memories: &[Memory]) -> Vec<String> {
     memories
         .iter()
         .filter(|m| m.effective_level() == LEVEL_LOCKED && m.resolved)
-        .map(|m| format!(
-            "INTEGRITY VIOLATION: LOCKED memory resolved=true [{}]: {}",
-            m.id,
-            &m.content.chars().take(60).collect::<String>()
-        ))
+        .map(|m| {
+            format!(
+                "INTEGRITY VIOLATION: LOCKED memory resolved=true [{}]: {}",
+                m.id,
+                &m.content.chars().take(60).collect::<String>()
+            )
+        })
         .collect()
 }

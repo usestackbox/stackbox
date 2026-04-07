@@ -19,15 +19,15 @@ pub mod repo;
 pub mod watcher;
 pub mod webhook;
 
-use std::sync::Arc;
-use axum::{
-    Router,
-    routing::post,
-    http::{HeaderMap, StatusCode},
-    extract::State,
-    body::Bytes,
-};
 use crate::state::AppState;
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    routing::post,
+    Router,
+};
+use std::sync::Arc;
 
 pub async fn start_webhook_server(state: Arc<AppState>) {
     let port = std::env::var("STACKBOX_WEBHOOK_PORT")
@@ -68,7 +68,7 @@ async fn handle_webhook_request(
     eprintln!("[webhook] received: {event_type}");
 
     let payload: webhook::WebhookPayload = match serde_json::from_slice(&body) {
-        Ok(p)  => p,
+        Ok(p) => p,
         Err(e) => {
             eprintln!("[webhook] parse error: {e}");
             return StatusCode::BAD_REQUEST;
@@ -100,12 +100,12 @@ fn verify_signature(secret: &str, headers: &HeaderMap, body: &Bytes) -> bool {
     // Decode the hex signature from the header into raw bytes.
     // If decoding fails, reject immediately.
     let sig_bytes = match hex::decode(sig_header) {
-        Ok(b)  => b,
+        Ok(b) => b,
         Err(_) => return false,
     };
 
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .expect("HMAC can take key of any size");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(body);
 
     // verify_slice() does a constant-time comparison internally.

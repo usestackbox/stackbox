@@ -6,8 +6,8 @@
 //   branch merge). Fixed delete_worktree → remove_worktree_only.
 //   ensure_worktree now requires 4 args (added session_id).
 
-use serde_json::{json, Value};
 use crate::{db, git, state::AppState};
+use serde_json::{json, Value};
 
 pub fn tool_definitions() -> Value {
     json!([
@@ -77,27 +77,34 @@ pub fn tool_definitions() -> Value {
 // ── tool dispatcher ───────────────────────────────────────────────────────────
 
 pub async fn dispatch(
-    tool_name:   &str,
-    input:       &Value,
-    state:       &AppState,
-    _db:         &crate::db::Db,
+    tool_name: &str,
+    input: &Value,
+    state: &AppState,
+    _db: &crate::db::Db,
     _agent_name: &str,
 ) -> Result<Value, String> {
     match tool_name {
         "git_ensure" => {
-            let cwd        = str_field(input, "cwd")?;
-            let runbox_id  = str_field(input, "runbox_id")?;
+            let cwd = str_field(input, "cwd")?;
+            let runbox_id = str_field(input, "runbox_id")?;
             let agent_kind = input["agent_kind"].as_str().unwrap_or("shell");
-            let session_id = input["session_id"].as_str().unwrap_or(&runbox_id).to_string();
+            let session_id = input["session_id"]
+                .as_str()
+                .unwrap_or(&runbox_id)
+                .to_string();
 
             git::repo::ensure_git_repo(&cwd, &runbox_id)?;
             let wt = git::repo::ensure_worktree(&cwd, &runbox_id, &session_id, agent_kind);
 
             if let Some(ref w) = wt {
                 db::runboxes::runbox_set_worktree(
-                    &state.db, &runbox_id, agent_kind,
-                    Some(&w.path), Some(&w.branch),
-                ).ok();
+                    &state.db,
+                    &runbox_id,
+                    agent_kind,
+                    Some(&w.path),
+                    Some(&w.branch),
+                )
+                .ok();
                 let _ = db::branches::record_branch_start(
                     &state.db,
                     &runbox_id,
@@ -127,8 +134,8 @@ pub async fn dispatch(
 
         "git_commit" => {
             let worktree_path = str_field(input, "worktree_path")?;
-            let message       = str_field(input, "message")?;
-            let result        = git::commands::commit_direct(&worktree_path, &message)?;
+            let message = str_field(input, "message")?;
+            let result = git::commands::commit_direct(&worktree_path, &message)?;
             Ok(json!({ "result": result }))
         }
 
@@ -140,7 +147,7 @@ pub async fn dispatch(
 
         "set_agent_status" => {
             let runbox_id = str_field(input, "runbox_id")?;
-            let status    = str_field(input, "status")?;
+            let status = str_field(input, "status")?;
             db::runboxes::runbox_set_status(&state.db, &runbox_id, &status)
                 .map_err(|e| e.to_string())?;
             Ok(json!({ "ok": true }))

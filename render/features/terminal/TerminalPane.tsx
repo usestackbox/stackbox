@@ -14,6 +14,7 @@
 //   • Tauri clipboard   — plugin:clipboard-manager with navigator.clipboard fallback
 //   • Split down / split right / close / maximize / minimize titlebar controls
 //   • Dim separator line when history is restored
+//   • FIX: double prompt — snapshot skipped when it contains only bare shell prompts
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import { Terminal }        from "@xterm/xterm";
@@ -73,6 +74,43 @@ function clearSnapshot(id: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// snapshotHasContent
+//
+// Returns true only when the snapshot contains meaningful output beyond bare
+// shell prompts.  A snapshot that is ONLY prompts (e.g. the user opened a
+// terminal, saw "archon>", then closed it) is worthless to restore and causes
+// the double-prompt bug: the saved "archon>" is written first, then the new
+// PTY writes its own "archon>", giving two identical lines with no separator.
+//
+// Algorithm:
+//   1. Strip all ANSI escape sequences and OSC strings.
+//   2. Split into non-empty lines.
+//   3. If every non-empty line matches a bare-prompt pattern, discard.
+// ─────────────────────────────────────────────────────────────────────────────
+function snapshotHasContent(data: string): boolean {
+  const stripped = data
+    // CSI sequences  \x1b[ ... <letter>
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+    // OSC strings  \x1b] ... \x07  or  \x1b] ... \x1b\
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    // Remaining bare ESC chars
+    .replace(/\x1b./g, "")
+    .trim();
+
+  const lines = stripped.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+  if (lines.length === 0) return false;
+
+  // A "bare prompt" line: optional path/label, ends with >, $, %, or #,
+  // optionally followed by whitespace.  Max 80 chars to avoid false negatives
+  // on lines that happen to end with those chars inside real output.
+  const barePromptRe = /^[^\s]{0,60}[>$%#]\s*$/;
+  const allArePrompts = lines.every(l => barePromptRe.test(l));
+
+  return !allArePrompts;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Theme
 // ─────────────────────────────────────────────────────────────────────────────
 const BG     = "#12161A";
@@ -105,7 +143,6 @@ const TERM_CSS = `
   background:${BG};display:flex;flex-direction:column;
   overflow:hidden;position:relative;
   border:none;
-  border-right:1px solid rgba(255,255,255,.06);
   border-radius:0;
   transition:background .15s,border-color .15s;
 }
@@ -175,20 +212,30 @@ const TERM_CSS = `
   position:relative;overflow:hidden;
   background:${BG};transition:background .15s;
 }
-.rp-win.rp-active .rp-body { background:${BG_ACT}; }
+
 .rp-win:not(.rp-active) .rp-body { opacity:.45; }
 
 /* ── xterm container ───────────────────────────── */
-.rp-xterm { position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden; }
+.rp-xterm { position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;padding-left:6px; }
 .rp-xterm .xterm,
 .rp-xterm .xterm-viewport,
 .rp-xterm .xterm-screen { background:transparent!important; }
+/* ── Kill focus outline / border on xterm's hidden textarea ── */
+.rp-xterm .xterm-helper-textarea,
+.rp-xterm textarea {
+  outline:none!important;
+  border:none!important;
+  box-shadow:none!important;
+  caret-color:transparent!important;
+}
+/* Kill any viewport border or outline */
+.rp-xterm .xterm-viewport { border:none!important; outline:none!important; box-shadow:none!important; }
 /* ── Kill every source of the top gap ────────────────────────────────────── */
 .rp-xterm .xterm           { padding:0!important; }
 .rp-xterm .xterm-viewport  { padding:0!important; margin:0!important; }
 /* xterm-screen default is position:relative which shifts down after viewport.
    Force absolute so it pins to top:0 regardless of viewport height. */
-.rp-xterm .xterm-screen    { position:absolute!important; top:0!important; left:0!important; padding:0!important; margin:0!important; }
+.rp-xterm .xterm-screen    { position:absolute!important; top:0!important; left:0!important; right:0!important; padding:0!important; margin:0!important; }
 .rp-xterm .xterm-rows      { padding:0!important; margin:0!important; }
 .rp-xterm canvas           { display:block; }
 
@@ -199,17 +246,6 @@ const TERM_CSS = `
   background:rgba(255,255,255,.13)!important;
 }
 .xterm .scrollbar.horizontal { height:0!important;display:none!important; }
-
-/* ── Fade edges ────────────────────────────────── */
-.rp-fade-t {
-  display:none;
-}
-.rp-fade-b {
-  position:absolute;bottom:0;left:0;right:0;height:20px;
-  background:linear-gradient(to top,${BG},transparent);
-  pointer-events:none;z-index:4;transition:background .15s;
-}
-.rp-win.rp-active .rp-fade-b { background:linear-gradient(to top,${BG_ACT},transparent); }
 
 /* ── Context menu ──────────────────────────────── */
 .rp-ctx {
@@ -380,22 +416,24 @@ const IcoMaximize = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="
 // Props
 // ─────────────────────────────────────────────────────────────────────────────
 interface TerminalPaneProps {
-  runboxCwd?:       string;
-  runboxId?:        string;
-  runboxName?:      string;
-  agentCmd?:        string;
-  sessionId?:       string;
-  label?:           string;
-  isActive?:        boolean;
-  onActivate?:      () => void;
-  onClose?:         () => void;
-  onSplitDown?:     () => void;
-  onSplitLeft?:     () => void;
-  onCwdChange?:     (cwd: string) => void;
-  onSessionChange?: (sid: string) => void;
-  onWorktreeReady?: (path: string) => void;
-  onMaximize?:      () => void;
-  onMinimize?:      () => void;
+  runboxCwd?:        string;
+  runboxId?:         string;
+  runboxName?:       string;
+  agentCmd?:         string;
+  sessionId?:        string;
+  label?:            string;
+  isActive?:         boolean;
+  onActivate?:       () => void;
+  onClose?:          () => void;
+  onSplitDown?:      () => void;
+  onSplitLeft?:      () => void;
+  onCwdChange?:      (cwd: string) => void;
+  onSessionChange?:  (sid: string) => void;
+  onWorktreeReady?:  (path: string) => void;
+  onMaximize?:       () => void;
+  onMinimize?:       () => void;
+  /** Called with the agent key (e.g. "claude") when detected, or null when shell returns. */
+  onAgentDetected?:  (agent: string | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -418,6 +456,7 @@ export function TerminalPane({
   onWorktreeReady,
   onMaximize,
   onMinimize,
+  onAgentDetected,
 }: TerminalPaneProps) {
   // ── Refs ────────────────────────────────────────────────────────────────
   const termElRef = useRef<HTMLDivElement>(null);
@@ -443,12 +482,31 @@ export function TerminalPane({
   const onWorktreeRef = useRef(onWorktreeReady);
   const onSessionRef  = useRef(onSessionChange);
   const onCwdRef      = useRef(onCwdChange);
-  useEffect(() => { agentCmdRef.current   = agentCmd;        }, [agentCmd]);
-  useEffect(() => { runboxNameRef.current = runboxName;      }, [runboxName]);
-  useEffect(() => { runboxCwdRef.current  = runboxCwd;       }, [runboxCwd]);
-  useEffect(() => { onWorktreeRef.current = onWorktreeReady; }, [onWorktreeReady]);
-  useEffect(() => { onSessionRef.current  = onSessionChange; }, [onSessionChange]);
-  useEffect(() => { onCwdRef.current      = onCwdChange;     }, [onCwdChange]);
+  const onAgentDetectedRef = useRef(onAgentDetected);
+  useEffect(() => { agentCmdRef.current        = agentCmd;        }, [agentCmd]);
+  useEffect(() => { runboxNameRef.current      = runboxName;      }, [runboxName]);
+  useEffect(() => { runboxCwdRef.current       = runboxCwd;       }, [runboxCwd]);
+  useEffect(() => { onWorktreeRef.current      = onWorktreeReady; }, [onWorktreeReady]);
+  useEffect(() => { onSessionRef.current       = onSessionChange; }, [onSessionChange]);
+  useEffect(() => { onCwdRef.current           = onCwdChange;     }, [onCwdChange]);
+  useEffect(() => { onAgentDetectedRef.current = onAgentDetected; }, [onAgentDetected]);
+
+  // ── Agent detection ──────────────────────────────────────────────────────
+  // Maps CLI command name → agent key (same key used in AGENT_META in types.ts).
+  const AGENT_CMDS: Record<string, string> = {
+    claude:        "claude",
+    "claude-code":  "claude",
+    gemini:        "gemini",
+    codex:         "codex",
+    cursor:        "cursor",
+    copilot:       "copilot",
+    "gh-copilot":  "copilot",
+    aider:         "aider",
+  };
+  // Buffer for tracking what the user is typing on the current input line.
+  const inputLineRef      = useRef("");
+  // Tracks the currently active agent so we know when to clear it.
+  const activeAgentRef    = useRef<string | null>(null);
 
   // ── State ────────────────────────────────────────────────────────────────
   const [liveCwd,   setLiveCwd]   = useState(runboxCwd);
@@ -614,14 +672,26 @@ export function TerminalPane({
       .catch(() => {});
 
     // ── Restore scrollback snapshot ──────────────────────────────────────
-    // Use the stable session id so split panes each get their own snapshot
+    // Use the stable session id so split panes each get their own snapshot.
+    //
+    // FIX (double-prompt): Only restore when the snapshot contains meaningful
+    // output beyond bare shell prompts.  If the last session ended right after
+    // a fresh prompt with no real output, restoring would write "archon>" to
+    // the terminal before the new PTY writes its own "archon>", causing two
+    // identical prompt lines.  snapshotHasContent() guards against this.
     const snapshotId = sidRef.current;
     const snapshot = loadSnapshot(snapshotId);
-    if (snapshot) {
+    if (snapshot && snapshotHasContent(snapshot)) {
       term.write(snapshot);
       const cols = Math.max((term.cols ?? 80) - 8, 10);
       const line = "─".repeat(Math.min(cols, 56));
-      term.write(`\r\n\x1b[38;5;237m${line} restored ${line}\x1b[0m\r\n\r\n`);
+      // Use a perceptible dim color (terminal 59 = #5f5f5f) so the separator
+      // is actually visible against the dark background.
+      term.write(`\r\n\x1b[38;5;59m${line} restored ${line}\x1b[0m\r\n\r\n`);
+    } else if (snapshot) {
+      // Snapshot exists but is only bare prompts — discard it so it doesn't
+      // accumulate and eventually pass the content check on a future mount.
+      clearSnapshot(snapshotId);
     }
 
     // ── Native right-click handler (capture phase) ────────────────────────
@@ -682,9 +752,28 @@ export function TerminalPane({
       // no state needed — we read it on right-click
     });
 
-    // Forward keypresses to PTY
+    // Forward keypresses to PTY + agent detection via input line buffering
     term.onData(data => {
       invoke("pty_write", { sessionId: sidRef.current, data }).catch(() => {});
+
+      // Build a line buffer so we can inspect the full command on Enter.
+      if (data === "\r" || data === "\n") {
+        const cmd = inputLineRef.current.trim().toLowerCase().split(/\s+/)[0] ?? "";
+        const agentKey = AGENT_CMDS[cmd];
+        if (agentKey && activeAgentRef.current !== agentKey) {
+          activeAgentRef.current = agentKey;
+          onAgentDetectedRef.current?.(agentKey);
+        }
+        inputLineRef.current = "";
+      } else if (data === "\x7f" || data === "\b") {
+        // Backspace
+        inputLineRef.current = inputLineRef.current.slice(0, -1);
+      } else if (data === "\x03" || data === "\x04") {
+        // Ctrl+C / Ctrl+D — likely exiting an agent
+        inputLineRef.current = "";
+      } else if (data.length === 1 && data >= " ") {
+        inputLineRef.current += data;
+      }
     });
 
     const applyMargin = () => {
@@ -697,7 +786,7 @@ export function TerminalPane({
       if (xterm)    { xterm.style.padding    = "0"; xterm.style.margin = "0"; }
       if (viewport) { viewport.style.padding = "0"; viewport.style.margin = "0"; }
       if (screen)   { screen.style.position  = "absolute"; screen.style.top = "0";
-                      screen.style.left      = "6px"; screen.style.margin = "0"; screen.style.padding = "0"; }
+                      screen.style.left      = "0"; screen.style.margin = "0"; screen.style.padding = "0"; }
       if (rows)     { rows.style.padding     = "0"; rows.style.margin = "0"; }
     };
 
@@ -706,6 +795,14 @@ export function TerminalPane({
 
     // ── Spawn PTY ────────────────────────────────────────────────────────
     const spawnPty = (sid: string, cols: number, rows: number) => {
+      // FIX (double-prompt): Always clear the snapshot for this session before
+      // spawning a new PTY.  The new shell will write its own fresh prompt;
+      // any previously saved snapshot for this sid is now stale.  Without this
+      // a rapid close-and-reopen cycle can accumulate snapshots that all look
+      // like they have content (the restored separator line counts as content),
+      // leading to an ever-growing wall of old prompts on every reopen.
+      clearSnapshot(sid);
+
       invoke("pty_spawn", {
         sessionId:     sid,
         runboxId,
@@ -755,6 +852,28 @@ export function TerminalPane({
               : cwd;
             setLiveCwd(display);
             onCwdRef.current?.(display);
+
+            // OSC 7 fires on bash's PROMPT_COMMAND → we're back at shell prompt.
+            if (activeAgentRef.current) {
+              activeAgentRef.current = null;
+              onAgentDetectedRef.current?.(null);
+            }
+          }
+
+          // Shell prompt pattern detection (catches zsh and other shells that
+          // don't emit OSC 7 on every prompt).  After ANSI-stripping, look for
+          // a line that ends with one of the common shell prompt terminators.
+          if (activeAgentRef.current) {
+            const stripped = payload.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
+            const lines = stripped.split(/\r?\n/);
+            for (const line of lines) {
+              const t = line.trimEnd();
+              if (/[\$%>#]\s*$/.test(t) && t.length < 120) {
+                activeAgentRef.current = null;
+                onAgentDetectedRef.current?.(null);
+                break;
+              }
+            }
           }
         }),
 
@@ -855,11 +974,17 @@ export function TerminalPane({
       ctxEl.removeEventListener("contextmenu", handleNativeCtx, true);
       for (const u of unlisteners) u?.();
       restartDisposable?.dispose();
-      // Persist scrollback before destroying
+      // Persist scrollback before destroying — but only if there is meaningful
+      // content beyond a bare prompt.  This prevents the double-prompt bug on
+      // the next mount (see snapshotHasContent above).
       try {
         if (serRef.current && termRef.current) {
           const data = serRef.current.serialize();
-          if (data.trim()) saveSnapshot(sidRef.current, data);
+          if (data.trim() && snapshotHasContent(data)) {
+            saveSnapshot(sidRef.current, data);
+          }
+          // If it's only prompts, don't save — clearSnapshot was called in
+          // spawnPty already, so nothing persists for next mount.
         }
       } catch { /* ignore */ }
       invoke("pty_kill", { sessionId: sidRef.current }).catch(() => {});
@@ -922,10 +1047,7 @@ export function TerminalPane({
 
       {/* ── Terminal body ─────────────────────────────────────────────── */}
       <div className="rp-body">
-        <div className="rp-fade-t" />
         <div className="rp-xterm" ref={termElRef} />
-        <div className="rp-fade-b" />
-
       </div>
 
       {/* ── Right-click context menu ──────────────────────────────────── */}

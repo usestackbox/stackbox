@@ -1,5 +1,4 @@
 // features/workspace/types.ts
-// Local types used only within the workspace feature.
 
 export interface WinState {
   id:        string;
@@ -17,9 +16,11 @@ export interface WinState {
   preMaxH?:  number;
   cwd:       string;
   zIndex:    number;
-  /** Agent command to run in this pane (e.g. "claude", "gemini"). Undefined = plain shell. */
+  /** Agent command sent to backend on pane creation (e.g. "claude", "agent"). Undefined = plain shell. */
   agentCmd?: string;
-  /** True when this window was auto-minimized by another window's maximize — restored on un-maximize. */
+  /** Agent key detected from PTY I/O (e.g. "claude", "cursor"). Undefined = plain shell. */
+  detectedAgent?: string;
+  /** True when this window was auto-minimized by another window's maximize. */
   minimizedByMaximize?: boolean;
 }
 
@@ -53,5 +54,50 @@ export function tileWindows(count: number, aw: number, ah: number) {
 
 export function winLabel(win: WinState): string {
   if (win.kind === "browser") return win.label ?? "browser";
+  if (win.detectedAgent) return AGENT_META[win.detectedAgent]?.label ?? win.detectedAgent;
+  if (win.agentCmd)      return AGENT_META[win.agentCmd]?.label ?? win.agentCmd;
   return win.cwd.split(/[/\\]/).filter(Boolean).pop() ?? "~";
 }
+
+// ── Agent metadata ────────────────────────────────────────────────────────────
+// All icon colors are #ffffff.
+// Icons are dimmed via opacity (0.38) when the tab is inactive.
+// Detection happens in TWO ways — both are "detected" mode:
+//
+//   1. agentCmd pane: backend sends the launch command automatically after
+//      the shell starts (kind.rs launch_cmd). The backend emits pty://agent/{sid}
+//      when it detects the agent from stdout, and the frontend sets detectedAgent.
+//
+//   2. Plain shell pane: user types the agent command manually. TerminalPane's
+//      onData handler matches the typed command against AGENT_INPUT_CMDS,
+//      and sets detectedAgent immediately on Enter.
+export interface AgentMeta {
+  label: string;   // Display name in the tab
+  color: string;   // Always "#ffffff"
+}
+
+export const AGENT_META: Record<string, AgentMeta> = {
+  claude:  { label: "Claude Code",    color: "#ffffff" },
+  codex:   { label: "OpenAI Codex",   color: "#ffffff" },
+  openai:  { label: "OpenAI",         color: "#ffffff" },
+  gemini:  { label: "Gemini",         color: "#ffffff" },
+  cursor:  { label: "Cursor Agent",   color: "#ffffff" },
+  copilot: { label: "GitHub Copilot", color: "#ffffff" },
+  aider:   { label: "Aider",          color: "#ffffff" },
+};
+
+// ── What users type in the terminal → agent key ───────────────────────────────
+// Used by TerminalPane's onData handler to detect agents in plain shell panes.
+//
+// Cursor: user types `agent` (NOT `cursor` — that opens the GUI app).
+// Copilot: user types `copilot` (the GitHub Copilot CLI).
+// No gh-copilot alias — use the actual CLI name only.
+export const AGENT_INPUT_CMDS: Record<string, string> = {
+  "claude":      "claude",
+  "codex":       "codex",
+  "openai":      "openai",
+  "gemini":      "gemini",
+  "agent":       "cursor",   // Cursor's terminal agent CLI is `agent`
+  "copilot":     "copilot",  // GitHub Copilot CLI
+  "aider":       "aider",
+};
