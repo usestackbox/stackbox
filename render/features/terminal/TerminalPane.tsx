@@ -2,7 +2,6 @@
 //
 // FULL PRODUCTION BUILD — all features wired:
 //   • WebGL2 renderer   (falls back to canvas)
-//   • SerializeAddon    — scrollback persists across pane close/reopen (localStorage)
 //   • ClipboardAddon    — OSC 52 sync (vim, tmux, etc.)
 //   • WebLinksAddon     — clickable URLs
 //   • FitAddon          — responsive resize
@@ -13,28 +12,24 @@
 //   • Session restart   — "press any key" flow after PTY exits
 //   • Tauri clipboard   — plugin:clipboard-manager with navigator.clipboard fallback
 //   • Split down / split right / close / maximize / minimize titlebar controls
-//   • Dim separator line when history is restored
-//   • FIX: double prompt — snapshot skipped when it contains only bare shell prompts
+//   • NOTE: localStorage snapshot storage removed — no double-prompt, clean restarts
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import { Terminal }        from "@xterm/xterm";
 import { FitAddon }        from "@xterm/addon-fit";
 import { WebLinksAddon }   from "@xterm/addon-web-links";
 import { WebglAddon }      from "@xterm/addon-webgl";
-import { SerializeAddon }  from "@xterm/addon-serialize";
 import { ClipboardAddon }  from "@xterm/addon-clipboard";
 import { invoke }          from "@tauri-apps/api/core";
 import { listen }          from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 // xterm.css — statically imported so Vite bundles it correctly in production.
-// The dynamic /node_modules/ link only works in dev mode and 404s in Tauri builds.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — add `declare module "@xterm/xterm/css/xterm.css" {}` to a .d.ts if you want type safety
+// @ts-ignore
 import "@xterm/xterm/css/xterm.css";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Clipboard helpers
-// navigator.clipboard is gated in Tauri's webview.  Use the plugin first.
 // ─────────────────────────────────────────────────────────────────────────────
 async function clipWrite(text: string): Promise<void> {
   try {
@@ -49,65 +44,6 @@ async function clipRead(): Promise<string> {
     return await invoke<string>("plugin:clipboard-manager|read_text");
   } catch { /* fall through */ }
   try { return await navigator.clipboard.readText(); } catch { return ""; }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Buffer persistence  — localStorage  key: stackbox:term:<sessionId>
-// Keyed by sessionId (not runboxId) so split panes don't overwrite each other.
-// ─────────────────────────────────────────────────────────────────────────────
-const SNAPSHOT_KEY   = (id: string) => `stackbox:term:${id}`;
-const SNAPSHOT_MAX   = 512 * 1024; // 512 KB
-
-function saveSnapshot(id: string, data: string) {
-  try {
-    const trimmed = data.length > SNAPSHOT_MAX
-      ? data.slice(data.length - SNAPSHOT_MAX)
-      : data;
-    localStorage.setItem(SNAPSHOT_KEY(id), trimmed);
-  } catch { /* storage full */ }
-}
-function loadSnapshot(id: string): string | null {
-  try { return localStorage.getItem(SNAPSHOT_KEY(id)); } catch { return null; }
-}
-function clearSnapshot(id: string) {
-  try { localStorage.removeItem(SNAPSHOT_KEY(id)); } catch { /* ignore */ }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// snapshotHasContent
-//
-// Returns true only when the snapshot contains meaningful output beyond bare
-// shell prompts.  A snapshot that is ONLY prompts (e.g. the user opened a
-// terminal, saw "archon>", then closed it) is worthless to restore and causes
-// the double-prompt bug: the saved "archon>" is written first, then the new
-// PTY writes its own "archon>", giving two identical lines with no separator.
-//
-// Algorithm:
-//   1. Strip all ANSI escape sequences and OSC strings.
-//   2. Split into non-empty lines.
-//   3. If every non-empty line matches a bare-prompt pattern, discard.
-// ─────────────────────────────────────────────────────────────────────────────
-function snapshotHasContent(data: string): boolean {
-  const stripped = data
-    // CSI sequences  \x1b[ ... <letter>
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
-    // OSC strings  \x1b] ... \x07  or  \x1b] ... \x1b\
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
-    // Remaining bare ESC chars
-    .replace(/\x1b./g, "")
-    .trim();
-
-  const lines = stripped.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-
-  if (lines.length === 0) return false;
-
-  // A "bare prompt" line: optional path/label, ends with >, $, %, or #,
-  // optionally followed by whitespace.  Max 80 chars to avoid false negatives
-  // on lines that happen to end with those chars inside real output.
-  const barePromptRe = /^[^\s]{0,60}[>$%#]\s*$/;
-  const allArePrompts = lines.every(l => barePromptRe.test(l));
-
-  return !allArePrompts;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,9 +169,7 @@ const TERM_CSS = `
 /* ── Kill every source of the top gap ────────────────────────────────────── */
 .rp-xterm .xterm           { padding:0!important; }
 .rp-xterm .xterm-viewport  { padding:0!important; margin:0!important; }
-/* xterm-screen default is position:relative which shifts down after viewport.
-   Force absolute so it pins to top:0 regardless of viewport height. */
-.rp-xterm .xterm-screen    { position:absolute!important; top:0!important; left:0!important; right:0!important; padding:0!important; margin:0!important; }
+.rp-xterm .xterm-screen    { padding:0!important; margin:0!important; }
 .rp-xterm .xterm-rows      { padding:0!important; margin:0!important; }
 .rp-xterm canvas           { display:block; }
 
@@ -330,17 +264,20 @@ const TERM_CSS = `
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OSC 7  (CWD tracking)
-// Handles BEL (\x07) and ST (\x1b\\) terminators; Windows + macOS + Linux paths
 // ─────────────────────────────────────────────────────────────────────────────
 function parseOsc7(data: string): string | null {
   const m = data.match(/\x1b]7;file:\/\/[^/]*([^\x07\x1b]+)(?:\x07|\x1b\\)/);
   if (!m) return null;
   try {
     let p = decodeURIComponent(m[1]);
+    // Windows: OSC 7 emits "file:///C:/Users/foo" → decoded path is "/C:/Users/foo".
+    // Strip the spurious leading "/" so we store "C:/Users/foo" natively.
+    // This ensures pty_spawn always receives a valid Windows path.
+    p = p.replace(/^\/([A-Za-z]:[\/])/, "$1");
     const homePatterns = [
-      /^\/[A-Za-z]:\/Users\/[^/]+(\/|$)/,   // Windows  /C:/Users/foo/
-      /^\/Users\/[^/]+(\/|$)/,               // macOS    /Users/foo/
-      /^\/home\/[^/]+(\/|$)/,                // Linux    /home/foo/
+      /^[A-Za-z]:\/Users\/[^/]+(\/$|$)/,   // Windows: C:/Users/<n>
+      /^\/Users\/[^/]+(\/$|$)/,             // macOS
+      /^\/home\/[^/]+(\/$|$)/,              // Linux
     ];
     for (const re of homePatterns) {
       const hm = p.match(re);
@@ -405,7 +342,6 @@ const IcoSelect   = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="
 const IcoClear    = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 13h10"/><path d="M5 10l1-7h4l1 7"/><line x1="4" y1="6" x2="12" y2="6"/></svg>;
 const IcoUp       = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><polyline points="4,6 8,2 12,6"/><line x1="8" y1="2" x2="8" y2="11"/><line x1="3" y1="14" x2="13" y2="14"/></svg>;
 const IcoFolder   = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M2 9V5a1 1 0 0 1 1-1h3l2-2h5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H9"/><rect x="2" y="9" width="5" height="5" rx="1"/></svg>;
-const IcoSearch   = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="6.5" cy="6.5" r="4"/><line x1="10" y1="10" x2="14" y2="14"/></svg>;
 const IcoSplitH   = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="1.5" y="1.5" width="13" height="13" rx="2"/><line x1="1.5" y1="8.5" x2="14.5" y2="8.5"/></svg>;
 const IcoSplitV   = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="1.5" y="1.5" width="13" height="13" rx="2"/><line x1="8.5" y1="1.5" x2="8.5" y2="14.5"/></svg>;
 const IcoClose    = () => <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>;
@@ -432,7 +368,6 @@ interface TerminalPaneProps {
   onWorktreeReady?:  (path: string) => void;
   onMaximize?:       () => void;
   onMinimize?:       () => void;
-  /** Called with the agent key (e.g. "claude") when detected, or null when shell returns. */
   onAgentDetected?:  (agent: string | null) => void;
 }
 
@@ -462,11 +397,9 @@ export function TerminalPane({
   const termElRef = useRef<HTMLDivElement>(null);
   const termRef   = useRef<Terminal | null>(null);
   const fitRef    = useRef<FitAddon | null>(null);
-  const serRef    = useRef<SerializeAddon | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const searchRef = useRef<any>(null); // SearchAddon — typed as any so @xterm/addon-search is optional
+  const searchRef = useRef<any>(null);
 
-  // stable session id — never reuse across spawns
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _ignoreSessionProp = sessionId;
   const sidRef = useRef(`${runboxId}-${crypto.randomUUID()}`);
@@ -475,7 +408,6 @@ export function TerminalPane({
   const spawned        = useRef(false);
   const hasSpawnedOnce = useRef(false);
 
-  // keep callbacks in refs so the main effect's closure stays stable
   const agentCmdRef   = useRef(agentCmd);
   const runboxNameRef = useRef(runboxName);
   const runboxCwdRef  = useRef(runboxCwd);
@@ -492,7 +424,6 @@ export function TerminalPane({
   useEffect(() => { onAgentDetectedRef.current = onAgentDetected; }, [onAgentDetected]);
 
   // ── Agent detection ──────────────────────────────────────────────────────
-  // Maps CLI command name → agent key (same key used in AGENT_META in types.ts).
   const AGENT_CMDS: Record<string, string> = {
     claude:        "claude",
     "claude-code":  "claude",
@@ -503,9 +434,7 @@ export function TerminalPane({
     "gh-copilot":  "copilot",
     aider:         "aider",
   };
-  // Buffer for tracking what the user is typing on the current input line.
   const inputLineRef      = useRef("");
-  // Tracks the currently active agent so we know when to clear it.
   const activeAgentRef    = useRef<string | null>(null);
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -517,9 +446,6 @@ export function TerminalPane({
 
   // Inject CSS once
   useEffect(() => {
-    // xterm.css is now a static import at the top of this file (Vite bundles it
-    // correctly for both dev and Tauri production). Only the component-scoped
-    // styles below need runtime injection.
     const id = "rp-css-v20";
     document.getElementById(id)?.remove();
     const s = document.createElement("style");
@@ -542,10 +468,6 @@ export function TerminalPane({
   useEffect(() => { onSessionRef.current?.(sidRef.current); }, []);
 
   // ── Dismiss context menu on outside click ────────────────────────────────
-  // NOTE: do NOT use { capture: true } here — that fires before React's onClick
-  // on the menu items, causing the menu to unmount before the click handler runs.
-  // Instead we rely on the menu container calling e.nativeEvent.stopPropagation()
-  // (see below) so this window listener never fires for intra-menu clicks.
   useEffect(() => {
     if (!ctxMenu) return;
     const dismiss = () => setCtxMenu(null);
@@ -579,7 +501,6 @@ export function TerminalPane({
 
   const ctxClearScrollback = useCallback(() => {
     termRef.current?.clear();
-    clearSnapshot(sidRef.current);
     setCtxMenu(null); termRef.current?.focus();
   }, []);
 
@@ -592,19 +513,12 @@ export function TerminalPane({
   const ctxSplitRight = useCallback(() => { setCtxMenu(null); onSplitLeft?.(); },  [onSplitLeft]);
   const ctxClose      = useCallback(() => { setCtxMenu(null); onClose?.(); },       [onClose]);
 
-  // ── Right-click ──────────────────────────────────────────────────────────
-  // Context menu is triggered by a native capture-phase listener registered
-  // inside the main terminal useEffect (see below). That approach intercepts
-  // the event before xterm's own contextmenu handler and is more reliable.
-  // This placeholder is kept so refactors stay easy to follow.
-
   // ── Main terminal lifecycle ───────────────────────────────────────────────
   useEffect(() => {
     if (!termElRef.current) return;
     gone.current    = false;
     spawned.current = false;
 
-    // Dynamically import SearchAddon — fully optional, no type dep required
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let searchAddon: any = null;
 
@@ -614,7 +528,7 @@ export function TerminalPane({
       cursorWidth:           1.5,
       fontSize:              13,
       lineHeight:            1.42,
-      letterSpacing:         0,
+      letterSpacing:         0.3,
       fontWeight:            "normal",
       fontWeightBold:        "bold",
       fontFamily:            "ui-monospace,'SF Mono',Menlo,Monaco,'Cascadia Mono',Consolas,'Courier New',monospace",
@@ -628,76 +542,52 @@ export function TerminalPane({
     });
 
     const fit = new FitAddon();
-    const ser = new SerializeAddon();
     term.loadAddon(fit);
-    term.loadAddon(ser);
     term.loadAddon(new WebLinksAddon());
-    term.loadAddon(new ClipboardAddon());   // OSC 52
+    term.loadAddon(new ClipboardAddon());
 
-    // Attempt SearchAddon — optional package, hidden from TS resolver via Function()
-    // so a missing @xterm/addon-search never causes a compile error.
     (Function('return import("@xterm/addon-search")')() as Promise<any>)
       .then(({ SearchAddon }: any) => {
         searchAddon = new SearchAddon();
         term.loadAddon(searchAddon);
         searchRef.current = searchAddon;
       })
-      .catch(() => { /* not installed — search bar renders but find is no-op */ });
+      .catch(() => {});
 
-    // WebGL2 — falls back to DOM renderer on failure or context loss.
-    // IMPORTANT: calling wgl.dispose() on context loss removes the WebGL renderer
-    // but leaves no renderer attached, causing a permanent black canvas.
-    // After dispose we call term.refresh() to force xterm to fall back to its
-    // built-in DOM renderer so the terminal stays visible.
+    // Open the terminal into the DOM *first* — renderer addons (WebGL, Canvas)
+    // require the terminal to be mounted before they can initialize their canvas.
+    // Loading WebGL before open() causes it to attach incorrectly and produces
+    // the garbled / repeated-character rendering artifact seen on Windows.
+    term.open(termElRef.current);
+    termRef.current = term;
+    fitRef.current  = fit;
+
+    // WebGL2 — must be loaded AFTER term.open(). Falls back to DOM renderer on
+    // context loss (GPU reset, driver crash, tab backgrounded on low-memory devices).
     try {
       const wgl = new WebglAddon();
       wgl.onContextLoss(() => {
         wgl.dispose();
-        // Re-render via DOM renderer fallback
-        try { term.refresh(0, term.rows - 1); } catch { /* ignore */ }
+        // After WebGL is gone xterm reverts to the DOM renderer automatically.
+        // We need to re-fit (recalculates cell size for the DOM renderer) and
+        // then do a full refresh so every row is repainted cleanly.
+        requestAnimationFrame(() => {
+          try {
+            if (!gone.current && fitRef.current && termRef.current && termRef.current.rows > 0) {
+              fitRef.current.fit();
+              termRef.current.refresh(0, termRef.current.rows - 1);
+            }
+          } catch { /* ignore */ }
+        });
       });
       term.loadAddon(wgl);
-    } catch { /* DOM renderer fallback */ }
+    } catch { /* DOM renderer fallback — fine, xterm renders via DOM */ }
 
-    term.open(termElRef.current);
-    termRef.current = term;
-    fitRef.current  = fit;
-    serRef.current  = ser;
-
-    // ── Check if tmux session is alive (Unix) ────────────────────────────
-    // If yes, we will reconnect to it instead of spawning fresh.
-    // The "session ended" banner is suppressed so reconnect is seamless.
     invoke<boolean>("pty_session_alive", { runboxId })
       .then(alive => { if (alive) hasSpawnedOnce.current = true; })
       .catch(() => {});
 
-    // ── Restore scrollback snapshot ──────────────────────────────────────
-    // Use the stable session id so split panes each get their own snapshot.
-    //
-    // FIX (double-prompt): Only restore when the snapshot contains meaningful
-    // output beyond bare shell prompts.  If the last session ended right after
-    // a fresh prompt with no real output, restoring would write "archon>" to
-    // the terminal before the new PTY writes its own "archon>", causing two
-    // identical prompt lines.  snapshotHasContent() guards against this.
-    const snapshotId = sidRef.current;
-    const snapshot = loadSnapshot(snapshotId);
-    if (snapshot && snapshotHasContent(snapshot)) {
-      term.write(snapshot);
-      const cols = Math.max((term.cols ?? 80) - 8, 10);
-      const line = "─".repeat(Math.min(cols, 56));
-      // Use a perceptible dim color (terminal 59 = #5f5f5f) so the separator
-      // is actually visible against the dark background.
-      term.write(`\r\n\x1b[38;5;59m${line} restored ${line}\x1b[0m\r\n\r\n`);
-    } else if (snapshot) {
-      // Snapshot exists but is only bare prompts — discard it so it doesn't
-      // accumulate and eventually pass the content check on a future mount.
-      clearSnapshot(snapshotId);
-    }
-
-    // ── Native right-click handler (capture phase) ────────────────────────
-    // xterm.js attaches its own contextmenu listener to the viewport element.
-    // By registering in the CAPTURE phase on the container we fire FIRST,
-    // preventing xterm from consuming the event and reliably showing our menu.
+    // ── Native right-click handler ────────────────────────────────────────
     const ctxEl = termElRef.current!;
     const handleNativeCtx = (e: MouseEvent) => {
       e.preventDefault();
@@ -707,39 +597,31 @@ export function TerminalPane({
     };
     ctxEl.addEventListener("contextmenu", handleNativeCtx, true);
 
-    // ── Keyboard shortcuts via attachCustomKeyEventHandler ───────────────
-    // MUST use this — outer-div onKeyDown never fires because xterm's textarea
-    // calls stopPropagation.
+    // ── Keyboard shortcuts ───────────────────────────────────────────────
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.type !== "keydown") return true;
       const ctrl  = e.ctrlKey || e.metaKey;
       const shift = e.shiftKey;
 
-      // Copy selection
       if (ctrl && shift && e.key === "C") {
         const sel = term.getSelection();
         if (sel) clipWrite(sel);
         return false;
       }
-      // Paste
       if (ctrl && shift && e.key === "V") {
         clipRead().then(t => {
           if (t) invoke("pty_write", { sessionId: sidRef.current, data: t }).catch(() => {});
         });
         return false;
       }
-      // Select all
       if (ctrl && shift && e.key === "A") {
         term.selectAll();
         return false;
       }
-      // Hard clear scrollback
       if (ctrl && shift && e.key === "K") {
         term.clear();
-        clearSnapshot(sidRef.current);
         return false;
       }
-      // macOS: Cmd+L → clear screen
       if (e.metaKey && !shift && e.key === "l") {
         invoke("pty_write", { sessionId: sidRef.current, data: "\x0c" }).catch(() => {});
         return false;
@@ -747,16 +629,10 @@ export function TerminalPane({
       return true;
     });
 
-    // Track selection for context menu Copy enabled state
-    term.onSelectionChange(() => {
-      // no state needed — we read it on right-click
-    });
-
-    // Forward keypresses to PTY + agent detection via input line buffering
+    // Forward keypresses to PTY + agent detection
     term.onData(data => {
       invoke("pty_write", { sessionId: sidRef.current, data }).catch(() => {});
 
-      // Build a line buffer so we can inspect the full command on Enter.
       if (data === "\r" || data === "\n") {
         const cmd = inputLineRef.current.trim().toLowerCase().split(/\s+/)[0] ?? "";
         const agentKey = AGENT_CMDS[cmd];
@@ -766,10 +642,8 @@ export function TerminalPane({
         }
         inputLineRef.current = "";
       } else if (data === "\x7f" || data === "\b") {
-        // Backspace
         inputLineRef.current = inputLineRef.current.slice(0, -1);
       } else if (data === "\x03" || data === "\x04") {
-        // Ctrl+C / Ctrl+D — likely exiting an agent
         inputLineRef.current = "";
       } else if (data.length === 1 && data >= " ") {
         inputLineRef.current += data;
@@ -781,13 +655,24 @@ export function TerminalPane({
       if (!root) return;
       const xterm    = root.querySelector(".xterm")          as HTMLElement | null;
       const viewport = root.querySelector(".xterm-viewport") as HTMLElement | null;
-      const screen   = root.querySelector(".xterm-screen")   as HTMLElement | null;
       const rows     = root.querySelector(".xterm-rows")     as HTMLElement | null;
+      // Do NOT touch .xterm-screen position/top — xterm owns that for scroll tracking.
+      // Forcing top:0 on it desyncs xterm's internal cursor row → input jumps to top.
       if (xterm)    { xterm.style.padding    = "0"; xterm.style.margin = "0"; }
       if (viewport) { viewport.style.padding = "0"; viewport.style.margin = "0"; }
-      if (screen)   { screen.style.position  = "absolute"; screen.style.top = "0";
-                      screen.style.left      = "0"; screen.style.margin = "0"; screen.style.padding = "0"; }
       if (rows)     { rows.style.padding     = "0"; rows.style.margin = "0"; }
+    };
+
+    // Full repaint after fit — clears ghost/stale pixels from old size (WebGL).
+    // Also scrolls viewport to bottom so the prompt stays visible after resize.
+    const safeRefresh = () => {
+      const t = termRef.current;
+      if (!t || t.rows <= 0) return;
+      try {
+        const vp = termElRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
+        if (vp) vp.scrollTop = vp.scrollHeight;
+        t.refresh(0, t.rows - 1);
+      } catch { /* ignore */ }
     };
 
     let unlisteners: Array<UnlistenFn | null> = [];
@@ -795,18 +680,20 @@ export function TerminalPane({
 
     // ── Spawn PTY ────────────────────────────────────────────────────────
     const spawnPty = (sid: string, cols: number, rows: number) => {
-      // FIX (double-prompt): Always clear the snapshot for this session before
-      // spawning a new PTY.  The new shell will write its own fresh prompt;
-      // any previously saved snapshot for this sid is now stale.  Without this
-      // a rapid close-and-reopen cycle can accumulate snapshots that all look
-      // like they have content (the restored separator line counts as content),
-      // leading to an ever-growing wall of old prompts on every reopen.
-      clearSnapshot(sid);
-
+      // Guard: never spawn into "/" or an empty path — fall back to "~/" so the
+      // shell starts in the user's home directory rather than the filesystem root.
+      let effectiveCwd = runboxCwdRef.current && runboxCwdRef.current !== "/"
+        ? runboxCwdRef.current
+        : "~/";
+      // OSC 7 on Windows encodes paths with a leading "/" before the drive letter
+      // (e.g. "/C:/Users/foo"). Strip that leading "/" so the Rust backend receives
+      // a valid Windows path ("C:/Users/foo") — otherwise the backend silently
+      // fails to chdir and the shell starts in home, reporting "~/" via OSC 7.
+      effectiveCwd = effectiveCwd.replace(/^\/([A-Za-z]:[/\\])/, "$1");
       invoke("pty_spawn", {
         sessionId:     sid,
         runboxId,
-        cwd:           runboxCwdRef.current,
+        cwd:           effectiveCwd,
         agentCmd:      agentCmdRef.current ?? null,
         workspaceName: runboxNameRef.current ?? null,
         cols,
@@ -814,7 +701,6 @@ export function TerminalPane({
       })
         .then(() => {
           hasSpawnedOnce.current = true;
-          // Use sessionId so each split pane / agent gets its own worktree
           invoke<string | null>("get_worktree_path", { sessionId: sidRef.current, runboxId })
             .then(wt => { if (wt) onWorktreeRef.current?.(wt); })
             .catch(() => {});
@@ -827,10 +713,6 @@ export function TerminalPane({
     };
 
     // ── Event listeners ──────────────────────────────────────────────────
-    // IMPORTANT: returns a Promise that resolves only once BOTH Tauri listeners
-    // are fully registered. spawnPty must be called after this resolves.
-    // Without this gate the shell's first bytes (prompt) arrive while the
-    // listener is still pending and are silently dropped — blank terminal on Windows.
     const setupListeners = (sid: string): Promise<void> => {
       for (const u of unlisteners) u?.();
       unlisteners = [];
@@ -838,31 +720,24 @@ export function TerminalPane({
       restartDisposable = null;
 
       return Promise.all([
-        // PTY output → write to xterm
         listen<string>(`pty://output/${sid}`, ({ payload }) => {
           if (gone.current) return;
           term.write(payload);
 
-          // OSC 7 — track CWD
           const cwd = parseOsc7(payload);
           if (cwd) {
-            // Hide internal worktree suffix from the user
             const display = /[/\\]stackbox-wt-[^/\\]*$/.test(cwd)
               ? (runboxCwdRef.current ?? cwd)
               : cwd;
             setLiveCwd(display);
             onCwdRef.current?.(display);
 
-            // OSC 7 fires on bash's PROMPT_COMMAND → we're back at shell prompt.
             if (activeAgentRef.current) {
               activeAgentRef.current = null;
               onAgentDetectedRef.current?.(null);
             }
           }
 
-          // Shell prompt pattern detection (catches zsh and other shells that
-          // don't emit OSC 7 on every prompt).  After ANSI-stripping, look for
-          // a line that ends with one of the common shell prompt terminators.
           if (activeAgentRef.current) {
             const stripped = payload.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
             const lines = stripped.split(/\r?\n/);
@@ -877,7 +752,6 @@ export function TerminalPane({
           }
         }),
 
-        // PTY ended — show restart prompt
         listen<void>(`pty://ended/${sid}`, () => {
           if (gone.current) return;
           restartDisposable?.dispose();
@@ -901,7 +775,6 @@ export function TerminalPane({
             sidRef.current = newSid;
             onSessionRef.current?.(newSid);
             spawned.current = true;
-            // Wait for new listeners before restarting the PTY
             setupListeners(newSid).then(() => {
               if (!gone.current) spawnPty(newSid, term.cols, term.rows);
             });
@@ -911,27 +784,22 @@ export function TerminalPane({
       ]).then(([outUL, endedUL]) => {
         unlisteners = [outUL, endedUL];
       }).catch((err) => {
-        // Previously `.catch(() => {})` silently swallowed this, leaving
-        // `unlisteners` empty so PTY output events never reached xterm.
         console.error("[TerminalPane] Failed to register PTY listeners:", err);
       });
     };
 
-    // Register listeners FIRST and hold the promise so spawn can await it.
-    // This ensures the Tauri IPC channel is active before the PTY process
-    // starts writing — otherwise the shell prompt is lost on Windows/WebView2.
     const listenersReady = setupListeners(sidRef.current);
 
-    // ── Initial spawn ────────────────────────────────────────────────────
-    // spawned.current is the single gate. Set it to true BEFORE the async
-    // .then() — otherwise the ResizeObserver or second rAF can race in and
-    // call spawnPty a second time while listenersReady is still pending.
     const doSpawn = () => {
-      spawned.current = true; // lock before any async work
+      spawned.current = true;
       applyMargin();
       term.focus();
       listenersReady.then(() => {
-        if (!gone.current) spawnPty(sidRef.current, term.cols, term.rows);
+        if (!gone.current) {
+          spawnPty(sidRef.current, term.cols, term.rows);
+          // Flush any stale WebGL pixels from before the PTY connected
+          requestAnimationFrame(safeRefresh);
+        }
       });
     };
 
@@ -958,11 +826,11 @@ export function TerminalPane({
       try { fit.fit(); } catch { return; }
       if (term.cols <= 0 || term.rows <= 0) return;
       if (!spawned.current && !gone.current) {
-        // First valid size — spawn now
         doSpawn();
       } else if (spawned.current) {
-        // Already spawned — just resize the PTY
         invoke("pty_resize", { sessionId: sidRef.current, cols: term.cols, rows: term.rows }).catch(() => {});
+        // Repaint after resize to flush ghost pixels and re-anchor prompt
+        requestAnimationFrame(safeRefresh);
       }
     });
     ro.observe(termElRef.current!);
@@ -974,24 +842,10 @@ export function TerminalPane({
       ctxEl.removeEventListener("contextmenu", handleNativeCtx, true);
       for (const u of unlisteners) u?.();
       restartDisposable?.dispose();
-      // Persist scrollback before destroying — but only if there is meaningful
-      // content beyond a bare prompt.  This prevents the double-prompt bug on
-      // the next mount (see snapshotHasContent above).
-      try {
-        if (serRef.current && termRef.current) {
-          const data = serRef.current.serialize();
-          if (data.trim() && snapshotHasContent(data)) {
-            saveSnapshot(sidRef.current, data);
-          }
-          // If it's only prompts, don't save — clearSnapshot was called in
-          // spawnPty already, so nothing persists for next mount.
-        }
-      } catch { /* ignore */ }
       invoke("pty_kill", { sessionId: sidRef.current }).catch(() => {});
       term.dispose();
       termRef.current = null;
       fitRef.current  = null;
-      serRef.current  = null;
       searchRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1001,8 +855,6 @@ export function TerminalPane({
   const handleMouseDown = useCallback(() => {
     onActivate?.();
     termRef.current?.focus();
-    // On Windows/WebView2 React's DOM commit can briefly blur the textarea.
-    // A zero-delay setTimeout refocuses after the commit completes.
     setTimeout(() => termRef.current?.focus(), 0);
   }, [onActivate]);
 
@@ -1056,9 +908,6 @@ export function TerminalPane({
           className="rp-ctx"
           style={{ top: ctxY, left: ctxX }}
           onMouseDown={e => {
-            // Stop the native event from bubbling to window so the dismiss
-            // listener (registered WITHOUT capture) never fires for clicks
-            // inside the menu — this lets CtxItem onClick handlers run first.
             e.nativeEvent.stopPropagation();
             e.stopPropagation();
           }}

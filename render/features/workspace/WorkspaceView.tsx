@@ -12,8 +12,6 @@ import {
   type WinState, type FileTab, type SidePanel, type FilesView,
 } from "./types";
 
-
-
 const isMac = navigator.userAgent.toLowerCase().includes("mac");
 
 interface WorkspaceViewProps {
@@ -41,6 +39,8 @@ interface WorkspaceViewProps {
   renderFileEditor:   (tab: FileTab, onClose: () => void) => React.ReactNode;
   /** Render side panels */
   renderSidePanel:    (panel: SidePanel, runbox: Runbox, branch: string, onClose: () => void) => React.ReactNode;
+  /** Called when user requests a new workspace */
+  onNewWorkspace?:    () => void;
 }
 
 export interface TermPaneCallbacks {
@@ -55,7 +55,6 @@ export interface TermPaneCallbacks {
   onResizeStart:   (e: React.MouseEvent, dir: string) => void;
   onSplitDown:     () => void;
   onSplitLeft:     () => void;
-  /** Called when an agent is detected as running (or null when it exits). */
   onAgentDetected: (agent: string | null) => void;
 }
 
@@ -67,17 +66,46 @@ export function WorkspaceView({
   onSidePanelToggle, onSidebarToggle, onFileTreeToggle,
   onCwdChange, onSessionChange, onOpenDiff, onOpenFile,
   renderTermPane, renderBrowsePane, renderFileEditor, renderSidePanel,
+  onNewWorkspace,
 }: WorkspaceViewProps) {
-  const areaRef    = useRef<HTMLDivElement>(null);
-  const labelCount = useRef(0);
+  const areaRef     = useRef<HTMLDivElement>(null);
+  const labelCount  = useRef(0);
   const initialized = useRef(false);
   const resizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const winsRef     = useRef<WinState[]>([]);
 
-  const [wins,        setWins]        = useState<WinState[]>([]);
-  const [activeWinId, setActiveWinId] = useState<string | null>(null);
-  const [fileTabs,     setFileTabs]     = useState<FileTab[]>([]);
-  const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  // ── FIX 1: Initialize activeWinId synchronously with the first window ──
+  // Previously both setWins and setActiveWinId were called inside a useEffect,
+  // causing them to batch as separate renders. On the first render activeWinId
+  // was null, so isActive === false, and TerminalPane blurred the xterm textarea
+  // immediately — making the terminal appear to not accept keyboard input.
+  //
+  // By seeding the initial state with the same ID we guarantee that on the very
+  // first render activeWinId === wins[0].id → isActive === true → terminal focuses.
+  const initialId  = useRef(crypto.randomUUID());
+  const initialCwd = runbox.cwd || "~/";
+
+  const [wins, setWins] = useState<WinState[]>([{
+    id:        initialId.current,
+    label:     "",
+    kind:      "terminal",
+    x:         GAP,
+    y:         GAP,
+    w:         800 - GAP * 2,   // will be corrected by ResizeObserver on first paint
+    h:         600 - GAP * 2,
+    minimized: false,
+    maximized: false,
+    cwd:       initialCwd,
+    zIndex:    nextZ(),
+  }]);
+  const [activeWinId, setActiveWinId] = useState<string | null>(initialId.current);
+
+  const [fileTabs,      setFileTabs]      = useState<FileTab[]>([]);
+  const [activeFileId,  setActiveFileId]  = useState<string | null>(null);
+  // Split-right: show file editor to the right of terminals side-by-side
+  const [fileSplitRight, setFileSplitRight] = useState(false);
+  // Resizable divider for split-right mode
+  const [splitRatio, setSplitRatio] = useState(0.5); // 0..1, terminals left portion
 
   const [_sidePanel, _setSidePanel] = useState<SidePanel>(null);
   const sidePanel    = sidePanelProp !== undefined ? sidePanelProp : _sidePanel;
@@ -89,6 +117,112 @@ export function WorkspaceView({
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => { winsRef.current = wins; }, [wins]);
+
+  // Keep a ref to activeWinId so event handlers below don't go stale
+  const activeWinIdRef = useRef<string | null>(initialId.current);
+  useEffect(() => { activeWinIdRef.current = activeWinId; }, [activeWinId]);
+
+  // Keep a ref to onNewWorkspace so event handlers don't go stale
+  const onNewWorkspaceRef = useRef(onNewWorkspace);
+  useEffect(() => { onNewWorkspaceRef.current = onNewWorkspace; }, [onNewWorkspace]);
+
+  // Keep a ref to runbox.cwd so closures inside event handlers always read the
+  // latest workspace path, not the stale value captured at mount time.
+  const runboxCwdRef = useRef(runbox.cwd);
+  useEffect(() => { runboxCwdRef.current = runbox.cwd; }, [runbox.cwd]);
+
+  // ── sb: command event bridge ─────────────────────────────────────────────
+  useEffect(() => {
+    const handle = (e: Event) => {
+      const type = (e as CustomEvent).type;
+      const aid  = activeWinIdRef.current;
+
+      if (type === "sb:new-terminal") {
+        setWins(prev => {
+          const area = areaRef.current; if (!area) return prev;
+          const aw = area.offsetWidth, ah = area.offsetHeight;
+          labelCount.current += 1;
+          const id = crypto.randomUUID();
+          const activeCwd = prev.find(w => w.id === activeWinIdRef.current)?.cwd || runboxCwdRef.current || runbox.cwd;
+          const all: WinState[] = [...prev, { id, label: "", kind: "terminal", x: 0, y: 0, w: 400, h: 300, minimized: false, maximized: false, cwd: activeCwd, zIndex: nextZ() }];
+          const visible = all.filter(w => !w.minimized && !w.maximized);
+          const tiles   = tileWindows(visible.length, aw, ah);
+          let ti = 0;
+          const next = all.map(w => w.minimized || w.maximized ? w : { ...w, ...tiles[ti++] });
+          setTimeout(() => setActiveWinId(id), 0);
+          return next;
+        });
+        return;
+      }
+
+      if ((type === "sb:split-down" || type === "sb:split-right") && aid) {
+        const dir = type === "sb:split-down" ? "down" : "left";
+        setWins(prev => {
+          const src = prev.find(w => w.id === aid); if (!src) return prev;
+          const newId = crypto.randomUUID();
+          labelCount.current += 1;
+          let updated: WinState, newWin: WinState;
+          if (dir === "down") {
+            const halfH = Math.max(MIN_H, Math.floor((src.h - GAP) / 2));
+            updated = { ...src, h: halfH };
+            newWin  = { ...src, id: newId, label: "", y: src.y + halfH + GAP, h: src.h - halfH - GAP, zIndex: nextZ(), minimized: false, maximized: false };
+          } else {
+            const halfW = Math.max(MIN_W, Math.floor((src.w - GAP) / 2));
+            updated = { ...src, w: halfW };
+            newWin  = { ...src, id: newId, label: "", x: src.x + halfW + GAP, w: src.w - halfW - GAP, zIndex: nextZ(), minimized: false, maximized: false };
+          }
+          setTimeout(() => setActiveWinId(newId), 0);
+          return [...prev.map(w => w.id === aid ? updated : w), newWin];
+        });
+        return;
+      }
+
+      if ((type === "sb:move-terminal-left" || type === "sb:move-terminal-right") && aid) {
+        const dir = type === "sb:move-terminal-left" ? "left" : "right";
+        setWins(prev => {
+          const arr = [...prev];
+          const idx = arr.findIndex(w => w.id === aid); if (idx < 0) return prev;
+          const newIdx = dir === "left" ? idx - 1 : idx + 1;
+          if (newIdx < 0 || newIdx >= arr.length) return prev;
+          [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
+          return arr;
+        });
+        return;
+      }
+
+      if (type === "sb:next-terminal" || type === "sb:prev-terminal") {
+        const dir = type === "sb:next-terminal" ? 1 : -1;
+        setWins(prev => {
+          const visible = prev.filter(w => !w.minimized);
+          if (visible.length < 2) return prev;
+          const idx  = visible.findIndex(w => w.id === activeWinIdRef.current);
+          const next = visible[(idx + dir + visible.length) % visible.length];
+          if (next) setTimeout(() => { setActiveWinId(next.id); setWins(p => p.map(w => w.id === next.id ? { ...w, zIndex: nextZ() } : w)); }, 0);
+          return prev;
+        });
+        return;
+      }
+
+      if (type === "sb:new-terminal-workspace") {
+        onNewWorkspaceRef.current?.();
+        return;
+      }
+    };
+
+    const events = [
+      "sb:new-terminal",
+      "sb:split-down",
+      "sb:split-right",
+      "sb:move-terminal-left",
+      "sb:move-terminal-right",
+      "sb:next-terminal",
+      "sb:prev-terminal",
+      "sb:new-terminal-workspace",
+    ];
+    events.forEach(ev => window.addEventListener(ev, handle));
+    return () => events.forEach(ev => window.removeEventListener(ev, handle));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runbox.cwd]);
 
   const dispatchResize = useCallback(() => {
     if (resizeTimer.current) clearTimeout(resizeTimer.current);
@@ -105,16 +239,18 @@ export function WorkspaceView({
     return () => { unsub.then(f => f()).catch(() => {}); };
   }, []);
 
-  // Initialize first window
+  // ── FIX 1 (cont): Correct initial window geometry on first paint ──
+  // The initial wins state uses 800×600 as a placeholder. Once areaRef is
+  // attached to the DOM we snap it to the real dimensions immediately.
   useEffect(() => {
-    if (initialized.current) return;
     initialized.current = true;
     const area = areaRef.current; if (!area) return;
     const aw = area.offsetWidth || 800, ah = area.offsetHeight || 600;
     labelCount.current = 1;
-    const id = crypto.randomUUID();
-    setWins([{ id, label: "", kind: "terminal", x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }]);
-    setActiveWinId(id);
+    setWins(prev => {
+      if (prev.length !== 1) return prev; // already multiple windows, don't clobber
+      return prev.map(w => ({ ...w, x: GAP, y: GAP, w: aw - GAP * 2, h: ah - GAP * 2, cwd: runboxCwdRef.current || runbox.cwd }));
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -147,6 +283,24 @@ export function WorkspaceView({
     setWins(prev => prev.map(w => w.id === id ? { ...w, zIndex: nextZ() } : w));
   }, []);
 
+  // Focus next / previous terminal (cycles through non-minimized wins)
+  const focusNextWin = useCallback((dir: 1 | -1) => {
+    setWins(prev => {
+      const visible = prev.filter(w => !w.minimized);
+      if (visible.length < 2) return prev;
+      const cur = visible.findIndex(w => w.id === winsRef.current.find(x => x.id)?.id);
+      setActiveWinId(aid => {
+        const idx = visible.findIndex(w => w.id === aid);
+        const next = visible[(idx + dir + visible.length) % visible.length];
+        if (next) {
+          setTimeout(() => focusWin(next.id), 0);
+        }
+        return aid;
+      });
+      return prev;
+    });
+  }, [focusWin]);
+
   // Wire onOpenFile
   const openFileWin = useCallback((filePath: string) => {
     setFileTabs(prev => {
@@ -169,6 +323,7 @@ export function WorkspaceView({
         const idx = prev.findIndex(t => t.id === id);
         return next[Math.min(idx, next.length - 1)].id;
       });
+      if (next.length === 0) setFileSplitRight(false);
       return next;
     });
   }, []);
@@ -204,7 +359,8 @@ export function WorkspaceView({
     labelCount.current += 1;
     const id = crypto.randomUUID();
     setWins(prev => {
-      const all: WinState[] = [...prev, { id, label: "", kind: "terminal", x: 0, y: 0, w: 400, h: 300, minimized: false, maximized: false, cwd: runbox.cwd, zIndex: nextZ() }];
+      const activeCwd = prev.find(w => w.id === activeWinIdRef.current)?.cwd || runboxCwdRef.current || runbox.cwd;
+      const all: WinState[] = [...prev, { id, label: "", kind: "terminal", x: 0, y: 0, w: 400, h: 300, minimized: false, maximized: false, cwd: activeCwd, zIndex: nextZ() }];
       const visible = all.filter(w => !w.minimized && !w.maximized);
       const tiles   = tileWindows(visible.length, aw, ah);
       let ti = 0;
@@ -257,7 +413,6 @@ export function WorkspaceView({
       const win = prev.find(w => w.id === id);
       if (!win) return prev;
       if (win.maximized) {
-        // Un-maximize: restore this window and bring back any auto-minimized windows
         return prev.map(w => {
           if (w.id === id)
             return { ...w, maximized: false, x: w.preMaxX ?? GAP, y: w.preMaxY ?? GAP, w: w.preMaxW ?? 400, h: w.preMaxH ?? 300 };
@@ -266,7 +421,6 @@ export function WorkspaceView({
           return w;
         });
       }
-      // Maximize: fill canvas, minimize all other non-minimized windows (keep their tabs)
       return prev.map(w => {
         if (w.id === id)
           return { ...w, maximized: true, preMaxX: win.x, preMaxY: win.y, preMaxW: win.w, preMaxH: win.h, x: 0, y: 0, w: aw, h: ah, zIndex: nextZ() };
@@ -389,9 +543,93 @@ export function WorkspaceView({
     });
   }, []);
 
-  const macOffset    = isMac && !isFullscreen;
-  const hasFiles     = fileTabs.length > 0;
+  // ── Split-right drag divider ─────────────────────────────────────────────
+  const handleSplitDividerDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const container = (e.currentTarget as HTMLElement).parentElement;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const onMove = (ev: MouseEvent) => {
+      const ratio = Math.min(0.8, Math.max(0.2, (ev.clientX - rect.left) / rect.width));
+      setSplitRatio(ratio);
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 30);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+
+  const macOffset     = isMac && !isFullscreen;
+  const hasFiles      = fileTabs.length > 0;
   const activeFileTab = fileTabs.find(t => t.id === activeFileId) ?? null;
+
+  const showSplitRight  = fileSplitRight && !!activeFileTab;
+  const showFileOverlay = !fileSplitRight && !!activeFileTab;
+
+  // ── Helper: renders the terminal canvas area ─────────────────────────────
+  const renderTerminalCanvas = (isActivePredicate: (winId: string) => boolean) => (
+    <div ref={areaRef} style={{
+      flex: 1, minWidth: 0, minHeight: 0,
+      position: "relative", background: C.bg0,
+      overflow: "hidden", height: "100%",
+      opacity: showFileOverlay ? 0 : 1,
+      pointerEvents: showFileOverlay ? "none" : "auto",
+      transition: "opacity .1s",
+    }}>
+      {wins.length === 0 && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, userSelect: "none", pointerEvents: "none" }}>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.55)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+          <span style={{ fontSize: 18, letterSpacing: "0.06em", color: "rgba(255,255,255,.5)", fontFamily: SANS, fontWeight: 700 }}>Stackbox</span>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7, marginTop: 4 }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,.38)", fontFamily: SANS }}>
+              Press <span style={{ fontFamily: MONO, fontSize: 11, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, padding: "1px 8px", color: "rgba(255,255,255,.6)" }}>+</span> to open a terminal
+            </span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,.25)", fontFamily: SANS }}>Split · resize · arrange freely</span>
+          </div>
+        </div>
+      )}
+
+      {wins.map(win => (
+        <div key={win.id} style={{
+          position: "absolute", left: win.x, top: win.y, width: win.w, height: win.h,
+          zIndex: win.zIndex,
+          display: win.minimized ? "none" : "flex",
+          flexDirection: "column", overflow: "hidden",
+          transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
+        }}>
+          {win.kind === "browser"
+            ? renderBrowsePane(win, pendingBrowserUrl[win.id] ?? null, () => setPendingBrowserUrl(p => ({ ...p, [win.id]: null })))
+            : renderTermPane(win, {
+                isActive:    isActivePredicate(win.id),
+                onActivate:  () => { setActiveFileId(null); focusWin(win.id); },
+                onCwdChange: cwd => {
+                  setWins(prev => prev.map(w => w.id === win.id ? { ...w, cwd } : w));
+                  if (activeWinId === win.id) onCwdChange(cwd);
+                },
+                onSessionChange: sid => onSessionChange?.(sid),
+                onClose:     () => closeWin(win.id),
+                onMinimize:  () => minimizeWin(win.id),
+                onMaximize:  () => maximizeWin(win.id),
+                onDragStart: e => handleDragStart(e, win.id),
+                onResizeStart: (e, dir) => handleResizeStart(e, win.id, dir),
+                onSplitDown: () => splitWin(win.id, "down"),
+                onSplitLeft: () => splitWin(win.id, "left"),
+                onAgentDetected: agent => {
+                  setWins(prev => prev.map(w =>
+                    w.id === win.id ? { ...w, detectedAgent: agent ?? undefined } : w
+                  ));
+                },
+              })
+          }
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
@@ -404,6 +642,7 @@ export function WorkspaceView({
         fileTreeOpen={fileTreeOpen}
         macOffset={macOffset}
         toolbarSlot={toolbarSlot}
+        fileSplitRight={fileSplitRight}
         onWinActivate={id => { setActiveFileId(null); focusWin(id); }}
         onWinClose={closeWin}
         onWinRestore={restoreWin}
@@ -414,92 +653,109 @@ export function WorkspaceView({
         onContextMenu={(e, win, idx) => setTabCtx({ x: e.clientX, y: e.clientY, win, idx })}
         onSidebarToggle={() => onSidebarToggle?.()}
         onFileTreeToggle={() => onFileTreeToggle?.()}
+        onFileSplitRight={hasFiles ? () => setFileSplitRight(v => !v) : undefined}
       />
 
+      {/*
+        ── FIX 2: Changes panel no longer overlaps terminal ──
+        Layout: [terminal area] [side panel]
+        Both live as flex siblings inside this row. The side panel pushes the
+        terminal area left instead of floating on top of it (position:absolute
+        or z-index layering were the old culprits).
+        contentMarginLeft moves only the terminal area, not the side panel.
+      */}
       <div style={{
-        flex: 1, minHeight: 0, display: "flex", overflow: "hidden",
-        marginLeft: contentMarginLeft,
-        transition: "margin-left .18s cubic-bezier(.4,0,.2,1)",
+        flex: 1, minHeight: 0,
+        display: "flex", flexDirection: "row",
+        overflow: "hidden",
       }}>
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
-          {/* File editor overlay */}
-          {activeFileTab && (
-            <div style={{ position: "absolute", inset: 0, zIndex: 10, background: C.bg0, display: "flex", flexDirection: "column" }}>
-              {renderFileEditor(activeFileTab, () => closeFileTab(activeFileTab.id))}
-            </div>
-          )}
 
-          {/* Window canvas */}
-          <div ref={areaRef} style={{
-            flex: 1, minWidth: 0, minHeight: 0,
-            position: "relative", background: C.bg0,
-            overflow: "hidden", height: "100%",
-            opacity: activeFileTab ? 0 : 1,
-            pointerEvents: activeFileTab ? "none" : "auto",
-            transition: "opacity .1s",
-          }}>
-            {wins.length === 0 && (
-              <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, userSelect: "none", pointerEvents: "none" }}>
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.55)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
-                </svg>
-                <span style={{ fontSize: 18, letterSpacing: "0.06em", color: "rgba(255,255,255,.5)", fontFamily: SANS, fontWeight: 700 }}>Stackbox</span>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7, marginTop: 4 }}>
-                  <span style={{ fontSize: 12, color: "rgba(255,255,255,.38)", fontFamily: SANS }}>
-                    Press <span style={{ fontFamily: MONO, fontSize: 11, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.2)", borderRadius: 4, padding: "1px 8px", color: "rgba(255,255,255,.6)" }}>+</span> to open a terminal
-                  </span>
-                  <span style={{ fontSize: 11, color: "rgba(255,255,255,.25)", fontFamily: SANS }}>Split · resize · arrange freely</span>
-                </div>
-              </div>
-            )}
+        {/* ── Terminal / editor content area ── */}
+        <div style={{
+          flex: 1, minWidth: 0, minHeight: 0,
+          display: "flex", flexDirection: "column",
+          position: "relative", overflow: "hidden",
+          marginLeft: contentMarginLeft,
+          transition: "margin-left .18s cubic-bezier(.4,0,.2,1)",
+        }}>
 
-            {wins.map(win => (
-              <div key={win.id} style={{
-                position: "absolute", left: win.x, top: win.y, width: win.w, height: win.h,
-                zIndex: win.zIndex,
-                display: win.minimized ? "none" : "flex",
-                flexDirection: "column", overflow: "hidden",
-                transition: win.maximized ? "left .18s ease, top .18s ease, width .18s ease, height .18s ease" : "none",
+          {showSplitRight ? (
+            /* ── Split-right layout: terminals LEFT | file editor RIGHT ── */
+            <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden" }}>
+              {/* Terminals pane (left) */}
+              <div style={{
+                width: `${splitRatio * 100}%`,
+                minWidth: MIN_W,
+                flexShrink: 0,
+                position: "relative",
+                overflow: "hidden",
               }}>
-                {win.kind === "browser"
-                  ? renderBrowsePane(win, pendingBrowserUrl[win.id] ?? null, () => setPendingBrowserUrl(p => ({ ...p, [win.id]: null })))
-                  : renderTermPane(win, {
-                      isActive:    activeWinId === win.id && !activeFileTab,
-                      onActivate:  () => { setActiveFileId(null); focusWin(win.id); },
-                      onCwdChange: cwd => {
-                        setWins(prev => prev.map(w => w.id === win.id ? { ...w, cwd } : w));
-                        if (activeWinId === win.id) onCwdChange(cwd);
-                      },
-                      onSessionChange: sid => onSessionChange?.(sid),
-                      onClose:     () => closeWin(win.id),
-                      onMinimize:  () => minimizeWin(win.id),
-                      onMaximize:  () => maximizeWin(win.id),
-                      onDragStart: e => handleDragStart(e, win.id),
-                      onResizeStart: (e, dir) => handleResizeStart(e, win.id, dir),
-                      onSplitDown: () => splitWin(win.id, "down"),
-                      onSplitLeft: () => splitWin(win.id, "left"),
-                      onAgentDetected: agent => {
-                        setWins(prev => prev.map(w =>
-                          w.id === win.id
-                            ? { ...w, detectedAgent: agent ?? undefined }
-                            : w
-                        ));
-                      },
-                    })
-                }
+                {renderTerminalCanvas(id => activeWinId === id)}
               </div>
-            ))}
-          </div>
+
+              {/* Drag divider */}
+              <div
+                onMouseDown={handleSplitDividerDrag}
+                style={{
+                  width: 4,
+                  flexShrink: 0,
+                  background: "rgba(255,255,255,.06)",
+                  cursor: "col-resize",
+                  transition: "background .1s",
+                  zIndex: 20,
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(0,229,255,.25)"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,.06)"; }}
+              />
+
+              {/* File editor pane (right) */}
+              <div style={{
+                flex: 1,
+                minWidth: 280,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                background: C.bg0,
+                borderLeft: `1px solid ${C.border}`,
+              }}>
+                {activeFileTab && renderFileEditor(activeFileTab, () => closeFileTab(activeFileTab.id))}
+              </div>
+            </div>
+          ) : (
+            /* ── Original layout ── */
+            <>
+              {/* File editor overlay (fullscreen) */}
+              {showFileOverlay && activeFileTab && (
+                <div style={{ position: "absolute", inset: 0, zIndex: 10, background: C.bg0, display: "flex", flexDirection: "column" }}>
+                  {renderFileEditor(activeFileTab, () => closeFileTab(activeFileTab.id))}
+                </div>
+              )}
+
+              {/* Window canvas — terminals */}
+              {renderTerminalCanvas(id => activeWinId === id && !showFileOverlay)}
+            </>
+          )}
         </div>
 
-        {/* Side panels */}
+        {/* ── FIX 2 (cont): Side panel as flex sibling, not overlay ──
+            This renders BESIDE the terminal area. The terminal area's flex:1
+            naturally shrinks to make room. No z-index, no position:absolute,
+            no overlap with the terminal. ResizeHandle lets the user drag the
+            divider between them. */}
         {sidePanel && (
-          <div style={{ width: panelWidth, flexShrink: 0, display: "flex", alignItems: "stretch", borderLeft: `1px solid ${C.border}`, animation: "slideIn .14s ease-out" }}>
+          <div style={{
+            width: panelWidth,
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "stretch",
+            borderLeft: `1px solid ${C.border}`,
+            animation: "slideIn .14s ease-out",
+          }}>
             <ResizeHandle onResize={w => setPanelWidth(w)} />
             <div style={{
-              flex: 1, minWidth: 0, display: "flex", flexDirection: "column",
+              flex: 1, minWidth: 0,
+              display: "flex", flexDirection: "column",
               background: C.bg1, overflow: "hidden",
-              borderRadius: 0,
               boxShadow: "-4px 0 24px rgba(0,0,0,.35)",
             }}>
               {renderSidePanel(sidePanel, runbox, branch, () => onSidePanelToggle?.(sidePanel as any))}
@@ -517,6 +773,13 @@ export function WorkspaceView({
           onRestore={tabCtx.win.minimized ? () => restoreWin(tabCtx.win.id) : undefined}
           onMoveLeft={() => moveTab(tabCtx.win.id, "left")}
           onMoveRight={() => moveTab(tabCtx.win.id, "right")}
+          onNewTerminal={addTerminal}
+          onSplitDown={() => splitWin(tabCtx.win.id, "down")}
+          onSplitRight={() => splitWin(tabCtx.win.id, "left")}
+          onNextTerminal={() => focusNextWin(1)}
+          onPrevTerminal={() => focusNextWin(-1)}
+          onOpenChanges={() => { onSidePanelToggle?.("git"); setTabCtx(null); }}
+          onNewWorkspace={onNewWorkspace ? () => { onNewWorkspace(); setTabCtx(null); } : undefined}
         />
       )}
 

@@ -1,7 +1,7 @@
 // render/features/settings/SettingsModal.tsx
 import { useState } from "react";
 import { C, SANS } from "../../design";
-import { useSettings } from "./useSettings";
+import { useSettings }   from "./useSettings";
 import { GeneralTab }    from "./GeneralTab";
 import { UpdatesTab }    from "./UpdatesTab";
 import { AppearanceTab } from "./AppearanceTab";
@@ -22,13 +22,14 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 interface Props {
-  onClose:  () => void;
-  updater:  UseUpdaterReturn;
+  onClose:     () => void;
+  updater:     UseUpdaterReturn;
+  initialTab?: Tab;           // ← NEW: allows App.tsx to open a specific tab
 }
 
-export function SettingsModal({ onClose, updater }: Props) {
-  const [tab, setTab]     = useState<Tab>("general");
-  const settingsCtx       = useSettings();
+export function SettingsModal({ onClose, updater, initialTab }: Props) {
+  const [tab, setTab] = useState<Tab>(initialTab ?? "general");  // ← use prop
+  const settingsCtx   = useSettings();
 
   return (
     <div
@@ -57,7 +58,7 @@ export function SettingsModal({ onClose, updater }: Props) {
         <nav style={{
           width: 160,
           background: C.bg2,
-          borderRight: `1px solid ${C.borderSubtle}`,
+          borderRight: `1px solid ${C.border}`,   // ← was C.borderSubtle (doesn't exist)
           padding: "12px 0",
           flexShrink: 0,
         }}>
@@ -76,15 +77,15 @@ export function SettingsModal({ onClose, updater }: Props) {
               style={{
                 width: "100%",
                 padding: "7px 14px",
-                background:   tab === t.id ? C.bg4 : "transparent",
-                border:       "none",
-                borderLeft:   tab === t.id ? `2px solid ${C.blue}` : "2px solid transparent",
-                color:        tab === t.id ? C.t1 : C.t2,
-                fontSize:     13,
-                fontFamily:   SANS,
-                textAlign:    "left",
-                cursor:       "pointer",
-                transition:   "background .1s",
+                background:  tab === t.id ? C.bg4 : "transparent",
+                border:      "none",
+                borderLeft:  tab === t.id ? `2px solid ${C.blue}` : "2px solid transparent",
+                color:       tab === t.id ? C.t1 : C.t2,
+                fontSize:    13,
+                fontFamily:  SANS,
+                textAlign:   "left",
+                cursor:      "pointer",
+                transition:  "background .1s",
               }}
             >
               {t.label}
@@ -93,7 +94,7 @@ export function SettingsModal({ onClose, updater }: Props) {
         </nav>
 
         {/* Content */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px", position: "relative" }}>
           {/* Close */}
           <button
             onClick={onClose}

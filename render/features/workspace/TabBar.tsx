@@ -19,6 +19,7 @@ interface TabBarProps {
   fileTreeOpen:     boolean;
   macOffset:        boolean;
   toolbarSlot?:     React.ReactNode;
+  fileSplitRight?:  boolean;
   onWinActivate:       (id: string) => void;
   onWinClose:          (id: string) => void;
   onWinRestore:        (id: string) => void;
@@ -29,6 +30,7 @@ interface TabBarProps {
   onContextMenu:       (e: React.MouseEvent, win: WinState, idx: number) => void;
   onSidebarToggle:     () => void;
   onFileTreeToggle:    () => void;
+  onFileSplitRight?:   () => void;
 }
 
 const tbtn: React.CSSProperties = {
@@ -40,12 +42,31 @@ const tbtn: React.CSSProperties = {
 
 const TRAFFIC_H = 28;
 
+// Split-right icon: file on left | terminal on right
+function SplitRightIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none"
+      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+      style={{ opacity: active ? 1 : 0.65 }}
+    >
+      <rect x="1" y="2" width="14" height="12" rx="1.5" />
+      <line x1="8.5" y1="2" x2="8.5" y2="14" />
+      {/* doc lines on left side */}
+      <line x1="3" y1="6" x2="6.5" y2="6" strokeWidth="1.2" />
+      <line x1="3" y1="8.5" x2="6.5" y2="8.5" strokeWidth="1.2" />
+      {/* terminal prompt on right side */}
+      <polyline points="10,6.5 11.5,8 10,9.5" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 export function TabBar({
   wins, fileTabs, activeWinId, activeFileId,
   sidebarCollapsed, fileTreeOpen, macOffset, toolbarSlot,
+  fileSplitRight = false,
   onWinActivate, onWinClose, onWinRestore, onAddTerminal,
   onFileSelect, onFileClose, onReorderWins, onContextMenu,
-  onSidebarToggle, onFileTreeToggle,
+  onSidebarToggle, onFileTreeToggle, onFileSplitRight,
 }: TabBarProps) {
   const [dragTabId,  setDragTabId]  = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -98,15 +119,15 @@ export function TabBar({
         <div data-tauri-drag-region style={{ height: TRAFFIC_H, flexShrink: 0 }} />
       )}
 
-      <div style={{ display: "flex", alignItems: "stretch", flex: 1, padding: "0 6px", gap: 3 }}>
+      <div style={{ display: "flex", alignItems: "stretch", flex: 1, padding: "0 5px", }}>
         {/* Brand + view toggles */}
         <div style={{
           display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
-          paddingLeft: 6, paddingRight: 8, alignSelf: "center",
-          borderRight: `1px solid rgba(255,255,255,.08)`, marginRight: 2,
+          paddingLeft: 6, paddingRight: 8, alignSelf: "stretch",
+          borderRight: `2px solid rgba(255,255,255,.08)`,
         }}>
           <StripIcon title="Workspace" active={!sidebarCollapsed && !fileTreeOpen} onClick={onSidebarToggle} size={32}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" opacity="0.5"/>
               <path d="M3 5a2 2 0 0 1 2-2h4v18H5a2 2 0 0 1-2-2V5z"
@@ -127,8 +148,8 @@ export function TabBar({
 
         {/* Terminal tabs */}
         <div style={{
-          display: "flex", alignItems: "stretch", gap: 0,
-          overflowX: "auto", minWidth: 0, maxWidth: "65%",
+          display: "flex", alignItems: "stretch", 
+          overflowX: "auto", minWidth: 0, maxWidth: hasFiles ? "50%" : "85%",
           scrollbarWidth: "none",
         }}>
           {wins.map((w, idx) => (
@@ -137,7 +158,7 @@ export function TabBar({
               win={w}
               idx={idx}
               isActive={activeWinId === w.id}
-              hasFile={hasFiles && activeFileId !== null}
+              hasFile={hasFiles && activeFileId !== null && !fileSplitRight}
               dragTabId={dragTabId}
               dragOverId={dragOverId}
               onActivate={() => { onWinActivate(w.id); }}
@@ -151,7 +172,7 @@ export function TabBar({
 
           <button
             onClick={onAddTerminal}
-            title="New terminal"
+            title="New terminal  (Ctrl+Shift+T)"
             style={{ ...tbtn, width: 26, alignSelf: "stretch", borderRadius: 0, fontSize: 16, fontWeight: 300, border: "1px solid transparent", marginRight: 6 }}
             onMouseEnter={e => {
               const el = e.currentTarget as HTMLElement;
@@ -169,6 +190,7 @@ export function TabBar({
         {/* File tabs */}
         {fileTabs.length > 0 && (
           <>
+            
             <div style={{ display: "flex", alignItems: "stretch", gap: 0, overflowX: "auto", minWidth: 0, flex: 1, scrollbarWidth: "none" }}>
               {fileTabs.map(tab => (
                 <FileTab

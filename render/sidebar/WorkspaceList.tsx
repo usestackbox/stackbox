@@ -55,7 +55,7 @@ export function WorkspaceList({
         <span
           onClick={onNew}
           style={{
-            fontSize: FS.sm, fontFamily: SANS, color: C.t3,
+            fontSize: FS.md, fontFamily: SANS, color: C.t3,
             cursor: "pointer", letterSpacing: ".02em",
             transition: "color .12s",
           }}
@@ -67,7 +67,7 @@ export function WorkspaceList({
       </div>
 
       {/* Workspace rows */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "2px 0 10px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "0px 0 10px" }}>
         {workspaces.map(ws => (
           <WorkspaceItem
             key={ws.id}

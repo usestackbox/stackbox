@@ -2,11 +2,10 @@
 // Root shell. Layout only — all state lives in useRunboxes + useBranchPoller.
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { C, SANS, MONO } from "./design";
+import { C, SANS } from "./design";
 import { useRunboxes }     from "./features/runbox";
 import { useBranchPoller } from "./hooks";
-import { StripIcon }       from "./ui";
-// icons — memory panel hidden, IcoBrain not needed
+import { useKeyboard }     from "./hooks/useKeyboard";
 
 import { WorkspaceView }  from "./features/workspace";
 import type { WinState, FileTab, SidePanel as WsSidePanel } from "./features/workspace/types";
@@ -19,15 +18,13 @@ import { BrowsePane }     from "./features/browser/BrowsePane";
 import { FileEditorPane } from "./features/editor/FileEditorPane";
 import { GitPanel }       from "./features/git/GitPanel";
 import { MemoryPanel }    from "./features/memory/MemoryPanel";
-// REMOVED: FileChangeList (duplicate of GitPanel ChangesTab)
-// REMOVED: LiveDiffFile import from changes — now sourced from git/types
 import type { LiveDiffFile } from "./features/git/types";
 
-const SIDEBAR_TOTAL = 260; // match WORKSPACE_W in Sidebar.tsx
+import { SettingsModal }  from "./features/settings";
+import { useUpdater }     from "./features/updater";
 
-// "files" kept in the type union so the signature matches WorkspaceView's onSidePanelToggle.
-// The panel itself is no longer rendered (file changes live inside Git → Changes tab),
-// but the type must stay compatible with WorkspaceView's prop type.
+const SIDEBAR_TOTAL = 260;
+
 type SidePanel = "git" | "memory" | "files" | null;
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -37,7 +34,7 @@ export default function App() {
   const [cwdMap,      setCwdMap]      = useState<Record<string, string>>({});
   const [worktreeMap, setWorktreeMap] = useState<Record<string, string>>({});
   const [branchMap,   setBranchMap]   = useState<Record<string, string>>({});
-  const [showModal, setShowModal] = useState(false);
+  const [showModal,   setShowModal]   = useState(false);
 
   // Sidebar / panel state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -45,6 +42,13 @@ export default function App() {
   const [sidePanel,        setSidePanel]        = useState<SidePanel>(null);
   const [sidebarTotal,     setSidebarTotal]     = useState(SIDEBAR_TOTAL);
   const [activeSessionId,  setActiveSessionId]  = useState<string | null>(null);
+
+  // Settings modal state
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab,  setSettingsTab]  = useState<string | undefined>(undefined);
+
+  // Updater
+  const updater = useUpdater();
 
   // Imperative refs for diff/file openers per runbox
   const diffOpenerRefs = useRef<Record<string, { open: (fc: any) => void }>>({});
@@ -84,41 +88,72 @@ export default function App() {
 
   const contentMarginLeft = sidebarCollapsed ? 0 : sidebarTotal;
 
-  // ── Render props for WorkspaceView ─────────────────────────────────────────
-  // NOTE: renderTermPane is now defined inline per-runbox inside the map below.
-  // Each WorkspaceView needs its own scoped renderer so runboxId is always correct.
+  // ── sb: event bridge ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const openSettings = (e: Event) => {
+      const tab = (e as CustomEvent).detail?.tab as string | undefined;
+      setSettingsTab(tab);
+      setShowSettings(true);
+    };
+    const checkUpdates = () => {
+      updater.checkNow();
+      setSettingsTab("updates");
+      setShowSettings(true);
+    };
+    const newWorkspace = () => setShowModal(true);
 
+    window.addEventListener("sb:open-settings", openSettings);
+    window.addEventListener("sb:check-updates", checkUpdates);
+    window.addEventListener("sb:new-workspace", newWorkspace);
+
+    return () => {
+      window.removeEventListener("sb:open-settings", openSettings);
+      window.removeEventListener("sb:check-updates", checkUpdates);
+      window.removeEventListener("sb:new-workspace", newWorkspace);
+    };
+  }, [updater]);
+
+  // ── Global keyboard shortcuts ─────────────────────────────────────────────
+  useKeyboard({
+    "mod+n": () => setShowModal(true),
+    "mod+f": () => {
+      if (!fileTreeOpen) handleFileTreeToggle();
+      window.dispatchEvent(new CustomEvent("sb:file-search-focus"));
+    },
+    "mod+t":                () => window.dispatchEvent(new CustomEvent("sb:new-terminal")),
+    "mod+w":                () => window.dispatchEvent(new CustomEvent("sb:close-terminal")),
+    "mod+shift+ArrowRight": () => window.dispatchEvent(new CustomEvent("sb:next-terminal")),
+    "mod+shift+ArrowLeft":  () => window.dispatchEvent(new CustomEvent("sb:prev-terminal")),
+    "mod+ArrowDown":        () => window.dispatchEvent(new CustomEvent("sb:split-down")),
+    "mod+ArrowRight":       () => window.dispatchEvent(new CustomEvent("sb:split-right")),
+  });
+
+  // ── Render props ──────────────────────────────────────────────────────────
   const renderBrowsePane = useCallback((
     win: WinState,
     pendingUrl: string | null,
     onConsumed: () => void,
-  ) => {
-    return (
-      <BrowsePane
-        key={win.id}
-        paneId={win.id}
-        runboxId={safeId ?? undefined}
-        isActive={false}
-        onActivate={() => {}}
-        onClose={() => {}}
-        externalUrl={pendingUrl}
-        onExternalUrlConsumed={onConsumed}
-      />
-    );
-  }, [safeId]);
+  ) => (
+    <BrowsePane
+      key={win.id}
+      paneId={win.id}
+      runboxId={safeId ?? undefined}
+      isActive={false}
+      onActivate={() => {}}
+      onClose={() => {}}
+      externalUrl={pendingUrl}
+      onExternalUrlConsumed={onConsumed}
+    />
+  ), [safeId]);
 
-  const renderFileEditor = useCallback((tab: FileTab, onClose: () => void) => {
-    return (
-      <FileEditorPane
-        key={tab.id}
-        path={tab.filePath}
-        onClose={onClose}
-      />
-    );
-  }, []);
+  const renderFileEditor = useCallback((tab: FileTab, onClose: () => void) => (
+    <FileEditorPane
+      key={tab.id}
+      path={tab.filePath}
+      onClose={onClose}
+    />
+  ), []);
 
-  // FIX: was missing `worktreeMap` in deps — caused stale closure where GitPanel
-  //      received the wrong cwd when worktree path changed after mount.
   const renderSidePanel = useCallback((
     panel: WsSidePanel,
     runbox: typeof runboxes[number],
@@ -146,7 +181,7 @@ export default function App() {
       );
     }
     return null;
-  }, [cwdMap, worktreeMap]); // ← worktreeMap added to deps (was missing)
+  }, [cwdMap, worktreeMap]);
 
   return (
     <div style={{
@@ -154,7 +189,7 @@ export default function App() {
       height: "100%", width: "100%",
       background: C.bg0, overflow: "hidden", position: "relative",
     }}>
-      {/* Floating Sidebar */}
+      {/* Sidebar */}
       <Sidebar
         runboxes={runboxes}
         activeId={safeId}
@@ -174,10 +209,6 @@ export default function App() {
 
       {/* One WorkspaceView per runbox — only active is visible */}
       {runboxes.map(rb => {
-        // Each WorkspaceView gets its OWN renderTermPane scoped to its runbox.
-        // The shared renderTermPane used safeId (the globally active workspace),
-        // so ALL inactive WorkspaceViews were spawning PTYs with the wrong runboxId —
-        // two PTYs on the same ID = double prompt output.
         const renderTermPaneForRb = (win: WinState, callbacks: TermPaneCallbacks) => (
           <TerminalPane
             key={win.id}
@@ -202,69 +233,70 @@ export default function App() {
             onAgentDetected={callbacks.onAgentDetected}
           />
         );
+
         return (
-        <div
-          key={rb.id}
-          style={{
-            display:       safeId === rb.id ? "flex" : "none",
-            flex:          1,
-            flexDirection: "column",
-            minHeight:     0,
-          }}
-        >
-          <WorkspaceView
-            runbox={rb}
-            branch={branchMap[rb.id] ?? ""}
-            sidePanel={sidePanel}
-            sidebarCollapsed={sidebarCollapsed}
-            fileTreeOpen={fileTreeOpen}
-            contentMarginLeft={contentMarginLeft}
-            onSidePanelToggle={toggleSide}
-            onSidebarToggle={handleSidebarToggle}
-            onFileTreeToggle={handleFileTreeToggle}
-            toolbarSlot={
-              <div style={{ display: "flex", alignItems: "center", gap: 1 }}>
-                {/* Memory panel hidden — not needed with per-agent git worktrees */}
-                <button
-                  onClick={() => toggleSide("git")}
-                  title="Changes"
-                  style={{
-                    background: sidePanel === "git" ? "rgba(255,255,255,.18)" : "transparent",
-                    border: sidePanel === "git" ? "1px solid rgba(255,255,255,.12)" : "1px solid rgba(255,255,255,.1)",
-                    borderRadius: 6,
-                    color: sidePanel === "git" ? "#ffffff" : "rgba(255,255,255,.45)",
-                    cursor: "pointer",
-                    padding: "0 10px",
-                    height: 28,
-                    fontSize: 11,
-                    fontWeight: 500,
-                    letterSpacing: "0.04em",
-                    whiteSpace: "nowrap",
-                    transition: "all .12s",
-                    display: "flex",
-                    alignItems: "center",
-                  }}
-                  onMouseEnter={e => {
-                    const el = e.currentTarget as HTMLElement;
-                    if (sidePanel !== "git") { el.style.color = "#fff"; el.style.background = "rgba(255,255,255,.09)"; }
-                  }}
-                  onMouseLeave={e => {
-                    const el = e.currentTarget as HTMLElement;
-                    if (sidePanel !== "git") { el.style.color = "rgba(255,255,255,.45)"; el.style.background = "transparent"; }
-                  }}
-                >Changes</button>
-              </div>
-            }
-            onCwdChange={cwd => setCwdMap(p => ({ ...p, [rb.id]: cwd }))}
-            onSessionChange={setActiveSessionId}
-            onOpenDiff={ref => { diffOpenerRefs.current[rb.id] = ref; }}
-            onOpenFile={ref => { fileOpenerRefs.current[rb.id] = ref; }}
-            renderTermPane={renderTermPaneForRb}
-            renderBrowsePane={renderBrowsePane}
-            renderFileEditor={renderFileEditor}
-            renderSidePanel={renderSidePanel}
-          />
-        </div>
+          <div
+            key={rb.id}
+            style={{
+              display:       safeId === rb.id ? "flex" : "none",
+              flex:          1,
+              flexDirection: "column",
+              minHeight:     0,
+            }}
+          >
+            <WorkspaceView
+              runbox={rb}
+              branch={branchMap[rb.id] ?? ""}
+              sidePanel={sidePanel}
+              sidebarCollapsed={sidebarCollapsed}
+              fileTreeOpen={fileTreeOpen}
+              contentMarginLeft={contentMarginLeft}
+              onSidePanelToggle={toggleSide}
+              onSidebarToggle={handleSidebarToggle}
+              onFileTreeToggle={handleFileTreeToggle}
+              toolbarSlot={
+                <div style={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <button
+                    onClick={() => toggleSide("git")}
+                    title="Changes"
+                    style={{
+                      background:   sidePanel === "git" ? "#3A4149" : "transparent",
+                      border:       sidePanel === "git" ? "1px solid rgba(255,255,255,.12)" : "1px solid rgba(255,255,255,.1)",
+                      borderRadius: 6,
+                      color:        sidePanel === "git" ? "#ffffff" : "rgba(255,255,255,.45)",
+                      cursor:       "pointer",
+                      padding:      "0 10px",
+                      height:       24,
+                      fontSize:     11,
+                      fontWeight:   600,
+                      letterSpacing:"0.05em",
+                      whiteSpace:   "nowrap",
+                      transition:   "all .12s",
+                      display:      "flex",
+                      alignItems:   "center",
+                    }}
+                    onMouseEnter={e => {
+                      const el = e.currentTarget as HTMLElement;
+                      if (sidePanel !== "git") { el.style.color = "#fff"; el.style.background = "rgba(255,255,255,.09)"; }
+                    }}
+                    onMouseLeave={e => {
+                      const el = e.currentTarget as HTMLElement;
+                      if (sidePanel !== "git") { el.style.color = "rgba(255,255,255,.45)"; el.style.background = "transparent"; }
+                    }}
+                  >Changes</button>
+                </div>
+              }
+              onCwdChange={cwd => setCwdMap(p => ({ ...p, [rb.id]: cwd }))}
+              onSessionChange={setActiveSessionId}
+              onOpenDiff={ref => { diffOpenerRefs.current[rb.id] = ref; }}
+              onOpenFile={ref => { fileOpenerRefs.current[rb.id] = ref; }}
+              renderTermPane={renderTermPaneForRb}
+              renderBrowsePane={renderBrowsePane}
+              renderFileEditor={renderFileEditor}
+              renderSidePanel={renderSidePanel}
+              onNewWorkspace={() => setShowModal(true)}
+            />
+          </div>
         );
       })}
 
@@ -281,6 +313,14 @@ export default function App() {
         <CreateRunboxModal
           onSubmit={(n, c) => { create(n, c); setShowModal(false); }}
           onClose={() => setShowModal(false)}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          onClose={() => { setShowSettings(false); setSettingsTab(undefined); }}
+          updater={updater}
+          initialTab={settingsTab as any}
         />
       )}
     </div>

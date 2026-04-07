@@ -44,7 +44,6 @@ export function WinControls() {
     <div style={{
       display: "flex", alignItems: "center", gap: 1,
       marginLeft: 4, paddingLeft: 6,
-      borderLeft: `1px solid rgba(255,255,255,.08)`,
     }}>
       <WinBtn title="Minimize"         hoverBg="rgba(255,255,255,.07)" hoverColor="#fff" onClick={() => win.minimize().catch(() => {})}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
