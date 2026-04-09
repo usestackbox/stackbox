@@ -13,8 +13,8 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background: #080808;
-  color: rgba(255, 255, 255, 0.93);
+  background: #090B12;
+  color: rgba(232, 235, 255, 0.95);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -28,11 +28,11 @@ body,
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(120, 130, 220, 0.18);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(139, 124, 246, 0.38);
 }
 ::-webkit-scrollbar-corner {
   background: transparent;

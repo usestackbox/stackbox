@@ -23,6 +23,7 @@ export interface SidebarProps {
   onCreate: (name: string, cwd: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  onChangeCwd?: (id: string, cwd: string) => void;
   fileTreeOpen?: boolean;
   onFileTreeToggle?: () => void;
   onOpenFile?: (path: string) => void;
@@ -59,6 +60,7 @@ export function Sidebar({
   onCreate,
   onRename,
   onDelete,
+  onChangeCwd,
   fileTreeOpen,
   onFileTreeToggle,
   onOpenFile,
@@ -97,7 +99,7 @@ export function Sidebar({
 
   /** Which workspace item is open for inline editing, and which field */
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editField, setEditField] = useState<"name" | "dir" | null>(null);
+  const [editField, setEditField] = useState<"name" | null>(null);
 
   useEffect(() => {
     if (wsEditing) setTimeout(() => wsInputRef.current?.select(), 20);
@@ -156,11 +158,6 @@ export function Sidebar({
           onChangeName={() => {
             setEditingId(ctxMenu.id);
             setEditField("name");
-            setCtxMenu(null);
-          }}
-          onChangeDir={() => {
-            setEditingId(ctxMenu.id);
-            setEditField("dir");
             setCtxMenu(null);
           }}
           onClose={() => setCtxMenu(null)}

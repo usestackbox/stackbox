@@ -1,62 +1,70 @@
 // ── Backgrounds ───────────────────────────────────────────────────────────────
+// Slate — mid-dark, airy, like Linear or Vercel dashboard
 export const BG = {
-  0: "#0B0E11", // terminal (deepest, noticeable)
-  1: "#12161A", // app base
-  2: "#181C20", // canvas
-  3: "#21262B", // ← PRIMARY panels
-  4: "#2C3238", // borders / separation
-  5: "#3A4149", // ← SECONDARY hover/active
+  0: "#151821", // terminal (not black, soft)
+  1: "#1E222B", // app base
+  2: "#242938", // workspace
+  3: "#2B3042", // primary panels
+  4: "#353A50", // borders / dividers
+  5: "#404663", // hover / active
 };
 
 // ── Borders ───────────────────────────────────────────────────────────────────
-const BORDER = {
-  subtle: "rgba(255,255,255,.05)",
-  base: "rgba(255,255,255,.08)",
-  mid: "rgba(255,255,255,.12)",
-  hi: "rgba(255,255,255,.22)",
+export const BORDER = {
+  subtle: "rgba(150,155,210,.07)",
+  base:   "rgba(150,155,210,.13)",
+  mid:    "rgba(150,155,210,.22)",
+  hi:     "rgba(160,165,230,.36)",
 } as const;
 
 // ── Text ──────────────────────────────────────────────────────────────────────
-const TEXT = {
-  primary: "rgba(255,255,255,.93)",
-  secondary: "rgba(255,255,255,.65)",
-  muted: "rgba(255,255,255,.40)",
-  faint: "rgba(255,255,255,.22)",
-  ghost: "rgba(255,255,255,.10)",
+export const TEXT = {
+  primary:   "rgba(238,240,255,.96)",
+  secondary: "rgba(195,198,225,.78)",
+  muted:     "rgba(150,155,185,.58)",
+  faint:     "rgba(110,115,150,.38)",
+  ghost:     "rgba(80,85,120,.18)",
 } as const;
 
 // ── Semantic colours ──────────────────────────────────────────────────────────
-const SEM = {
-  green: "#4ade80",
-  greenDim: "#22c55e",
-  greenBg: "rgba(74,222,128,.07)",
-  greenBorder: "rgba(74,222,128,.18)",
-  red: "#f87171",
-  redDim: "#ef4444",
-  redBg: "rgba(248,113,113,.07)",
-  redBorder: "rgba(248,113,113,.18)",
-  amber: "#fbbf24",
-  amberDim: "#f59e0b",
-  amberBg: "rgba(251,191,36,.07)",
-  amberBorder: "rgba(251,191,36,.18)",
-  blue: "#60a5fa",
-  blueDim: "#3b82f6",
-  blueBg: "rgba(96,165,250,.07)",
-  blueBorder: "rgba(96,165,250,.18)",
+export const SEM = {
+  green: "#3fffa2",
+  greenDim: "#22e87a",
+  greenBg: "rgba(63,255,162,.07)",
+  greenBorder: "rgba(63,255,162,.18)",
+  red: "#ff6b6b",
+  redDim: "#f54242",
+  redBg: "rgba(255,107,107,.07)",
+  redBorder: "rgba(255,107,107,.18)",
+  amber: "#ffd060",
+  amberDim: "#f5a623",
+  amberBg: "rgba(255,208,96,.07)",
+  amberBorder: "rgba(255,208,96,.18)",
+  blue: "#6ab0ff",
+  blueDim: "#3d8ff5",
+  blueBg: "rgba(106,176,255,.07)",
+  blueBorder: "rgba(106,176,255,.18)",
+  // ── Violet/purple accent — Stackbox identity colour ─────────────────────────────
+  violet: "#9D8FFF",
+  violetBright: "#BCB2FF",
+  violetDim: "#7560F0",
+  violetBg: "rgba(157,143,255,.09)",
+  violetBorder: "rgba(157,143,255,.26)",
 } as const;
 
 // ── Shadows ───────────────────────────────────────────────────────────────────
-const SHADOW = {
-  xs: "0 1px 4px rgba(0,0,0,.45)",
-  sm: "0 2px 10px rgba(0,0,0,.55)",
-  md: "0 8px 28px rgba(0,0,0,.65)",
-  lg: "0 16px 52px rgba(0,0,0,.75)",
-  xl: "0 28px 80px rgba(0,0,0,.88)",
-  inner: "inset 0 1px 0 rgba(255,255,255,.04)",
+export const SHADOW = {
+  xs: "0 1px 4px rgba(0,0,0,.30)",
+  sm: "0 2px 10px rgba(0,0,0,.40)",
+  md: "0 8px 28px rgba(0,0,0,.50)",
+  lg: "0 16px 52px rgba(0,0,0,.58)",
+  xl: "0 28px 80px rgba(0,0,0,.66)",
+  inner: "inset 0 1px 0 rgba(255,255,255,.08)",
+  glow: "0 0 24px rgba(157,143,255,.22)",
 } as const;
 
 // ── Radius ────────────────────────────────────────────────────────────────────
-const RADIUS = {
+export const RADIUS = {
   xs: "4px",
   sm: "8px",
   md: "10px",
@@ -104,18 +112,26 @@ export const C = {
   blueBg: SEM.blueBg,
   blueBorder: SEM.blueBorder,
 
-  // Legacy compat — teal remapped to neutral white
-  teal: TEXT.primary,
-  tealBright: "#ffffff",
-  tealDim: "rgba(255,255,255,.06)",
-  tealBorder: BORDER.mid,
-  tealText: TEXT.primary,
+  // ── Violet accent ─────────────────────────────────────────────────────────
+  violet: SEM.violet,
+  violetBright: SEM.violetBright,
+  violetDim: SEM.violetDim,
+  violetBg: SEM.violetBg,
+  violetBorder: SEM.violetBorder,
+
+  // Legacy compat — teal remapped to violet
+  teal: SEM.violetBright,
+  tealBright: SEM.violet,
+  tealDim: SEM.violetBg,
+  tealBorder: SEM.violetBorder,
+  tealText: SEM.violetBright,
 
   shadowXs: SHADOW.xs,
   shadowSm: SHADOW.sm,
   shadow: SHADOW.md,
   shadowLg: SHADOW.lg,
   shadowXl: SHADOW.xl,
+  shadowGlow: SHADOW.glow,
 
   r1: RADIUS.xs,
   r2: RADIUS.sm,
@@ -130,17 +146,17 @@ export const SANS = "'DM Sans','Outfit',-apple-system,'SF Pro Text',system-ui,sa
 
 /** Font size scale in px */
 export const FS = {
-  xxs: 9,
-  xs: 10,
-  sm: 11,
-  md: 12,
-  base: 13,
-  lg: 14,
-  xl: 16,
-  xxl: 18,
-  h3: 20,
-  h2: 24,
-  h1: 32,
+  xxs: 11,
+  xs: 12,
+  sm: 13,
+  md: 14,
+  base: 15,
+  lg: 16,
+  xl: 18,
+  xxl: 20,
+  h3: 22,
+  h2: 26,
+  h1: 34,
 } as const;
 
 // ── Spacing (4-pt grid) ───────────────────────────────────────────────────────

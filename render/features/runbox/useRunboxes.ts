@@ -28,6 +28,11 @@ export function useRunboxes() {
     setRunboxes((p) => p.map((r) => (r.id === id ? { ...r, name } : r)));
   }, []);
 
+  const changeCwd = useCallback((id: string, cwd: string) => {
+    setRunboxes((p) => p.map((r) => (r.id === id ? { ...r, cwd } : r)));
+    invoke("git_ensure", { cwd, runboxId: id }).catch(() => {});
+  }, []);
+
   const remove = useCallback((id: string) => {
     invoke("memory_delete_for_runbox", { runboxId: id }).catch(() => {});
     setRunboxes((p) => {
@@ -37,5 +42,5 @@ export function useRunboxes() {
     });
   }, []);
 
-  return { runboxes, activeId, safeId, setActiveId, create, rename, remove };
+  return { runboxes, activeId, safeId, setActiveId, create, rename, changeCwd, remove };
 }

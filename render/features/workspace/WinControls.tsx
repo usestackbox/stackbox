@@ -1,4 +1,5 @@
 // features/workspace/WinControls.tsx
+import React from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { C } from "../../design";
 
@@ -63,4 +64,4 @@ export function WinControls() {
       </WinBtn>
     </div>
   );
-} 
+}

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Stackbox
+Comment=AI-powered developer workspace
+Exec=stackbox %u
+Icon=stackbox
+Terminal=false
+Type=Application
+Categories=Development;IDE;Utility;
+MimeType=x-scheme-handler/stackbox;
+StartupNotify=true
+StartupWMClass=stackbox
+Keywords=developer;workspace;ai;terminal;git;

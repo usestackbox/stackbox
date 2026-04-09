@@ -3,8 +3,7 @@
 // No React — safe to import anywhere.
 import type { PaneNode, TermNode } from "../../types";
 
-let _seq = 0;
-export const newLeaf = (): TermNode => ({ type: "leaf", id: `t${++_seq}` });
+export const newLeaf = (): TermNode => ({ type: "leaf", id: crypto.randomUUID() });
 
 /** Remove a leaf by id; collapses parent splits automatically. */
 export function removeLeaf(node: PaneNode, id: string): PaneNode | null {

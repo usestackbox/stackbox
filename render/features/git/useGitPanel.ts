@@ -10,6 +10,7 @@ import type {
   GitCommit,
   LiveDiffFile,
   WorktreeEntry,
+  WorktreeRecord,
 } from "./types";
 
 // ── File filter ───────────────────────────────────────────────────────────────
@@ -61,11 +62,25 @@ function shortAgent(name: string) {
   return name.split(" ")[0].toLowerCase();
 }
 
+/**
+ * Returns the agent whose session most closely precedes (or overlaps by 5s)
+ * the file's modifiedAt timestamp.
+ *
+ * Fix: spans are sorted ascending by startedAt. We stop as soon as a span
+ * starts MORE THAN 5s after modifiedAt — so match holds the last span that
+ * started ≤ modifiedAt+5s, which is the closest qualifying agent, not the
+ * most-recently-spawned one overall.
+ */
 export function agentForFile(spans: AgentSpan[], modifiedAt: number): string | null {
   if (!spans.length || !modifiedAt) return null;
   let match: AgentSpan | null = null;
   for (const s of spans) {
-    if (s.startedAt <= modifiedAt + 5000) match = s;
+    if (s.startedAt <= modifiedAt + 5000) {
+      match = s;
+    } else {
+      // Spans are sorted ascending; once we overshoot, all later ones will too.
+      break;
+    }
   }
   return match ? shortAgent(match.agent) : null;
 }
@@ -81,7 +96,22 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
   const [allBranches, setAllBranches] = useState<string[]>([]);
   const [agentSpans, setAgentSpans] = useState<AgentSpan[]>([]);
   const [agentBranches, setAgentBranches] = useState<AgentBranch[]>([]);
+  const [worktreeRecord, setWorktreeRecord] = useState<WorktreeRecord | null>(null);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+
+  // Reset everything when workspace switches so stale data never flashes
+  useEffect(() => {
+    setIsGitRepo(null);
+    setFiles([]);
+    setCommits([]);
+    setWorktrees([]);
+    setConflicts([]);
+    setAllBranches([]);
+    setAgentSpans([]);
+    setAgentBranches([]);
+    setWorktreeRecord(null);
+    setNotice(null);
+  }, [workspaceId]);
 
   const PORT = (window as any).__STACKBOX_PORT__ ?? 7700;
 
@@ -196,6 +226,12 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
       .catch(() => {});
   }, [workspaceId]);
 
+  const loadWorktreeRecord = useCallback(() => {
+    invoke<WorktreeRecord | null>("git_worktree_record", { cwd: workspaceCwd })
+      .then((r) => setWorktreeRecord(r))
+      .catch(() => setWorktreeRecord(null));
+  }, [workspaceCwd]);
+
   const loadAll = useCallback(() => {
     loadFiles();
     loadCommits();
@@ -203,7 +239,8 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     loadConflicts();
     loadBranches();
     loadAgentBranches();
-  }, [loadFiles, loadCommits, loadWorktrees, loadConflicts, loadBranches, loadAgentBranches]);
+    loadWorktreeRecord();
+  }, [loadFiles, loadCommits, loadWorktrees, loadConflicts, loadBranches, loadAgentBranches, loadWorktreeRecord]);
 
   useEffect(() => {
     if (!isGitRepo) return;
@@ -231,8 +268,8 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
 
   useEffect(() => {
     if (!isGitRepo) return;
-    const u = listen<LiveDiffFile[]>("git:live-diff", ({ payload }) => {
-      applyFiles(payload);
+    const u = listen<LiveDiffFile[]>("git:live-diff", () => {
+      loadFiles();
       loadConflicts();
     });
     return () => {
@@ -253,6 +290,24 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
       loadCommits();
     },
     [workspaceCwd, workspaceId, showNotice, loadFiles, loadCommits]
+  );
+
+  const push = useCallback(async () => {
+    const result = await invoke<string>("git_push", { cwd: workspaceCwd });
+    showNotice(result || "Pushed", true);
+    loadFiles();
+    loadCommits();
+    loadWorktreeRecord();
+  }, [workspaceCwd, showNotice, loadFiles, loadCommits, loadWorktreeRecord]);
+
+  const createPr = useCallback(
+    async (title: string, body: string): Promise<string> => {
+      const url = await invoke<string>("git_push_pr", { cwd: workspaceCwd, title, body });
+      showNotice("PR created", true);
+      loadWorktreeRecord();
+      return url;
+    },
+    [workspaceCwd, showNotice, loadWorktreeRecord]
   );
 
   const switchBranch = useCallback(
@@ -389,9 +444,12 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     allBranches,
     agentSpans,
     agentBranches,
+    worktreeRecord,
     notice,
     showNotice,
     commit,
+    push,
+    createPr,
     switchBranch,
     createBranch,
     renameBranch,
@@ -410,5 +468,6 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     loadFiles,
     loadCommits,
     loadBranches,
+    loadWorktreeRecord,
   };
 }

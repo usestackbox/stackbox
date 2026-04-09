@@ -59,6 +59,51 @@ export interface AgentSpan {
   startedAt: number;
 }
 
+// ── GitHub / PR types ─────────────────────────────────────────────────────────
+
+/** A single review on a pull request */
+export interface PrReview {
+  author: string;
+  /** APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED */
+  state: string;
+}
+
+/** A CI check run attached to a pull request */
+export interface PrCheck {
+  name: string;
+  /** QUEUED | IN_PROGRESS | COMPLETED */
+  status: string;
+  /** SUCCESS | FAILURE | ERROR | NEUTRAL | null (still running) */
+  conclusion: string | null;
+}
+
+/** Live pull-request details returned by git_pr_view */
+export interface PrDetails {
+  title: string;
+  /** OPEN | CLOSED | MERGED */
+  state: string;
+  author: string;
+  url: string;
+  body: string;
+  /** MERGEABLE | CONFLICTING | UNKNOWN */
+  mergeable: string;
+  reviews: PrReview[];
+  checks: PrCheck[];
+}
+
+/**
+ * Per-branch record that tracks the worktree path and open PR URL.
+ * Stored by the Rust kernel; fetched via git_worktree_record.
+ */
+export interface WorktreeRecord {
+  branch: string;
+  worktree_path: string | null;
+  pr_url: string | null;
+  pr_number: number | null;
+}
+
+// ── Panel types ───────────────────────────────────────────────────────────────
+
 export type GitTab = "changes" | "source" | "worktrees";
 
 export interface GitPanelProps {

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="Stackbox"
+    Language="1033"
+    Version="!(bind.FileVersion.MainExecutable)"
+    Manufacturer="Stackbox Contributors"
+    UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+
+    <Package
+      InstallerVersion="500"
+      Compressed="yes"
+      InstallScope="perMachine"
+      Description="Stackbox Installer"
+      Comments="AI-powered developer workspace"/>
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Stackbox is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="Stackbox" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="RegistryEntries" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="Stackbox" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Stackbox" />
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="MainExecutable" Guid="*">
+        <File Id="MainExecutable" Source="$(var.SourceDir)\stackbox.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder" Guid="*">
+      <Shortcut Id="StartMenuShortcut" Name="Stackbox"
+        Description="AI-powered developer workspace"
+        Target="[INSTALLFOLDER]stackbox.exe"
+        WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="CleanupStartMenu" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\Stackbox" Name="installed"
+        Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="RegistryEntries" Directory="INSTALLFOLDER" Guid="*">
+      <!-- stackbox:// URL scheme handler -->
+      <RegistryKey Root="HKCR" Key="stackbox">
+        <RegistryValue Type="string" Value="URL:Stackbox Protocol" />
+        <RegistryValue Name="URL Protocol" Type="string" Value="" />
+      </RegistryKey>
+      <RegistryKey Root="HKCR" Key="stackbox\shell\open\command">
+        <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]stackbox.exe&quot; &quot;%1&quot;" />
+      </RegistryKey>
+    </Component>
+
+  </Product>
+</Wix>

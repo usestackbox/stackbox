@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "stackbox": {
+      "headers": {
+        "Authorization": "Bearer 4d154706-c5f6-4bb6-b84e-efd95ba88ab4-2196e9d2-a03d-4508-8eb7-bc8b93b3ec6b"
+      },
+      "type": "http",
+      "url": "http://127.0.0.1:7547/mcp/4d154706-c5f6-4bb6-b84e-efd95ba88ab4"
+    }
+  }
+}

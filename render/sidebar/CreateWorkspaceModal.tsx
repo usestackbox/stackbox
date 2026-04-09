@@ -96,7 +96,7 @@ export function CreateWorkspaceModal({ onSubmit, onClose }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 1000,
+        zIndex: 99999,
         background: "rgba(0,0,0,.62)",
         backdropFilter: "blur(3px)",
         display: "flex",

@@ -379,7 +379,14 @@ export function FilePanel({ cwd, onClose, onOpenFile }: Props) {
     const parts = renaming.path.replace(/\\/g, "/").split("/");
     parts[parts.length - 1] = newName;
     try {
-      await invoke("fs_rename", { from: renaming.path, to: parts.join(sep) });
+      const toPath = parts.join(sep);
+      await invoke("fs_rename", { from: renaming.path, to: toPath });
+      // Notify open terminals so they can update their CWD if they're inside the renamed dir
+      if (renaming.is_dir) {
+        window.dispatchEvent(new CustomEvent("sb:dir-renamed", {
+          detail: { from: renaming.path, to: toPath },
+        }));
+      }
       setRefreshKey((k) => k + 1);
     } catch (e) {
       alert(`Rename failed: ${e}`);

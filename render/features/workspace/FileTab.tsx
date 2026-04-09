@@ -1,4 +1,5 @@
 // features/workspace/FileTab.tsx
+import React from "react";
 import { MONO } from "../../design";
 import { TabCloseBtn } from "../../ui";
 import type { FileTab as FileTabData } from "./types";

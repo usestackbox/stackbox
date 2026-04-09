@@ -133,12 +133,12 @@ function AgentBranchRow({
             </span>
             <span
               style={{
-                fontSize: 9,
+                fontSize: 13,
                 fontFamily: MONO,
                 color: C.t3,
                 background: C.bg4,
                 borderRadius: 4,
-                padding: "1px 5px",
+                padding: "1px 6px",
                 flexShrink: 0,
               }}
             >
@@ -148,19 +148,48 @@ function AgentBranchRow({
 
           {/* Status line */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 10, fontFamily: SANS, color: statusColor(ab.status) }}>
+            <span style={{ fontSize: 12, fontFamily: SANS, color: statusColor(ab.status) }}>
               {isActive ? "● running" : ab.status}
             </span>
             {status && status.ahead > 0 && (
-              <span style={{ fontSize: 10, fontFamily: MONO, color: C.t3 }}>
-                +{status.ahead} commit{status.ahead !== 1 ? "s" : ""}
+              <span
+                style={{
+                  fontSize: 10,
+                  fontFamily: "monospace",
+                  fontWeight: 600,
+                  color: "rgba(74,222,128,.9)",
+                  background: "rgba(74,222,128,.10)",
+                  border: "1px solid rgba(74,222,128,.20)",
+                  borderRadius: 4,
+                  padding: "1px 5px",
+                  lineHeight: 1.4,
+                }}
+              >
+                +{status.ahead}
+              </span>
+            )}
+            {status && status.behind > 0 && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontFamily: "monospace",
+                  fontWeight: 600,
+                  color: "rgba(248,113,113,.9)",
+                  background: "rgba(248,113,113,.10)",
+                  border: "1px solid rgba(248,113,113,.20)",
+                  borderRadius: 4,
+                  padding: "1px 5px",
+                  lineHeight: 1.4,
+                }}
+              >
+                -{status.behind}
               </span>
             )}
             {status?.has_conflicts && (
-              <span style={{ fontSize: 10, fontFamily: MONO, color: "#f87171" }}>⚡conflicts</span>
+              <span style={{ fontSize: 12, fontFamily: MONO, color: "#f87171" }}>⚡conflicts</span>
             )}
             {ab.commit_count > 0 && !status && (
-              <span style={{ fontSize: 10, fontFamily: MONO, color: C.t3 }}>
+              <span style={{ fontSize: 12, fontFamily: MONO, color: C.t3 }}>
                 {ab.commit_count} commit{ab.commit_count !== 1 ? "s" : ""}
               </span>
             )}
@@ -226,11 +255,11 @@ function AgentBranchRow({
               }}
             >
               <span
-                style={{ fontSize: 10, fontFamily: MONO, color: C.t3, flexShrink: 0, marginTop: 1 }}
+                style={{ fontSize: 12, fontFamily: MONO, color: C.t3, flexShrink: 0, marginTop: 1 }}
               >
                 {c.short_hash}
               </span>
-              <span style={{ fontSize: 11, fontFamily: SANS, color: C.t1, flex: 1 }}>
+              <span style={{ fontSize: 13, fontFamily: SANS, color: C.t1, flex: 1 }}>
                 {c.message}
               </span>
             </div>
@@ -287,7 +316,7 @@ function Btn({
         border,
         background: disabled ? C.bg4 : loading ? C.bg3 : bg,
         color: disabled ? C.t3 : color,
-        fontSize: 10,
+        fontSize: 12,
         fontFamily: SANS,
         cursor: disabled || loading ? "default" : "pointer",
         transition: "all .1s",
@@ -436,12 +465,12 @@ export function BranchesTab({
           {isRemote && !isActive && (
             <span
               style={{
-                fontSize: 9,
+                fontSize: 13,
                 fontFamily: MONO,
                 color: C.t3,
                 background: C.bg4,
                 borderRadius: 4,
-                padding: "1px 5px",
+                padding: "1px 6px",
               }}
             >
               remote
@@ -450,7 +479,7 @@ export function BranchesTab({
           {isActive && (
             <span
               style={{
-                fontSize: 10,
+                fontSize: 12,
                 fontFamily: SANS,
                 color: C.t3,
                 background: C.bg4,
@@ -473,7 +502,7 @@ export function BranchesTab({
                 border: `1px solid ${C.border}`,
                 borderRadius: 6,
                 color: C.t2,
-                fontSize: 10,
+                fontSize: 12,
                 fontFamily: SANS,
                 cursor: "pointer",
               }}
@@ -500,7 +529,7 @@ export function BranchesTab({
                 border: `1px solid ${C.border}`,
                 borderRadius: 6,
                 color: C.t2,
-                fontSize: 10,
+                fontSize: 12,
                 fontFamily: SANS,
                 cursor: "pointer",
               }}
@@ -527,7 +556,7 @@ export function BranchesTab({
                 border: `1px solid ${C.border}`,
                 borderRadius: 6,
                 color: C.t2,
-                fontSize: 10,
+                fontSize: 12,
                 fontFamily: SANS,
                 cursor: "pointer",
               }}
@@ -585,7 +614,7 @@ export function BranchesTab({
                   border: `1px solid ${C.border}`,
                   borderRadius: 7,
                   color: C.t2,
-                  fontSize: 11,
+                  fontSize: 13,
                   fontFamily: SANS,
                   cursor: "pointer",
                 }}
@@ -604,7 +633,7 @@ export function BranchesTab({
                     renameVal.trim() && renameVal.trim() !== renamingId && !renaming ? C.t0 : C.bg4,
                   color:
                     renameVal.trim() && renameVal.trim() !== renamingId && !renaming ? C.bg0 : C.t3,
-                  fontSize: 11,
+                  fontSize: 13,
                   fontFamily: SANS,
                   fontWeight: 600,
                   cursor: "pointer",
@@ -665,7 +694,7 @@ export function BranchesTab({
               background: "transparent",
               border: `1px dashed ${C.border}`,
               color: C.t2,
-              fontSize: 12,
+              fontSize: 14,
               fontFamily: SANS,
               cursor: "pointer",
               transition: "all .15s",
@@ -728,7 +757,7 @@ export function BranchesTab({
                   border: `1px solid ${C.border}`,
                   borderRadius: 8,
                   color: C.t2,
-                  fontSize: 11,
+                  fontSize: 13,
                   fontFamily: SANS,
                   cursor: "pointer",
                 }}
@@ -745,7 +774,7 @@ export function BranchesTab({
                   border: "none",
                   background: newName.trim() && !creating ? C.t0 : C.bg4,
                   color: newName.trim() && !creating ? C.bg0 : C.t3,
-                  fontSize: 11,
+                  fontSize: 13,
                   fontFamily: SANS,
                   fontWeight: 600,
                   cursor: "pointer",

@@ -1,8 +1,8 @@
 // features/memory/MemCard.tsx
 import { useEffect, useRef, useState } from "react";
 import { C, MONO, SANS } from "../../design";
-import { LEVEL_META, agentStyle, effectiveLevel, reltime } from "./memoryTypes";
-import type { Memory } from "./memoryTypes";
+import { LEVEL_META, agentStyle, effectiveLevel, reltime } from "./memorytypes";
+import type { Memory } from "./memorytypes";
 
 const tbtn: React.CSSProperties = {
   background: "none",

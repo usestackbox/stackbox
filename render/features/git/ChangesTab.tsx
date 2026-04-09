@@ -1,652 +1,272 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { C, MONO, SANS } from "../../design";
+import { parseDiff, getDiffLanguage } from "../diff/diffUtils";
+import { UnifiedDiff } from "../diff/UnifiedDiff";
 import type { AgentSpan, LiveDiffFile } from "./types";
+import { agentForFile } from "./useGitPanel";
 
 interface Props {
   files: LiveDiffFile[];
   agentSpans: AgentSpan[];
-  committing: boolean;
-  pushing: boolean;
-  message: string;
-  onMessage: (m: string) => void;
-  onCommit: () => void;
-  onCommitPush: () => void;
-  onPush: () => void;
   onFileClick: (fc: LiveDiffFile) => void;
   onStage?: (path: string) => Promise<void>;
   onUnstage?: (path: string) => Promise<void>;
   onDiscard?: (path: string) => Promise<void>;
 }
 
-function reltime(ms: number) {
-  if (!ms) return "";
-  const d = Date.now() - ms;
-  if (d < 60_000) return "now";
-  if (d < 3600_000) return `${Math.floor(d / 60_000)}m`;
-  if (d < 86400_000) return `${Math.floor(d / 3600_000)}h`;
-  return `${Math.floor(d / 86400_000)}d`;
-}
+const INS    = "rgba(63,255,162,.80)";
+const DEL    = "rgba(255,107,107,.80)";
 
-const INS = "rgba(74,222,128,.60)";
-const DEL = "rgba(248,113,113,.60)";
-
-const TYPE: Record<string, { label: string; labelBg: string; labelColor: string }> = {
-  created: { label: "A", labelBg: "rgba(74,222,128,.12)", labelColor: "rgba(74,222,128,.7)" },
-  modified: { label: "M", labelBg: "rgba(255,255,255,.07)", labelColor: "rgba(255,255,255,.35)" },
-  deleted: { label: "D", labelBg: "rgba(248,113,113,.12)", labelColor: "rgba(248,113,113,.7)" },
+const CHANGE_META: Record<string, { label: string; color: string; bg: string }> = {
+  created:  { label: "A", color: "rgba(63,255,162,.90)",  bg: "rgba(63,255,162,.12)"  },
+  modified: { label: "M", color: "rgba(190,190,210,.55)",  bg: "rgba(255,255,255,.06)" },
+  deleted:  { label: "D", color: "rgba(255,107,107,.90)", bg: "rgba(255,107,107,.12)" },
 };
 
-// ── Full diff view ─────────────────────────────────────────────────────────────
+const AGENT_DOT: Record<string, string> = {
+  claude: "#fbbf24", codex: "#4ade80", gemini: "#60a5fa",
+  cursor: "rgba(255,255,255,.5)", copilot: "#60a5fa", opencode: "#a78bfa",
+};
 
-function DiffView({ fc, onBack }: { fc: LiveDiffFile; onBack: () => void }) {
-  const lines = (fc.diff ?? "").split("\n");
-  const name = fc.path.split(/[/\\]/).pop() ?? fc.path;
-  const dir = fc.path.slice(0, fc.path.length - name.length);
+// ── Stat pills ────────────────────────────────────────────────────────────────
+function StatPill({ ins, del }: { ins: number; del: number }) {
+  const total = ins + del;
+  if (!total) return null;
+  const g = Math.round((ins / total) * 5);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+      {ins > 0 && <span style={{ fontSize: 11, fontFamily: MONO, color: INS, fontWeight: 500 }}>+{ins}</span>}
+      {del > 0 && <span style={{ fontSize: 11, fontFamily: MONO, color: DEL, fontWeight: 500 }}>-{del}</span>}
+      <div style={{ display: "flex", gap: 1.5, flexShrink: 0 }}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} style={{
+            width: 6, height: 6, borderRadius: 1.5,
+            background: i < g ? "rgba(63,255,162,.45)" : "rgba(255,107,107,.35)",
+          }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── File row ──────────────────────────────────────────────────────────────────
+function FileRow({
+  fc, agentSpans, open, onToggle, onDiscard,
+}: {
+  fc: LiveDiffFile;
+  agentSpans: AgentSpan[];
+  open: boolean;
+  onToggle: () => void;
+  onDiscard?: (path: string) => Promise<void>;
+}) {
+  const name     = fc.path.split(/[/\\]/).pop() ?? fc.path;
+  const dir      = fc.path.slice(0, fc.path.length - name.length);
+  const meta     = CHANGE_META[fc.change_type] ?? CHANGE_META.modified;
+  const agent    = agentForFile(agentSpans, fc.modified_at ?? 0);
+  const agentDot = agent ? (AGENT_DOT[agent] ?? C.t3) : null;
+  const lines    = fc.diff?.trim() ? parseDiff(fc.diff) : null;
+  const lang     = getDiffLanguage(fc.path);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg0 }}>
-      {/* top bar */}
+    <div style={{
+      margin: "5px 8px",
+      borderRadius: 10,
+      overflow: "hidden",
+      border: `1px solid ${C.border}`,
+      background: open ? "rgba(255,255,255,.025)" : C.bg1,
+      transition: "background .1s",
+    }}>
+      {/* Header row */}
       <div
+        onClick={onToggle}
         style={{
-          height: 48,
-          display: "flex",
-          alignItems: "center",
-          borderBottom: `1px solid ${C.border}`,
-          flexShrink: 0,
-          gap: 0,
+          display: "flex", alignItems: "center", gap: 6,
+          padding: "7px 10px 7px 12px",
+          cursor: "pointer", userSelect: "none",
+          background: open ? "rgba(255,255,255,.038)" : "transparent",
+          borderLeft: open ? "2px solid rgba(157,143,255,.65)" : "2px solid transparent",
+          transition: "background .08s",
+        }}
+        onMouseEnter={e => {
+          if (!open) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,.022)";
+        }}
+        onMouseLeave={e => {
+          if (!open) (e.currentTarget as HTMLElement).style.background = "transparent";
         }}
       >
+        {/* Chevron */}
+        <svg
+          width="9" height="9" viewBox="0 0 24 24" fill="none"
+          stroke={open ? "rgba(255,255,255,.55)" : C.t3}
+          strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"
+          style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s", flexShrink: 0 }}
+        >
+          <polyline points="9 6 15 12 9 18" />
+        </svg>
+
+        {/* Badge */}
+        <span style={{
+          fontSize: 9, fontFamily: MONO, fontWeight: 700,
+          color: meta.color, background: meta.bg,
+          borderRadius: 3, padding: "1px 4px", flexShrink: 0, letterSpacing: "0.05em",
+        }}>
+          {meta.label}
+        </span>
+
+        {/* Path */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{
+            fontSize: 12, fontFamily: MONO, display: "block",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {dir && <span style={{ color: C.t3 }}>{dir}</span>}
+            <span style={{ color: open ? C.t0 : C.t1 }}>{name}</span>
+          </span>
+        </div>
+
+        {/* Agent dot */}
+        {agentDot && (
+          <div style={{ width: 5, height: 5, borderRadius: "50%", background: agentDot, flexShrink: 0 }} title={agent ?? ""} />
+        )}
+
+        {/* Stats */}
+        <StatPill ins={fc.insertions ?? 0} del={fc.deletions ?? 0} />
+
+        {/* Copy */}
         <button
-          onClick={onBack}
+          onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(fc.path).catch(() => {}); }}
+          title="Copy path"
           style={{
-            height: "100%",
-            padding: "0 16px",
-            background: "none",
-            border: "none",
-            borderRight: `1px solid ${C.border}`,
-            color: C.t2,
-            cursor: "pointer",
-            fontSize: 13,
-            fontFamily: SANS,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            transition: "color .1s",
-            flexShrink: 0,
+            width: 22, height: 22, borderRadius: 4, background: "none", border: "none",
+            color: C.t3, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0, transition: "color .1s, opacity .1s", opacity: open ? 0.5 : 0,
           }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLElement).style.color = C.t0;
+          onMouseEnter={e => {
+            const el = e.currentTarget as HTMLElement;
+            el.style.opacity = "1"; el.style.color = C.t1;
           }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.color = C.t2;
+          onMouseLeave={e => {
+            const el = e.currentTarget as HTMLElement;
+            el.style.opacity = open ? "0.5" : "0"; el.style.color = C.t3;
           }}
         >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="15 18 9 12 15 6" />
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
           </svg>
-          Back
         </button>
 
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "0 14px",
-          }}
-        >
-          {dir && (
-            <span
-              style={{
-                fontSize: 11,
-                fontFamily: MONO,
-                color: C.t3,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                maxWidth: 140,
-              }}
-            >
-              {dir}
-            </span>
-          )}
-          <span
+        {/* Discard */}
+        {onDiscard && (
+          <button
+            onClick={e => { e.stopPropagation(); onDiscard(fc.path); }}
+            title="Discard"
             style={{
-              fontSize: 13,
-              fontFamily: MONO,
-              color: C.t0,
-              fontWeight: 700,
-              whiteSpace: "nowrap",
+              width: 22, height: 22, borderRadius: 4, background: "none", border: "none",
+              color: C.t3, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0, transition: "color .1s",
             }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "rgba(248,113,113,.85)"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.t3; }}
           >
-            {name}
-          </span>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, paddingRight: 14, flexShrink: 0, fontFamily: MONO }}>
-          {fc.insertions > 0 && (
-            <span style={{ fontSize: 13, color: INS, fontWeight: 800 }}>+{fc.insertions}</span>
-          )}
-          {fc.deletions > 0 && (
-            <span style={{ fontSize: 13, color: DEL, fontWeight: 800 }}>-{fc.deletions}</span>
-          )}
-        </div>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14H6L5 6M9 6V4h6v2M10 11v6M14 11v6"/>
+            </svg>
+          </button>
+        )}
       </div>
 
-      {/* diff table */}
-      {!fc.diff?.trim() ? (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: 11, color: C.t3, fontFamily: SANS }}>
-            {fc.change_type === "deleted" ? "File deleted" : "No diff available"}
-          </span>
-        </div>
-      ) : (
-        <div style={{ flex: 1, overflow: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed" }}>
-            <colgroup>
-              <col style={{ width: 40 }} />
-              <col style={{ width: 14 }} />
-              <col />
-            </colgroup>
-            <tbody>
-              {lines.map((line, i) => {
-                const isAdd = line.startsWith("+") && !line.startsWith("+++");
-                const isDel = line.startsWith("-") && !line.startsWith("---");
-                const isHunk = line.startsWith("@@");
-                const isMeta =
-                  !isAdd &&
-                  !isDel &&
-                  !isHunk &&
-                  (line.startsWith("+++") ||
-                    line.startsWith("---") ||
-                    line.startsWith("diff ") ||
-                    line.startsWith("index ") ||
-                    line.startsWith("new file") ||
-                    line.startsWith("deleted file"));
-
-                const rowBg = isAdd
-                  ? "rgba(74,222,128,.055)"
-                  : isDel
-                    ? "rgba(248,113,113,.055)"
-                    : isHunk
-                      ? "rgba(255,255,255,.01)"
-                      : "transparent";
-                const gutBg = isAdd
-                  ? "rgba(74,222,128,.10)"
-                  : isDel
-                    ? "rgba(248,113,113,.10)"
-                    : "rgba(255,255,255,.01)";
-                const sigCol = isAdd
-                  ? "rgba(74,222,128,.45)"
-                  : isDel
-                    ? "rgba(248,113,113,.45)"
-                    : "transparent";
-                const txtCol = isAdd
-                  ? "rgba(160,220,160,.80)"
-                  : isDel
-                    ? "rgba(220,155,155,.80)"
-                    : isHunk
-                      ? "rgba(90,120,155,.55)"
-                      : isMeta
-                        ? "rgba(90,90,90,.5)"
-                        : "rgba(180,180,180,.60)";
-
-                return (
-                  <tr key={i} style={{ background: rowBg }}>
-                    <td
-                      style={{
-                        padding: "0 6px",
-                        textAlign: "right",
-                        fontSize: 9,
-                        fontFamily: MONO,
-                        color: "rgba(255,255,255,.12)",
-                        userSelect: "none",
-                        background: gutBg,
-                        borderRight: `1px solid ${C.border}`,
-                        lineHeight: "18px",
-                        verticalAlign: "top",
-                      }}
-                    >
-                      {!isMeta && !isHunk ? i + 1 : ""}
-                    </td>
-                    <td
-                      style={{
-                        textAlign: "center",
-                        fontSize: 10,
-                        fontFamily: MONO,
-                        color: sigCol,
-                        userSelect: "none",
-                        background: gutBg,
-                        borderRight: `1px solid ${C.border}`,
-                        lineHeight: "18px",
-                        verticalAlign: "top",
-                      }}
-                    >
-                      {isAdd ? "+" : isDel ? "−" : ""}
-                    </td>
-                    <td
-                      style={{
-                        paddingLeft: 10,
-                        paddingRight: 6,
-                        lineHeight: "18px",
-                        verticalAlign: "top",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: txtCol,
-                          fontFamily: MONO,
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-all",
-                          fontStyle: isHunk ? "italic" : "normal",
-                        }}
-                      >
-                        {line || " "}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {/* Inline diff */}
+      {open && (
+        <div style={{ borderTop: `1px solid ${C.border}`, background: C.bg0 }}>
+          {lines && lines.length > 0 ? (
+            <div style={{ maxHeight: 360, overflow: "auto" }}>
+              <UnifiedDiff lines={lines} lang={lang} />
+            </div>
+          ) : (
+            <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 8 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="1.5" strokeLinecap="round">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+                <polyline points="13 2 13 9 20 9"/>
+              </svg>
+              <span style={{ fontSize: 11, color: C.t3, fontFamily: SANS }}>
+                {fc.change_type === "deleted" ? "File deleted." : "No diff available."}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
+export function ChangesTab({ files, agentSpans, onFileClick, onDiscard }: Props) {
+  // Multiple files can be open at once (matching screenshot)
+  const [openPaths, setOpenPaths] = useState<Set<string>>(new Set());
 
-export function ChangesTab({
-  files,
-  agentSpans,
-  committing,
-  pushing,
-  message,
-  onMessage,
-  onCommit,
-  onCommitPush,
-  onPush,
-  onFileClick,
-  onDiscard,
-}: Props) {
-  const busy = committing || pushing;
-  const textRef = useRef<HTMLTextAreaElement>(null);
+  const toggle = useCallback((fc: LiveDiffFile) => {
+    setOpenPaths(prev => {
+      const next = new Set(prev);
+      if (next.has(fc.path)) {
+        next.delete(fc.path);
+      } else {
+        next.add(fc.path);
+        // inline-only: do NOT call onFileClick (prevents double panel open)
+      }
+      return next;
+    });
+  }, []);
 
-  const [diffFile, setDiffFile] = useState<LiveDiffFile | null>(null);
-  const [justCommitted, setJustCommitted] = useState(false);
+  const totalIns = files.reduce((s, f) => s + (f.insertions ?? 0), 0);
+  const totalDel = files.reduce((s, f) => s + (f.deletions ?? 0), 0);
 
-  const openDiff = useCallback(
-    (fc: LiveDiffFile) => {
-      setDiffFile(fc);
-      onFileClick(fc);
-    },
-    [onFileClick]
-  );
-
-  // wrap commit to show push prompt after
-  const handleCommitLocal = useCallback(async () => {
-    await onCommit();
-    setJustCommitted(true);
-  }, [onCommit]);
-
-  const handlePushNow = useCallback(async () => {
-    setJustCommitted(false);
-    await onCommitPush(); // reuse — message is already cleared so it just pushes effectively
-  }, [onCommitPush]);
-
-  const totalIns = files.reduce((s, f) => s + f.insertions, 0);
-  const totalDel = files.reduce((s, f) => s + f.deletions, 0);
-
-  // ── Diff view ──
-  if (diffFile) {
-    return <DiffView fc={diffFile} onBack={() => setDiffFile(null)} />;
+  if (files.length === 0) {
+    return (
+      <div style={{
+        flex: 1, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", gap: 10,
+      }}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+          stroke={C.t3} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+        <span style={{ fontSize: 12, color: C.t3, fontFamily: SANS }}>Working tree clean</span>
+      </div>
+    );
   }
 
-  // ── File list view ──
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      {/* commit box */}
-      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-        <textarea
-          ref={textRef}
-          value={message}
-          onChange={(e) => {
-            onMessage(e.target.value);
-            setJustCommitted(false);
-          }}
-          placeholder="Commit message…"
-          rows={2}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              handleCommitLocal();
-            }
-          }}
-          style={{
-            width: "100%",
-            boxSizing: "border-box",
-            display: "block",
-            background: C.bg0,
-            border: `1px solid ${C.border}`,
-            borderRadius: 7,
-            color: C.t0,
-            fontSize: 13,
-            padding: "8px 10px",
-            resize: "none",
-            outline: "none",
-            fontFamily: SANS,
-            lineHeight: 1.5,
-            transition: "border-color .12s",
-            marginBottom: 8,
-          }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = C.borderMd)}
-          onBlur={(e) => (e.currentTarget.style.borderColor = C.border)}
-        />
-
-        {/* Commit + Push buttons */}
-        {!justCommitted && (
-          <div style={{ display: "flex", gap: 6 }}>
-            <button
-              onClick={handleCommitLocal}
-              disabled={busy || !message.trim()}
-              style={{
-                flex: 1,
-                height: 34,
-                borderRadius: 7,
-                border: `1px solid ${message.trim() && !busy ? C.borderMd : C.border}`,
-                background: message.trim() && !busy ? "rgba(255,255,255,.07)" : "transparent",
-                color: message.trim() && !busy ? C.t0 : C.t3,
-                fontSize: 13,
-                fontFamily: SANS,
-                fontWeight: 500,
-                cursor: message.trim() && !busy ? "pointer" : "default",
-                transition: "all .1s",
-              }}
-            >
-              {committing ? "Committing…" : "Commit"}
-            </button>
-            <button
-              onClick={onPush}
-              disabled={pushing}
-              style={{
-                height: 34,
-                padding: "0 14px",
-                borderRadius: 7,
-                border: `1px solid ${!pushing ? C.border : C.border}`,
-                background: "transparent",
-                color: pushing ? C.t3 : C.t2,
-                fontSize: 13,
-                fontFamily: SANS,
-                fontWeight: 500,
-                cursor: pushing ? "default" : "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                transition: "all .1s",
-                flexShrink: 0,
-              }}
-              onMouseEnter={(e) => {
-                if (!pushing) {
-                  const el = e.currentTarget as HTMLElement;
-                  el.style.borderColor = C.borderMd;
-                  el.style.color = C.t0;
-                  el.style.background = "rgba(255,255,255,.04)";
-                }
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget as HTMLElement;
-                el.style.borderColor = C.border;
-                el.style.color = pushing ? C.t3 : C.t2;
-                el.style.background = "transparent";
-              }}
-            >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-              {pushing ? "Pushing…" : "Push"}
-            </button>
-          </div>
-        )}
-
-        {/* Post-commit: push prompt */}
-        {justCommitted && (
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <span style={{ fontSize: 12, fontFamily: SANS, color: C.t2, flex: 1 }}>
-              Committed. Push now?
-            </span>
-            <button
-              onClick={handlePushNow}
-              disabled={pushing}
-              style={{
-                height: 34,
-                padding: "0 16px",
-                borderRadius: 7,
-                border: `1px solid ${C.borderMd}`,
-                background: "rgba(255,255,255,.07)",
-                color: pushing ? C.t3 : C.t0,
-                fontSize: 13,
-                fontFamily: SANS,
-                fontWeight: 500,
-                cursor: pushing ? "default" : "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                transition: "all .1s",
-              }}
-            >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-              {pushing ? "Pushing…" : "Push"}
-            </button>
-            <button
-              onClick={() => setJustCommitted(false)}
-              style={{
-                height: 34,
-                padding: "0 10px",
-                borderRadius: 7,
-                border: `1px solid ${C.border}`,
-                background: "transparent",
-                color: C.t3,
-                fontSize: 12,
-                fontFamily: SANS,
-                cursor: "pointer",
-              }}
-            >
-              Later
-            </button>
-          </div>
-        )}
+      {/* Summary */}
+      <div style={{
+        padding: "5px 12px", flexShrink: 0,
+        borderBottom: `1px solid ${C.border}`,
+        display: "flex", alignItems: "center", gap: 8,
+      }}>
+        <span style={{
+          fontSize: 10, fontFamily: MONO, color: C.t3, flex: 1,
+          letterSpacing: "0.07em", textTransform: "uppercase",
+        }}>
+          {files.length} {files.length === 1 ? "file" : "files"} changed
+        </span>
+        {totalIns > 0 && <span style={{ fontSize: 11, fontFamily: MONO, color: INS }}>+{totalIns}</span>}
+        {totalDel > 0 && <span style={{ fontSize: 11, fontFamily: MONO, color: DEL }}>-{totalDel}</span>}
       </div>
 
-      {/* file count + totals */}
-      {files.length > 0 && (
-        <div
-          style={{
-            padding: "7px 14px",
-            borderBottom: `1px solid ${C.border}`,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            flexShrink: 0,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 11,
-              fontFamily: MONO,
-              color: C.t3,
-              flex: 1,
-              letterSpacing: "0.04em",
-            }}
-          >
-            {files.length} FILES CHANGED
-          </span>
-          {totalIns > 0 && (
-            <span style={{ fontSize: 12, fontFamily: MONO, color: INS, fontWeight: 400 }}>
-              +{totalIns}
-            </span>
-          )}
-          {totalDel > 0 && (
-            <span style={{ fontSize: 12, fontFamily: MONO, color: DEL, fontWeight: 400 }}>
-              -{totalDel}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* list */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
-        {files.length === 0 && (
-          <div
-            style={{
-              padding: "56px 0",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={C.t3}
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span style={{ fontSize: 13, color: C.t3, fontFamily: SANS }}>Working tree clean</span>
-          </div>
-        )}
-
-        {files.map((fc) => {
-          const name = fc.path.split(/[/\\]/).pop() ?? fc.path;
-          const dir = fc.path.slice(0, fc.path.length - name.length);
-          const t = TYPE[fc.change_type] ?? TYPE.modified;
-
-          return (
-            <div
-              key={fc.path}
-              onClick={() => openDiff(fc)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "9px 14px",
-                cursor: "pointer",
-                borderBottom: `1px solid ${C.border}`,
-                transition: "background .08s",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.background = C.bg2;
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.background = "transparent";
-              }}
-            >
-              {/* type label pill */}
-              <span
-                style={{
-                  fontSize: 10,
-                  fontFamily: MONO,
-                  fontWeight: 500,
-                  color: t.labelColor,
-                  background: t.labelBg,
-                  borderRadius: 4,
-                  padding: "1px 5px",
-                  flexShrink: 0,
-                  letterSpacing: "0.02em",
-                }}
-              >
-                {t.label}
-              </span>
-
-              {/* name + dir */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontFamily: MONO,
-                    color: C.t0,
-                    fontWeight: 300,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {name}
-                </div>
-                {dir && (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontFamily: MONO,
-                      color: C.t3,
-                      fontWeight: 300,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      marginTop: 1,
-                    }}
-                  >
-                    {dir}
-                  </div>
-                )}
-              </div>
-
-              {/* ins/del */}
-              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                {fc.insertions > 0 && (
-                  <span style={{ fontSize: 12, fontFamily: MONO, color: INS, fontWeight: 400 }}>
-                    +{fc.insertions}
-                  </span>
-                )}
-                {fc.deletions > 0 && (
-                  <span style={{ fontSize: 12, fontFamily: MONO, color: DEL, fontWeight: 400 }}>
-                    -{fc.deletions}
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
+      {/* File list */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "4px 0 6px" }}>
+        {files.map(fc => (
+          <FileRow
+            key={fc.path}
+            fc={fc}
+            agentSpans={agentSpans}
+            open={openPaths.has(fc.path)}
+            onToggle={() => toggle(fc)}
+            onDiscard={onDiscard}
+          />
+        ))}
       </div>
     </div>
   );

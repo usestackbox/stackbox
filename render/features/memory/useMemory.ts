@@ -2,8 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 // features/memory/useMemory.ts
 import { useCallback, useEffect, useState } from "react";
-import type { MemTab, Memory } from "./memoryTypes";
-import { effectiveLevel } from "./memoryTypes";
+import type { MemTab, Memory } from "./memorytypes";
+import { effectiveLevel } from "./memorytypes";
 
 export function useMemory(workspaceId: string) {
   const [memories, setMemories] = useState<Memory[]>([]);

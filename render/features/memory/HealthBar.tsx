@@ -1,7 +1,7 @@
 // features/memory/HealthBar.tsx
 import { C, MONO } from "../../design";
-import { effectiveLevel } from "./memoryTypes";
-import type { Memory } from "./memoryTypes";
+import { effectiveLevel } from "./memorytypes";
+import type { Memory } from "./memorytypes";
 
 interface Props {
   memories: Memory[];

@@ -5,6 +5,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { C, SANS, MONO } from "../../design";
 import { PanelHeader, ResizeHandle } from "../../ui";
 import type { Runbox } from "../../types";
+import type { DiffTab } from "../../types";
+import { DiffViewer } from "../diff/DiffViewer";
 import { TabBar }         from "./TabBar";
 import { TabContextMenu } from "./TabContextMenu";
 import {
@@ -109,8 +111,15 @@ export function WorkspaceView({
 
   const [_sidePanel, _setSidePanel] = useState<SidePanel>(null);
   const sidePanel    = sidePanelProp !== undefined ? sidePanelProp : _sidePanel;
+  // Keep the last opened panel type in a ref so we can leave it mounted (display:none)
+  // when the panel is closed — this preserves openPaths diff state inside ChangesTab.
+  const lastSidePanelRef = useRef<SidePanel>(null);
+  if (sidePanel) lastSidePanelRef.current = sidePanel;
+  const mountedPanel: SidePanel = sidePanel ?? lastSidePanelRef.current;
   const [filesView,  setFilesView]  = useState<FilesView>("list");
-  const [activeDiff, setActiveDiff] = useState<any | null>(null);
+  // BUG FIX: activeDiff is now a proper DiffTab so the DiffViewer overlay
+  // can render independently of whether the side panel is open or closed.
+  const [activeDiff, setActiveDiff] = useState<DiffTab | null>(null);
   const [panelWidth, setPanelWidth] = useState(450);
   const [tabCtx,     setTabCtx]     = useState<{ x: number; y: number; win: WinState; idx: number } | null>(null);
   const [pendingBrowserUrl, setPendingBrowserUrl] = useState<Record<string, string | null>>({});
@@ -203,14 +212,114 @@ export function WorkspaceView({
         return;
       }
 
+      if (type === "sb:close-terminal" && aid) {
+        // Close the currently active (focused) terminal pane
+        setWins(prev => {
+          const next = prev.filter(w => w.id !== aid);
+          if (next.length === 0) { labelCount.current = 0; return next; }
+          const area = areaRef.current;
+          if (area) {
+            const aw = area.offsetWidth, ah = area.offsetHeight;
+            const visible = next.filter(w => !w.minimized && !w.maximized);
+            const tiles   = tileWindows(visible.length, aw, ah);
+            let ti = 0;
+            return next.map(w => w.minimized || w.maximized ? w : { ...w, ...tiles[ti++] });
+          }
+          return next;
+        });
+        // Focus the most-recently-used remaining pane
+        setActiveWinId(prev => {
+          if (prev !== aid) return prev;
+          const remaining = winsRef.current.filter(w => !w.minimized && w.id !== aid);
+          if (remaining.length > 0) {
+            const next = remaining[remaining.length - 1];
+            setTimeout(() => setActiveWinId(next.id), 0);
+          }
+          return null;
+        });
+        return;
+      }
+
       if (type === "sb:new-terminal-workspace") {
         onNewWorkspaceRef.current?.();
+        return;
+      }
+
+      // ── Spatial pane-focus navigation ──────────────────────────────────
+      // sb:focus-pane-up / down / left / right
+      // Finds the closest non-minimized pane in the requested direction
+      // relative to the active pane, using center-point geometry.
+      if (
+        type === "sb:focus-pane-up" ||
+        type === "sb:focus-pane-down" ||
+        type === "sb:focus-pane-left" ||
+        type === "sb:focus-pane-right"
+      ) {
+        const dir =
+          type === "sb:focus-pane-up"    ? "up"    :
+          type === "sb:focus-pane-down"  ? "down"  :
+          type === "sb:focus-pane-left"  ? "left"  : "right";
+
+        const currentWins = winsRef.current.filter(w => !w.minimized);
+        const src = currentWins.find(w => w.id === aid);
+        if (!src) return;
+
+        const sx = src.x + src.w / 2;
+        const sy = src.y + src.h / 2;
+
+        let best: WinState | null = null;
+        let bestDist = Infinity;
+
+        for (const w of currentWins) {
+          if (w.id === aid) continue;
+          const cx = w.x + w.w / 2;
+          const cy = w.y + w.h / 2;
+
+          const inDir =
+            dir === "up"    ? cy < sy :
+            dir === "down"  ? cy > sy :
+            dir === "left"  ? cx < sx : cx > sx;
+
+          if (!inDir) continue;
+
+          // Primary: distance along the desired axis
+          const primary =
+            dir === "up"    ? sy - cy :
+            dir === "down"  ? cy - sy :
+            dir === "left"  ? sx - cx : cx - sx;
+
+          // Secondary: perpendicular offset — favour direct neighbours
+          const perp =
+            dir === "up" || dir === "down"
+              ? Math.abs(cx - sx)
+              : Math.abs(cy - sy);
+
+          const dist = primary + perp * 0.25;
+          if (dist < bestDist) { bestDist = dist; best = w; }
+        }
+
+        if (best) {
+          setActiveWinId(best.id);
+          setWins(prev => prev.map(w => w.id === best!.id ? { ...w, zIndex: nextZ() } : w));
+        }
+        return;
+      }
+
+      // ── Minimize / maximize active pane ────────────────────────────────
+      if (type === "sb:minimize-terminal" && aid) {
+        minimizeWin(aid);
+        return;
+      }
+
+      if (type === "sb:maximize-terminal" && aid) {
+        maximizeWin(aid);
         return;
       }
     };
 
     const events = [
       "sb:new-terminal",
+      "sb:close-terminal",
       "sb:split-down",
       "sb:split-right",
       "sb:move-terminal-left",
@@ -218,6 +327,12 @@ export function WorkspaceView({
       "sb:next-terminal",
       "sb:prev-terminal",
       "sb:new-terminal-workspace",
+      "sb:focus-pane-up",
+      "sb:focus-pane-down",
+      "sb:focus-pane-left",
+      "sb:focus-pane-right",
+      "sb:minimize-terminal",
+      "sb:maximize-terminal",
     ];
     events.forEach(ev => window.addEventListener(ev, handle));
     return () => events.forEach(ev => window.removeEventListener(ev, handle));
@@ -270,12 +385,29 @@ export function WorkspaceView({
     return () => ro.disconnect();
   }, []);
 
-  // Wire onOpenDiff
+  // ── BUG FIX: Wire onOpenDiff to open a persistent DiffViewer overlay ──
+  // Previously this was a no-op, meaning the diff was only visible while the
+  // side panel was open. Now clicking a file in ChangesTab sets activeDiff,
+  // which renders a full-height DiffViewer overlay in the content area — so
+  // the diff stays visible even after the changes panel is closed.
   useEffect(() => {
-    onOpenDiff({ open: (fc: any) => {
-      setActiveDiff({ id: `diff-${fc.path}`, path: fc.path, diff: fc.diff, changeType: fc.change_type, insertions: fc.insertions, deletions: fc.deletions, openedAt: Date.now() });
-      _setSidePanel("files"); setFilesView("diff");
-    }});
+    onOpenDiff({
+      open: (fc: any) => {
+        if (!fc) { setActiveDiff(null); return; }
+        const tab: DiffTab = {
+          id:          fc.path,
+          path:        fc.path,
+          diff:        fc.diff ?? "",
+          changeType:  fc.change_type ?? "modified",
+          insertions:  fc.insertions ?? 0,
+          deletions:   fc.deletions ?? 0,
+          openedAt:    Date.now(),
+        };
+        setActiveDiff(tab);
+        // Clear active file tab so DiffViewer has full focus
+        setActiveFileId(null);
+      },
+    });
   }, [onOpenDiff]);
 
   const focusWin = useCallback((id: string) => {
@@ -288,7 +420,6 @@ export function WorkspaceView({
     setWins(prev => {
       const visible = prev.filter(w => !w.minimized);
       if (visible.length < 2) return prev;
-      const cur = visible.findIndex(w => w.id === winsRef.current.find(x => x.id)?.id);
       setActiveWinId(aid => {
         const idx = visible.findIndex(w => w.id === aid);
         const next = visible[(idx + dir + visible.length) % visible.length];
@@ -313,6 +444,17 @@ export function WorkspaceView({
   }, []);
 
   useEffect(() => { onOpenFile?.({ open: openFileWin }); }, [onOpenFile, openFileWin]);
+
+  // ── BUG FIX: Repaint xterm.js when DiffViewer overlay is dismissed ────────
+  // When activeDiff goes null the terminal canvas transitions from opacity:0
+  // back to opacity:1. xterm.js canvas elements don't repaint automatically
+  // on a CSS opacity change, so we dispatch a resize event to force a flush.
+  useEffect(() => {
+    if (!activeDiff) {
+      const t = setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
+      return () => clearTimeout(t);
+    }
+  }, [activeDiff]);
 
   const closeFileTab = useCallback((id: string) => {
     setFileTabs(prev => {
@@ -568,6 +710,9 @@ export function WorkspaceView({
 
   const showSplitRight  = fileSplitRight && !!activeFileTab;
   const showFileOverlay = !fileSplitRight && !!activeFileTab;
+  // DiffViewer overlay takes priority over terminal canvas when active,
+  // but file editor overlay takes priority over diff viewer.
+  const showDiffOverlay = !!activeDiff && !showFileOverlay && !showSplitRight;
 
   // ── Helper: renders the terminal canvas area ─────────────────────────────
   const renderTerminalCanvas = (isActivePredicate: (winId: string) => boolean) => (
@@ -575,8 +720,8 @@ export function WorkspaceView({
       flex: 1, minWidth: 0, minHeight: 0,
       position: "relative", background: C.bg0,
       overflow: "hidden", height: "100%",
-      opacity: showFileOverlay ? 0 : 1,
-      pointerEvents: showFileOverlay ? "none" : "auto",
+      opacity: showFileOverlay || showDiffOverlay ? 0 : 1,
+      pointerEvents: showFileOverlay || showDiffOverlay ? "none" : "auto",
       transition: "opacity .1s",
     }}>
       {wins.length === 0 && (
@@ -609,7 +754,7 @@ export function WorkspaceView({
                 onActivate:  () => { setActiveFileId(null); focusWin(win.id); },
                 onCwdChange: cwd => {
                   setWins(prev => prev.map(w => w.id === win.id ? { ...w, cwd } : w));
-                  if (activeWinId === win.id) onCwdChange(cwd);
+                  onCwdChange(cwd);
                 },
                 onSessionChange: sid => onSessionChange?.(sid),
                 onClose:     () => closeWin(win.id),
@@ -724,32 +869,47 @@ export function WorkspaceView({
           ) : (
             /* ── Original layout ── */
             <>
-              {/* File editor overlay (fullscreen) */}
+              {/* File editor overlay (fullscreen) — highest priority */}
               {showFileOverlay && activeFileTab && (
-                <div style={{ position: "absolute", inset: 0, zIndex: 10, background: C.bg0, display: "flex", flexDirection: "column" }}>
+                <div style={{ position: "absolute", inset: 0, zIndex: 12, background: C.bg0, display: "flex", flexDirection: "column" }}>
                   {renderFileEditor(activeFileTab, () => closeFileTab(activeFileTab.id))}
                 </div>
               )}
 
+              {/* ── BUG FIX: DiffViewer overlay ──────────────────────────────
+                  Shown when a file is clicked in ChangesTab and activeDiff is
+                  set. Lives independently of the side panel so it stays visible
+                  even after the changes panel is closed.
+                  Clicking "Files" in DiffViewer's header clears activeDiff.     */}
+              {showDiffOverlay && activeDiff && (
+                <div style={{
+                  position: "absolute", inset: 0, zIndex: 11,
+                  display: "flex", flexDirection: "column",
+                  background: C.bg0,
+                  animation: "slideIn .12s ease",
+                }}>
+                  <DiffViewer
+                    tab={activeDiff}
+                    onClose={() => setActiveDiff(null)}
+                  />
+                </div>
+              )}
+
               {/* Window canvas — terminals */}
-              {renderTerminalCanvas(id => activeWinId === id && !showFileOverlay)}
+              {renderTerminalCanvas(id => activeWinId === id && !showFileOverlay && !showDiffOverlay)}
             </>
           )}
         </div>
 
-        {/* ── FIX 2 (cont): Side panel as flex sibling, not overlay ──
-            This renders BESIDE the terminal area. The terminal area's flex:1
-            naturally shrinks to make room. No z-index, no position:absolute,
-            no overlap with the terminal. ResizeHandle lets the user drag the
-            divider between them. */}
-        {sidePanel && (
+        {/* Side panel — kept mounted so diff open-state survives close/reopen.
+            Uses display:flex/none instead of conditional rendering. */}
+        {mountedPanel && (
           <div style={{
             width: panelWidth,
             flexShrink: 0,
-            display: "flex",
+            display: sidePanel ? "flex" : "none",
             alignItems: "stretch",
             borderLeft: `1px solid ${C.border}`,
-            animation: "slideIn .14s ease-out",
           }}>
             <ResizeHandle onResize={w => setPanelWidth(w)} />
             <div style={{
@@ -758,7 +918,14 @@ export function WorkspaceView({
               background: C.bg1, overflow: "hidden",
               boxShadow: "-4px 0 24px rgba(0,0,0,.35)",
             }}>
-              {renderSidePanel(sidePanel, runbox, branch, () => onSidePanelToggle?.(sidePanel as any))}
+              {renderSidePanel(mountedPanel, runbox, branch, () => {
+                // ── BUG FIX: clear DiffViewer overlay on panel close ──────────
+                // Without this, activeDiff stays set → showDiffOverlay stays
+                // true → terminal canvas stays opacity:0 → looks fully blank
+                // after the side panel slides away.
+                setActiveDiff(null);
+                onSidePanelToggle?.(mountedPanel as any);
+              })}
             </div>
           </div>
         )}

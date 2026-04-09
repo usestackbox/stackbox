@@ -9,7 +9,7 @@ interface Props {
   lastUsed?: number;
   onSelect: () => void;
   onRename: (name: string) => void;
-  onEditDir?: (cwd: string) => void;
+
   onContextMenu: (e: React.MouseEvent) => void;
   /** Externally trigger editing from the context menu */
   externalEdit?: "name" | "dir" | null;
@@ -34,50 +34,40 @@ export function WorkspaceItem({
   lastUsed,
   onSelect,
   onRename,
-  onEditDir,
   onContextMenu,
   externalEdit,
   onExternalEditDone,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [nameVal, setNameVal] = useState(workspace.name);
-  const [dirVal, setDirVal] = useState(workspace.cwd);
   const [hovered, setHovered] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
-  const dirRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setNameVal(workspace.name);
   }, [workspace.name]);
-  useEffect(() => {
-    setDirVal(workspace.cwd);
-  }, [workspace.cwd]);
 
   // Focus the right input once editing panel opens
   useEffect(() => {
     if (!editing) return;
-    const target = externalEdit === "dir" ? dirRef : nameRef;
-    setTimeout(() => target.current?.select(), 20);
+    setTimeout(() => nameRef.current?.select(), 20);
   }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // React to external trigger from context menu
   useEffect(() => {
     if (!externalEdit) return;
     setNameVal(workspace.name);
-    setDirVal(workspace.cwd);
     setEditing(true);
   }, [externalEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = () => {
     if (nameVal.trim() && nameVal.trim() !== workspace.name) onRename(nameVal.trim());
-    if (dirVal.trim() && dirVal.trim() !== workspace.cwd) onEditDir?.(dirVal.trim());
     setEditing(false);
     onExternalEditDone?.();
   };
 
   const cancel = () => {
     setNameVal(workspace.name);
-    setDirVal(workspace.cwd);
     setEditing(false);
     onExternalEditDone?.();
   };
@@ -153,46 +143,6 @@ export function WorkspaceItem({
             />
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span
-              style={{
-                fontSize: 9,
-                fontFamily: MONO,
-                color: C.t3,
-                letterSpacing: ".06em",
-                textTransform: "uppercase" as const,
-              }}
-            >
-              Directory
-            </span>
-            <input
-              ref={dirRef}
-              value={dirVal}
-              onChange={(e) => setDirVal(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  submit();
-                }
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  cancel();
-                }
-              }}
-              style={{
-                background: C.bg0,
-                border: `1px solid ${C.border}`,
-                borderRadius: C.r1,
-                color: C.t1,
-                fontSize: FS.sm,
-                padding: "4px 7px",
-                outline: "none",
-                fontFamily: MONO,
-                width: "100%",
-                boxSizing: "border-box" as const,
-              }}
-            />
-          </div>
 
           <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
             <button

@@ -27,6 +27,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
         .manage(state::AppState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             db: db::open().expect("failed to open stackbox db"),

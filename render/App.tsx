@@ -6,6 +6,7 @@ import { C, SANS } from "./design";
 import { useRunboxes }     from "./features/runbox";
 import { useBranchPoller } from "./hooks";
 import { useKeyboard }     from "./hooks/useKeyboard";
+import { useTheme } from "./hooks/useTheme";
 
 import { WorkspaceView }  from "./features/workspace";
 import type { WinState, FileTab, SidePanel as WsSidePanel } from "./features/workspace/types";
@@ -23,13 +24,16 @@ import type { LiveDiffFile } from "./features/git/types";
 import { SettingsModal }  from "./features/settings";
 import { useUpdater }     from "./features/updater";
 
+
+
 const SIDEBAR_TOTAL = 260;
 
 type SidePanel = "git" | "memory" | "files" | null;
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const { runboxes, activeId, safeId, setActiveId, create, rename, remove } = useRunboxes();
+  useTheme();
+  const { runboxes, activeId, safeId, setActiveId, create, rename, changeCwd, remove } = useRunboxes();
 
   const [cwdMap,      setCwdMap]      = useState<Record<string, string>>({});
   const [worktreeMap, setWorktreeMap] = useState<Record<string, string>>({});
@@ -115,17 +119,34 @@ export default function App() {
 
   // ── Global keyboard shortcuts ─────────────────────────────────────────────
   useKeyboard({
-    "mod+n": () => setShowModal(true),
-    "mod+f": () => {
+    // mod+n = New Workspace, mod+t = New Terminal
+    "mod+n":       () => setShowModal(true),
+    "mod+shift+n": () => setShowModal(true),
+    "mod+,":       () => { setSettingsTab(undefined); setShowSettings(true); },
+    "mod+f":       () => {
       if (!fileTreeOpen) handleFileTreeToggle();
       window.dispatchEvent(new CustomEvent("sb:file-search-focus"));
     },
-    "mod+t":                () => window.dispatchEvent(new CustomEvent("sb:new-terminal")),
-    "mod+w":                () => window.dispatchEvent(new CustomEvent("sb:close-terminal")),
-    "mod+shift+ArrowRight": () => window.dispatchEvent(new CustomEvent("sb:next-terminal")),
-    "mod+shift+ArrowLeft":  () => window.dispatchEvent(new CustomEvent("sb:prev-terminal")),
-    "mod+ArrowDown":        () => window.dispatchEvent(new CustomEvent("sb:split-down")),
-    "mod+ArrowRight":       () => window.dispatchEvent(new CustomEvent("sb:split-right")),
+    "mod+t": () => window.dispatchEvent(new CustomEvent("sb:new-terminal")),
+    "mod+w": () => window.dispatchEvent(new CustomEvent("sb:close-terminal")),
+
+    // ── Split: mod+d (right), mod+s (down) ────────────────────────────────
+    "mod+d": () => window.dispatchEvent(new CustomEvent("sb:split-right")),
+    "mod+s": () => window.dispatchEvent(new CustomEvent("sb:split-down")),
+
+    // ── Spatial pane focus: mod+arrows ────────────────────────────────────
+    "mod+arrowup":    () => window.dispatchEvent(new CustomEvent("sb:focus-pane-up")),
+    "mod+arrowdown":  () => window.dispatchEvent(new CustomEvent("sb:focus-pane-down")),
+    "mod+arrowleft":  () => window.dispatchEvent(new CustomEvent("sb:focus-pane-left")),
+    "mod+arrowright": () => window.dispatchEvent(new CustomEvent("sb:focus-pane-right")),
+
+    // ── Pane minimize / maximize ───────────────────────────────────────────
+    "mod+m":       () => window.dispatchEvent(new CustomEvent("sb:minimize-terminal")),
+    "mod+enter":   () => window.dispatchEvent(new CustomEvent("sb:maximize-terminal")),
+
+    // ── Terminal tab cycling ───────────────────────────────────────────────
+    "tab+shift+arrowright": () => window.dispatchEvent(new CustomEvent("sb:next-terminal")),
+    "tab+shift+arrowleft":  () => window.dispatchEvent(new CustomEvent("sb:prev-terminal")),
   });
 
   // ── Render props ──────────────────────────────────────────────────────────
@@ -199,6 +220,7 @@ export default function App() {
         onSelect={setActiveId}
         onCreate={create}
         onRename={rename}
+        onChangeCwd={changeCwd}
         onDelete={remove}
         fileTreeOpen={fileTreeOpen}
         onFileTreeToggle={handleFileTreeToggle}
@@ -368,7 +390,7 @@ function AppEmptyState({ hasRunboxes, contentMarginLeft, onNew }: {
           onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(255,255,255,.04)"; el.style.borderColor = "rgba(255,255,255,.16)"; el.style.color = "rgba(255,255,255,.50)"; }}
           onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = "transparent"; el.style.borderColor = "rgba(255,255,255,.08)"; el.style.color = "rgba(255,255,255,.22)"; }}
         >
-          + New Runbox
+          + New Workspace
         </button>
       </div>
     </div>

@@ -14,12 +14,13 @@
 //   • Split down / split right / close / maximize / minimize titlebar controls
 //   • NOTE: localStorage snapshot storage removed — no double-prompt, clean restarts
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import React, { useEffect, useRef, useCallback, useState } from "react";
 import { Terminal }        from "@xterm/xterm";
 import { FitAddon }        from "@xterm/addon-fit";
 import { WebLinksAddon }   from "@xterm/addon-web-links";
 import { WebglAddon }      from "@xterm/addon-webgl";
 import { ClipboardAddon }  from "@xterm/addon-clipboard";
+import { SearchAddon }     from "@xterm/addon-search";
 import { invoke }          from "@tauri-apps/api/core";
 import { listen }          from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -49,8 +50,8 @@ async function clipRead(): Promise<string> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme
 // ─────────────────────────────────────────────────────────────────────────────
-const BG     = "#12161A";
-const BG_ACT = "#1C2228";
+const BG     = "#1E222B";
+const BG_ACT = "#242938";
 
 const TERM_THEME = {
   background:          BG,
@@ -166,11 +167,11 @@ const TERM_CSS = `
 }
 /* Kill any viewport border or outline */
 .rp-xterm .xterm-viewport { border:none!important; outline:none!important; box-shadow:none!important; }
-/* ── Kill every source of the top gap ────────────────────────────────────── */
-.rp-xterm .xterm           { padding:0!important; }
+/* Remove outer xterm container padding — DO NOT touch .xterm-rows or .xterm-screen:
+   xterm uses those elements for cursor row tracking; forcing margin/padding on them
+   desyncs the internal cursor position and makes typed input appear at the wrong position. */
+.rp-xterm .xterm           { padding:0!important; margin:0!important; }
 .rp-xterm .xterm-viewport  { padding:0!important; margin:0!important; }
-.rp-xterm .xterm-screen    { padding:0!important; margin:0!important; }
-.rp-xterm .xterm-rows      { padding:0!important; margin:0!important; }
 .rp-xterm canvas           { display:block; }
 
 /* slim scrollbar */
@@ -265,19 +266,19 @@ const TERM_CSS = `
 // ─────────────────────────────────────────────────────────────────────────────
 // OSC 7  (CWD tracking)
 // ─────────────────────────────────────────────────────────────────────────────
-function parseOsc7(data: string): string | null {
-  const m = data.match(/\x1b]7;file:\/\/[^/]*([^\x07\x1b]+)(?:\x07|\x1b\\)/);
-  if (!m) return null;
+
+// Normalise a raw OSC-7 path string (already URL-decoded) into the ~/… form
+// we store internally.
+function normaliseOsc7Path(raw: string): string | null {
   try {
-    let p = decodeURIComponent(m[1]);
-    // Windows: OSC 7 emits "file:///C:/Users/foo" → decoded path is "/C:/Users/foo".
-    // Strip the spurious leading "/" so we store "C:/Users/foo" natively.
-    // This ensures pty_spawn always receives a valid Windows path.
-    p = p.replace(/^\/([A-Za-z]:[\/])/, "$1");
+    let p = decodeURIComponent(raw);
+    // Windows: strip spurious leading "/" before drive letter
+    p = p.replace(/^\/([A-Za-z]:[/\\])/, "$1");
+    // Collapse home dir to "~/"
     const homePatterns = [
-      /^[A-Za-z]:\/Users\/[^/]+(\/$|$)/,   // Windows: C:/Users/<n>
-      /^\/Users\/[^/]+(\/$|$)/,             // macOS
-      /^\/home\/[^/]+(\/$|$)/,              // Linux
+      /^[A-Za-z]:\/Users\/[^/]+(\/|$)/,   // Windows C:/Users/<n>
+      /^\/Users\/[^/]+(\/|$)/,              // macOS
+      /^\/home\/[^/]+(\/|$)/,               // Linux
     ];
     for (const re of homePatterns) {
       const hm = p.match(re);
@@ -287,6 +288,30 @@ function parseOsc7(data: string): string | null {
     if (p !== "~/") p = p.replace(/\/$/, "");
     return p || "~/";
   } catch { return null; }
+}
+
+// Extract ALL OSC-7 paths from a (possibly partial) data string.
+// Returns { paths, remainder } where remainder is any trailing incomplete
+// OSC sequence that should be prepended to the next chunk.
+function extractOsc7(data: string): { paths: string[]; remainder: string } {
+  const paths: string[] = [];
+
+  // Fully terminated sequences — BEL (\x07) or ST (\x1b\)
+  const fullRe = /\x1b]7;file:\/\/[^\x07\x1b/]*([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+  let m: RegExpExecArray | null;
+  // eslint-disable-next-line no-cond-assign
+  while ((m = fullRe.exec(data)) !== null) {
+    const p = normaliseOsc7Path(m[1]);
+    if (p) paths.push(p);
+  }
+
+  // Check for a dangling (unterminated) OSC-7 start — save for next chunk
+  // Only keep the LAST potential start to avoid growing the buffer unboundedly.
+  const partialRe = /\x1b]7;file:\/\/[^\x07\x1b]*$/;
+  const partial = data.match(partialRe);
+  const remainder = partial ? partial[0] : "";
+
+  return { paths, remainder };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -436,11 +461,56 @@ export function TerminalPane({
   };
   const inputLineRef      = useRef("");
   const activeAgentRef    = useRef<string | null>(null);
+  // Buffer for incomplete OSC sequences split across PTY data chunks
+  const oscBufRef         = useRef("");
 
   // ── State ────────────────────────────────────────────────────────────────
   const [liveCwd,   setLiveCwd]   = useState(runboxCwd);
   const liveCwdRef = useRef(liveCwd);
   useEffect(() => { liveCwdRef.current = liveCwd; }, [liveCwd]);
+
+  // When the workspace root directory changes (user picks a new folder),
+  // move every existing terminal shell into the new directory and update
+  // the header + tab label so everything stays in sync.
+  useEffect(() => {
+    if (!runboxCwd || runboxCwd === liveCwdRef.current) return;
+    // Only act after the PTY has actually spawned — skip the initial mount.
+    if (!hasSpawnedOnce.current) return;
+    invoke("pty_write", { sessionId: sidRef.current, data: `cd ${JSON.stringify(runboxCwd)}\r` }).catch(() => {});
+    setLiveCwd(runboxCwd);
+    onCwdRef.current?.(runboxCwd);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runboxCwd]);
+
+  // When a directory is renamed from the file panel, update any terminal whose
+  // CWD is inside that directory and send a `cd` to keep the shell in sync.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { from, to } = (e as CustomEvent<{ from: string; to: string }>).detail;
+      const cur = liveCwdRef.current;
+      if (!cur || !from || !to) return;
+
+      const norm   = (p: string) => p.replace(/\\/g, "/").replace(/\/$/, "");
+      const nCur   = norm(cur);
+      const nFrom  = norm(from);
+      const nTo    = norm(to);
+
+      if (nCur !== nFrom && !nCur.startsWith(nFrom + "/")) return;
+
+      // Build the new path (handles both exact match and sub-directory)
+      const newCwd = nTo + nCur.slice(nFrom.length);
+
+      // Move the shell into the renamed directory
+      invoke("pty_write", { sessionId: sidRef.current, data: `cd ${JSON.stringify(newCwd)}\r` }).catch(() => {});
+
+      setLiveCwd(newCwd);
+      onCwdRef.current?.(newCwd);
+    };
+
+    window.addEventListener("sb:dir-renamed", handler);
+    return () => window.removeEventListener("sb:dir-renamed", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; hasSel: boolean } | null>(null);
 
@@ -533,7 +603,6 @@ export function TerminalPane({
       fontWeightBold:        "bold",
       fontFamily:            "ui-monospace,'SF Mono',Menlo,Monaco,'Cascadia Mono',Consolas,'Courier New',monospace",
       theme:                 TERM_THEME,
-      convertEol:            true,
       scrollback:            50_000,
       allowTransparency:     true,
       macOptionIsMeta:       true,
@@ -546,13 +615,11 @@ export function TerminalPane({
     term.loadAddon(new WebLinksAddon());
     term.loadAddon(new ClipboardAddon());
 
-    (Function('return import("@xterm/addon-search")')() as Promise<any>)
-      .then(({ SearchAddon }: any) => {
-        searchAddon = new SearchAddon();
-        term.loadAddon(searchAddon);
-        searchRef.current = searchAddon;
-      })
-      .catch(() => {});
+    try {
+      searchAddon = new SearchAddon();
+      term.loadAddon(searchAddon);
+      searchRef.current = searchAddon;
+    } catch { /* SearchAddon unavailable */ }
 
     // Open the terminal into the DOM *first* — renderer addons (WebGL, Canvas)
     // require the terminal to be mounted before they can initialize their canvas.
@@ -629,7 +696,7 @@ export function TerminalPane({
       return true;
     });
 
-    // Forward keypresses to PTY + agent detection
+    // Forward keypresses to PTY + agent detection + CWD polling
     term.onData(data => {
       invoke("pty_write", { sessionId: sidRef.current, data }).catch(() => {});
 
@@ -640,6 +707,42 @@ export function TerminalPane({
           activeAgentRef.current = agentKey;
           onAgentDetectedRef.current?.(agentKey);
         }
+
+        // Poll backend for real CWD after every Enter — catches Windows shells
+        // (PowerShell, cmd.exe) that don't auto-emit OSC 7 on directory change.
+        // Two passes: 350 ms (fast commands) + 1200 ms (slow commands / agents).
+        const pollCwd = () => {
+          invoke<string>("pty_get_cwd", { sessionId: sidRef.current })
+            .then(cwd => {
+              if (!cwd || gone.current) return;
+              // Normalise and apply the same home-folder collapsing as OSC 7
+              let p = cwd.replace(/\\/g, "/");
+              p = p.replace(/^\/([A-Za-z]:[/])/, "$1");
+              const homePatterns = [
+                /^[A-Za-z]:\/Users\/[^/]+(\/|$)/,
+                /^\/Users\/[^/]+(\/|$)/,
+                /^\/home\/[^/]+(\/|$)/,
+              ];
+              for (const re of homePatterns) {
+                const hm = p.match(re);
+                if (hm) { p = "~/" + p.slice(hm[0].length); break; }
+              }
+              p = p.replace(/^~\/\//, "~/");
+              if (p !== "~/") p = p.replace(/\/$/, "");
+              const display = /[/\\]stackbox-wt-[^/\\]*$/.test(p)
+                ? (runboxCwdRef.current ?? p)
+                : p;
+              if (display && display !== liveCwdRef.current) {
+                setLiveCwd(display);
+                onCwdRef.current?.(display);
+              }
+            })
+            .catch(() => {}); // backend may not support yet — silent fallback to OSC 7
+        };
+
+        setTimeout(pollCwd, 350);
+        setTimeout(pollCwd, 1200);
+
         inputLineRef.current = "";
       } else if (data === "\x7f" || data === "\b") {
         inputLineRef.current = inputLineRef.current.slice(0, -1);
@@ -650,29 +753,11 @@ export function TerminalPane({
       }
     });
 
-    const applyMargin = () => {
-      const root = termElRef.current;
-      if (!root) return;
-      const xterm    = root.querySelector(".xterm")          as HTMLElement | null;
-      const viewport = root.querySelector(".xterm-viewport") as HTMLElement | null;
-      const rows     = root.querySelector(".xterm-rows")     as HTMLElement | null;
-      // Do NOT touch .xterm-screen position/top — xterm owns that for scroll tracking.
-      // Forcing top:0 on it desyncs xterm's internal cursor row → input jumps to top.
-      if (xterm)    { xterm.style.padding    = "0"; xterm.style.margin = "0"; }
-      if (viewport) { viewport.style.padding = "0"; viewport.style.margin = "0"; }
-      if (rows)     { rows.style.padding     = "0"; rows.style.margin = "0"; }
-    };
-
     // Full repaint after fit — clears ghost/stale pixels from old size (WebGL).
-    // Also scrolls viewport to bottom so the prompt stays visible after resize.
     const safeRefresh = () => {
       const t = termRef.current;
       if (!t || t.rows <= 0) return;
-      try {
-        const vp = termElRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
-        if (vp) vp.scrollTop = vp.scrollHeight;
-        t.refresh(0, t.rows - 1);
-      } catch { /* ignore */ }
+      try { t.refresh(0, t.rows - 1); } catch { /* ignore */ }
     };
 
     let unlisteners: Array<UnlistenFn | null> = [];
@@ -724,8 +809,14 @@ export function TerminalPane({
           if (gone.current) return;
           term.write(payload);
 
-          const cwd = parseOsc7(payload);
-          if (cwd) {
+          // Prepend any leftover partial OSC sequence from the previous chunk
+          // so split sequences spanning two chunks are assembled before parsing.
+          const combined = oscBufRef.current + payload;
+          const { paths, remainder } = extractOsc7(combined);
+          oscBufRef.current = remainder.length < 4096 ? remainder : "";
+
+          if (paths.length > 0) {
+            const cwd = paths[paths.length - 1];
             const display = /[/\\]stackbox-wt-[^/\\]*$/.test(cwd)
               ? (runboxCwdRef.current ?? cwd)
               : cwd;
@@ -743,7 +834,7 @@ export function TerminalPane({
             const lines = stripped.split(/\r?\n/);
             for (const line of lines) {
               const t = line.trimEnd();
-              if (/[\$%>#]\s*$/.test(t) && t.length < 120) {
+              if (/[$%>#]\s*$/.test(t) && t.length < 120) {
                 activeAgentRef.current = null;
                 onAgentDetectedRef.current?.(null);
                 break;
@@ -792,7 +883,6 @@ export function TerminalPane({
 
     const doSpawn = () => {
       spawned.current = true;
-      applyMargin();
       term.focus();
       listenersReady.then(() => {
         if (!gone.current) {

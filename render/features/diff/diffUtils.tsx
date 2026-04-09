@@ -1,5 +1,6 @@
-// features/diff/diffUtils.ts
+// features/diff/diffUtils.tsx
 import hljs from "highlight.js/lib/core";
+import React from "react";
 
 // VS Code Dark+ theme string
 export const HLJS_DIFF_THEME = `
@@ -94,13 +95,14 @@ export function charDiff(oldStr: string, newStr: string): { old: React.ReactNode
   return {
     old: (
       <span>
-        <span style={{ color: "#c0b0b0" }}>{oldStr.slice(0, start)}</span>oldStr.slice(start, oe + 1) && <span style={{ background: "rgba(200,60,60,.40)", color: "#e09090", borderRadius: 2, padding: "0 1px" }>oldStr.slice(start, oe + 1)</span>}
+        <span style={{ color: "#c0b0b0" }}>{oldStr.slice(0, start)}</span>
+        {oldStr.slice(start, oe + 1) && <span style={{ background: "rgba(200,60,60,.40)", color: "#e09090", borderRadius: 2, padding: "0 1px" }}>{oldStr.slice(start, oe + 1)}</span>}
         <span style={{ color: "#c0b0b0" }}>{oldStr.slice(oe + 1)}</span>
       </span>
     ),
     new: (
       <span>
-        <span style={color: "#c8c8c8" }>{newStr.slice(0, start)}</span>
+        <span style={{ color: "#c8c8c8" }}>{newStr.slice(0, start)}</span>
         {newStr.slice(start, ne + 1) && <span style={{ background: "rgba(40,140,70,.28)", color: "#aaddaa", borderRadius: 2, padding: "0 1px" }}>{newStr.slice(start, ne + 1)}</span>}
         <span style={{ color: "#c8c8c8" }}>{newStr.slice(ne + 1)}</span>
       </span>

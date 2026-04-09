@@ -6,10 +6,9 @@
 //   git_pr_view  — fetch live PR details (title, state, checks, reviews)
 //   git_pr_merge — squash-merge + delete remote branch
 
-import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { C, MONO, SANS } from "../../design";
-import type { PrCheck, PrDetails, PrReview, WorktreeRecord } from "./types";
+import type { WorktreeRecord } from "./types";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -86,7 +85,7 @@ function Pill({ label, color }: { label: string; color: string }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function GithubTab({
+export function GithubTab({
   record,
   branch,
   workspaceCwd,
@@ -94,64 +93,7 @@ export default function GithubTab({
   onCreatePr,
   onRefreshRecord,
 }: GithubTabProps) {
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [prDetails, setPrDetails] = useState<PrDetails | null>(null);
-  const [prLoading, setPrLoading] = useState(false);
-  const [merging, setMerging] = useState(false);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
-
-  const showNotice = (text: string, ok = true) => {
-    setNotice({ text, ok });
-    setTimeout(() => setNotice(null), 4000);
-  };
-
-  const loadPrDetails = useCallback(() => {
-    if (!record?.pr_url) return;
-    setPrLoading(true);
-    invoke<PrDetails>("git_pr_view", { cwd: workspaceCwd })
-      .then((d) => setPrDetails(d))
-      .catch(() => setPrDetails(null))
-      .finally(() => setPrLoading(false));
-  }, [workspaceCwd, record?.pr_url]);
-
-  useEffect(() => {
-    loadPrDetails();
-  }, [loadPrDetails]);
-
-  const handleCreate = async () => {
-    if (!title.trim()) {
-      showNotice("Title is required.", false);
-      return;
-    }
-    try {
-      await onCreatePr(title.trim(), body.trim());
-      setTitle("");
-      setBody("");
-      showNotice("PR created!", true);
-      onRefreshRecord();
-      setTimeout(loadPrDetails, 1500);
-    } catch (e: any) {
-      showNotice(String(e), false);
-    }
-  };
-
-  const handleMerge = async () => {
-    if (!confirm("Squash-merge this PR and delete the remote branch?")) return;
-    setMerging(true);
-    try {
-      await invoke<string>("git_pr_merge", { cwd: workspaceCwd });
-      showNotice("Merged! Branch deleted.", true);
-      onRefreshRecord();
-      setPrDetails(null);
-    } catch (e: any) {
-      showNotice(String(e), false);
-    } finally {
-      setMerging(false);
-    }
-  };
-
-  const noPr = !record?.pr_url;
 
   return (
     <div
@@ -180,187 +122,22 @@ export default function GithubTab({
         </div>
       )}
 
-      {/* ── Create PR form ─────────────────────────────────────────────── */}
-      {noPr && (
-        <section>
-          <p style={{ margin: "0 0 10px", fontSize: 11, color: C.t3, fontFamily: SANS }}>
-            No pull request open for <span style={{ color: C.t1, fontFamily: MONO }}>{branch}</span>
-            .
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="PR title"
-              style={inputStyle}
-            />
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Description (optional)"
-              rows={4}
-              style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }}
-            />
-            <button
-              onClick={handleCreate}
-              disabled={busy || !title.trim()}
-              style={primaryBtnStyle(busy || !title.trim())}
-            >
-              {busy ? "Creating…" : "Create Pull Request"}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* ── Existing PR details ─────────────────────────────────────────── */}
-      {!noPr && (
-        <>
-          <section style={cardStyle}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <span
-                style={{ fontSize: 12, fontWeight: 600, color: C.t0, fontFamily: SANS, flex: 1 }}
-              >
-                {prDetails?.title ?? record.pr_url}
-              </span>
-              {prDetails && (
-                <Pill
-                  label={stateLabel(prDetails.state)}
-                  color={
-                    prDetails.state === "OPEN"
-                      ? C.green
-                      : prDetails.state === "MERGED"
-                        ? C.blue
-                        : C.red
-                  }
-                />
-              )}
-            </div>
-
-            {prDetails && (
-              <>
-                <Row label="Author" value={prDetails.author} />
-                <Row
-                  label="Mergeable"
-                  value={prDetails.mergeable}
-                  color={
-                    prDetails.mergeable === "MERGEABLE"
-                      ? C.green
-                      : prDetails.mergeable === "CONFLICTING"
-                        ? C.red
-                        : C.t3
-                  }
-                />
-                <div style={{ marginTop: 8 }}>
-                  <a
-                    href={prDetails.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      fontSize: 11,
-                      color: C.blue,
-                      fontFamily: MONO,
-                      textDecoration: "none",
-                    }}
-                  >
-                    {prDetails.url}
-                  </a>
-                </div>
-                {prDetails.body?.trim() && (
-                  <pre
-                    style={{
-                      marginTop: 10,
-                      padding: "8px 10px",
-                      background: C.bg0,
-                      borderRadius: 8,
-                      fontSize: 11,
-                      fontFamily: MONO,
-                      color: C.t2,
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      maxHeight: 120,
-                      overflowY: "auto",
-                    }}
-                  >
-                    {prDetails.body}
-                  </pre>
-                )}
-              </>
-            )}
-
-            {prLoading && !prDetails && (
-              <span style={{ fontSize: 11, color: C.t3, fontFamily: SANS }}>
-                Loading PR details…
-              </span>
-            )}
-          </section>
-
-          {prDetails && prDetails.reviews.length > 0 && (
-            <section style={cardStyle}>
-              <h4 style={sectionHeading}>Reviews</h4>
-              {prDetails.reviews.map((r: PrReview, i: number) => (
-                <div
-                  key={i}
-                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}
-                >
-                  <span style={{ fontSize: 11, color: C.t2, fontFamily: MONO, flex: 1 }}>
-                    {r.author}
-                  </span>
-                  <Pill label={stateLabel(r.state)} color={reviewColor(r.state)} />
-                </div>
-              ))}
-            </section>
-          )}
-
-          {prDetails && prDetails.checks.length > 0 && (
-            <section style={cardStyle}>
-              <h4 style={sectionHeading}>Checks</h4>
-              {prDetails.checks.map((c: PrCheck, i: number) => (
-                <div
-                  key={i}
-                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}
-                >
-                  <span
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: "50%",
-                      flexShrink: 0,
-                      background: statusColor(c.conclusion || c.status),
-                    }}
-                  />
-                  <span style={{ fontSize: 11, color: C.t2, fontFamily: MONO, flex: 1 }}>
-                    {c.name}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: statusColor(c.conclusion || c.status),
-                      fontFamily: MONO,
-                    }}
-                  >
-                    {c.conclusion || c.status}
-                  </span>
-                </div>
-              ))}
-            </section>
-          )}
-
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={loadPrDetails} disabled={prLoading} style={ghostBtnStyle(prLoading)}>
-              {prLoading ? "Refreshing…" : "↻ Refresh"}
-            </button>
-            {prDetails?.state === "OPEN" && prDetails.mergeable === "MERGEABLE" && (
-              <button
-                onClick={handleMerge}
-                disabled={merging || busy}
-                style={primaryBtnStyle(merging || busy)}
-              >
-                {merging ? "Merging…" : "Squash & Merge"}
-              </button>
-            )}
-          </div>
-        </>
-      )}
+      <div
+        style={{
+          padding: "14px 16px",
+          background: C.bg2,
+          border: `1px solid ${C.border}`,
+          borderRadius: 10,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        <span style={{ fontSize: 12, color: C.t2, fontFamily: SANS, fontWeight: 600 }}>
+          Branch
+        </span>
+        <span style={{ fontSize: 13, color: C.t0, fontFamily: MONO }}>{branch}</span>
+      </div>
     </div>
   );
 }

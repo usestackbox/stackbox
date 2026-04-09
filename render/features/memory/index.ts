@@ -6,4 +6,4 @@ export { ContextPreview } from "./ContextPreview";
 export { AddLockedForm } from "./AddLockedForm";
 export { AddPreferredForm } from "./AddPreferredForm";
 export { useMemory, useMemoryTab } from "./useMemory";
-export type { Memory, MemTab } from "./memoryTypes";
+export type { Memory, MemTab } from "./memorytypes";
