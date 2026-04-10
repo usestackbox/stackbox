@@ -1,74 +1,64 @@
 // render/features/onboarding/StepWelcome.tsx
-import { C, SANS } from "../../design";
-
-const FEATURES = [
-  { icon: "⬡", label: "Runboxes", desc: "Isolated workspaces with full PTY terminals" },
-  { icon: "⎇", label: "Git", desc: "Worktree-per-runbox with visual diff & PRs" },
-  { icon: "◈", label: "AI agents", desc: "Long-term memory and context-aware agents" },
-  { icon: "⬡", label: "MCP", desc: "Connect any Model Context Protocol server" },
-];
+import { C, FS, SANS } from "../../design";
 
 export function StepWelcome({ onNext }: { onNext: () => void }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-      {/* Heading */}
-      <div style={{ textAlign: "center" }}>
-        <span
-          className="stackbox-brand"
-          style={{ fontSize: 32, color: C.t1, display: "block", marginBottom: 10 }}
-        >
-          Welcome to Stackbox
-        </span>
-        <p style={{ margin: 0, fontSize: 14, color: C.t3, lineHeight: 1.6 }}>
-          A workspace for developers who build with AI. Let's get you set up in about a minute.
-        </p>
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Logo + title */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, textAlign: "center" }}>
+        <div style={{
+          width: 52, height: 52,
+          background: C.bg4,
+          border: `1px solid ${C.borderMd}`,
+          borderRadius: C.r3,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+            <rect x="2" y="3" width="8" height="6" rx="1.5" stroke={C.violet} strokeWidth="1.5" />
+            <rect x="14" y="3" width="8" height="6" rx="1.5" stroke={C.blue} strokeWidth="1.5" />
+            <rect x="7" y="15" width="10" height="6" rx="1.5" stroke={C.violet} strokeWidth="1.5" />
+            <line x1="6" y1="9" x2="6" y2="12" stroke={C.t3} strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="18" y1="9" x2="18" y2="12" stroke={C.t3} strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="6" y1="12" x2="18" y2="12" stroke={C.t3} strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="12" y1="12" x2="12" y2="15" stroke={C.t3} strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </div>
 
-      {/* Feature list */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {FEATURES.map((f) => (
-          <div
-            key={f.label}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-              padding: "10px 14px",
-              background: C.bg2,
-              border: `1px solid ${C.borderSubtle}`,
-              borderRadius: 8,
-            }}
-          >
-            <span style={{ fontSize: 18, width: 24, textAlign: "center", flexShrink: 0 }}>
-              {f.icon}
-            </span>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.t1, marginBottom: 2 }}>
-                {f.label}
-              </div>
-              <div style={{ fontSize: 12, color: C.t3 }}>{f.desc}</div>
-            </div>
+        <div>
+          <div style={{ fontSize: FS.xxl, fontWeight: 700, color: C.t0, fontFamily: SANS, letterSpacing: "-.02em", lineHeight: 1.15 }}>
+            Welcome to Calus
           </div>
-        ))}
+          <p style={{ margin: "8px 0 0", fontSize: FS.sm, color: C.t3, lineHeight: 1.6, fontFamily: SANS }}>
+            The control plane for AI coding agents.
+          </p>
+        </div>
       </div>
 
-      <button onClick={onNext} style={primaryBtn}>
+      <button
+        onClick={onNext}
+        style={{
+          width: "100%", padding: "10px 0",
+          background: C.violetBg,
+          color: C.violet,
+          border: `1px solid ${C.violetBorder}`,
+          borderRadius: C.r2,
+          fontSize: FS.sm, fontWeight: 600, fontFamily: SANS,
+          cursor: "pointer", letterSpacing: "-.01em",
+          transition: "background .15s, color .15s",
+        }}
+        onMouseEnter={e => {
+          const el = e.currentTarget as HTMLElement;
+          el.style.background = C.violetBorder;
+          el.style.color = C.violetBright;
+        }}
+        onMouseLeave={e => {
+          const el = e.currentTarget as HTMLElement;
+          el.style.background = C.violetBg;
+          el.style.color = C.violet;
+        }}
+      >
         Get started →
       </button>
     </div>
   );
 }
-
-const primaryBtn: React.CSSProperties = {
-  padding: "10px 0",
-  width: "100%",
-  background: "#2563eb",
-  color: "#fff",
-  border: "none",
-  borderRadius: 8,
-  fontSize: 14,
-  fontWeight: 600,
-  fontFamily: SANS,
-  cursor: "pointer",
-  transition: "background .15s",
-};

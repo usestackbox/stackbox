@@ -30,7 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(state::AppState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
-            db: db::open().expect("failed to open stackbox db"),
+            db: db::open().expect("failed to open calus db"),
             watchers: Arc::new(Mutex::new(HashMap::new())),
             watched_runboxes: Arc::new(Mutex::new(HashSet::new())),
             reinject_debounce: Arc::new(Mutex::new(HashMap::new())),
@@ -84,7 +84,7 @@ pub fn run() {
         })
         .register_uri_scheme_protocol("proxy", |_ctx, req| proxy::handle(req))
         .invoke_handler(tauri::generate_handler![
-            // ── PTY ─────────────────────────
+            // ── PTY ──────────────────────────────────────────────────────────
             commands::pty::pty_spawn,
             commands::pty::pty_write,
             commands::pty::pty_resize,
@@ -142,13 +142,14 @@ pub fn run() {
             git::commands::git_delete_branch,
             git::commands::git_branch_log,
             git::commands::git_branch_status,
+            git::commands::git_diff_branch,        // ← NEW: per-file diff for frontend
             git::commands::git_log_for_runbox,
             git::commands::git_diff_for_commit,
             git::commands::git_diff_live,
             git::commands::git_worktree_create,
             git::commands::git_worktree_remove,
             git::commands::git_worktree_list,
-            git::commands::git_worktree_list_stackbox,
+            git::commands::git_worktree_list_calus, // ← renamed from git_worktree_list_stackbox
             git::commands::git_current_branch,
             git::commands::git_stage_and_commit,
             git::commands::git_watch_start,

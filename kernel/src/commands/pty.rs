@@ -2,7 +2,8 @@
 use crate::{
     agent::kind::AgentKind,
     db::sessions::session_end,
-    git::repo::{ensure_git_repo, ensure_worktree, has_git, remove_worktree_only},
+    git::repo::{ensure_git_repo, has_git, remove_worktree_only},
+    mcp::config::{mcp_config_path, write_mcp_config},
     pty::{self, expand_cwd, kill_tmux_session, tmux_session_alive},
     state::AppState,
     workspace::persistent,
@@ -39,99 +40,47 @@ pub async fn pty_spawn(
     let agent_kind_str = kind.kind_str();
 
     // ── 3. Init persistent project dir in appdata ─────────────────────────────
-    // Idempotent — safe to call on every spawn, even shell sessions.
     if let Err(e) = persistent::init_project(&real_cwd) {
         eprintln!("[pty_spawn] persistent::init_project: {e}");
     }
 
-    // ── 4. Ensure git repo + eagerly create the agent's worktree ─────────────
-    let _worktree_path: Option<String> = if has_git(&real_cwd, &runbox_id) {
+    // ── 4. Ensure git repo (no worktree creation — agent does that itself) ────
+    if has_git(&real_cwd, &runbox_id) {
         let _ = ensure_git_repo(&real_cwd, &runbox_id);
-        let wt = ensure_worktree(&real_cwd, &runbox_id, &session_id, agent_kind_str);
+    }
 
-        if let Some(ref wt) = wt {
-            let _ = crate::db::runboxes::runbox_set_worktree(
-                &state.db,
-                &runbox_id,
-                agent_kind_str,
-                Some(wt.path.as_str()),
-                Some(wt.branch.as_str()),
-            );
-            let wt_path = &wt.path;
-            let wt_name = persistent::wt_name_from_path(wt_path);
-            eprintln!("[pty_spawn] worktree ready for {runbox_id}/{agent_kind_str}: {wt_path}");
+    // ── 5. Write shared MCP config to ~/stackbox/mcp/mcp.json ────────────────
+    // Never written to the user's repo. Passed to agent via --mcp-config flag.
+    if let Err(e) = write_mcp_config(&session_id) {
+        eprintln!("[pty_spawn] write_mcp_config: {e}");
+    }
 
-            // ── Register agent in ~/.stackbox/projects/<repo>/WORKSPACE.md ──
-            if let Err(e) =
-                persistent::register_agent(&real_cwd, &wt_name, &wt.branch, agent_kind_str, wt_path)
-            {
-                eprintln!("[pty_spawn] persistent::register_agent: {e}");
-            }
+    // ── 6. Write per-agent context file to appdata ────────────────────────────
+    // No worktree path yet — agent will create the worktree itself.
+    if let Err(e) = crate::agent::context::inject(
+        &real_cwd,
+        &runbox_id,
+        &session_id,
+        agent_kind_str,
+        None,
+    ) {
+        eprintln!("[pty_spawn] context::inject: {e}");
+    }
 
-            // ── Register session for injector lookup ─────────────────────────
-            persistent::register_session(&runbox_id, &real_cwd, &wt_name);
-
-            // ── Write MCP configs ────────────────────────────────────────────
-            let _ = crate::mcp::config::write_mcp_config(
-                &real_cwd,
-                Some(wt_path.as_str()),
-                &runbox_id,
-                &session_id,
-            );
-
-            // ── Write appdata context file (replaces .stackbox/agents/ in repo)
-            if let Err(e) = crate::agent::context::inject(
-                &real_cwd,
-                &runbox_id,
-                &session_id,
-                agent_kind_str,
-                Some(wt_path.as_str()),
-            ) {
-                eprintln!("[pty_spawn] context::inject: {e}");
-            }
-        } else {
-            // No worktree (shadow repo) — write MCP + context without worktree
-            let _ = crate::mcp::config::write_mcp_config(&real_cwd, None, &runbox_id, &session_id);
-            if let Err(e) = crate::agent::context::inject(
-                &real_cwd,
-                &runbox_id,
-                &session_id,
-                agent_kind_str,
-                None,
-            ) {
-                eprintln!("[pty_spawn] context::inject (no wt): {e}");
-            }
-        }
-        wt.map(|w| w.path)
-    } else {
-        // No git — still write MCP + context
-        let _ = crate::mcp::config::write_mcp_config(&real_cwd, None, &runbox_id, &session_id);
-        if let Err(e) =
-            crate::agent::context::inject(&real_cwd, &runbox_id, &session_id, agent_kind_str, None)
-        {
-            eprintln!("[pty_spawn] context::inject (no git): {e}");
-        }
-        None
-    };
-
-    // ── 5. Set STACKBOX_CONTEXT env var ──────────────────────────────────────
-    // Points the agent to its appdata context file so it can read it.
-    // This env var is set in the PTY environment, not in the user's shell rc.
     let context_file = crate::agent::context::context_file_path(&real_cwd, &runbox_id);
-    // The env var is passed through to pty::spawn via workspace_name for now;
-    // in a full impl this would go into pty::SpawnOptions.
-    // We log it so agents can find it via `env | grep STACKBOX`.
     eprintln!("[pty_spawn] STACKBOX_CONTEXT={}", context_file.display());
 
-    // ── 6. Terminal always starts in the user's real workspace folder ─────────
-    let effective_cwd = real_cwd.clone();
+    // ── 7. Inject --mcp-config into agent command ─────────────────────────────
+    // All agents get the same shared config file.
+    let effective_cmd = agent_cmd.map(|cmd| append_mcp_config_flag(&cmd, kind));
 
+    // ── 8. Terminal always starts in the user's real workspace folder ─────────
     pty::spawn(
         app,
         session_id,
         runbox_id,
-        effective_cwd,
-        agent_cmd,
+        real_cwd,
+        effective_cmd,
         workspace_name,
         cols,
         rows,
@@ -139,6 +88,21 @@ pub async fn pty_spawn(
         &state,
     )
     .await
+}
+
+/// Append --mcp-config <path> to the agent command.
+/// Each agent CLI uses the same flag name; Gemini uses an env var instead.
+fn append_mcp_config_flag(cmd: &str, kind: AgentKind) -> String {
+    let config_path = mcp_config_path();
+    let path_str = config_path.to_string_lossy();
+
+    match kind {
+        // Gemini CLI reads GEMINI_MCP_CONFIG env var — handled at PTY env level,
+        // not injected into the command string here.
+        AgentKind::GeminiCli => cmd.to_string(),
+        // All other agents support --mcp-config <path>
+        _ => format!("{cmd} --mcp-config {path_str}"),
+    }
 }
 
 #[tauri::command]
@@ -200,12 +164,15 @@ pub fn pty_write(
 
     if let Some((rb, cwd, kind, wt_path)) = inject {
         let sid = session_id.clone();
-        let _db = state.db.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) =
                 crate::agent::context::inject(&cwd, &rb, &sid, kind.kind_str(), wt_path.as_deref())
             {
                 eprintln!("[pty_write] re-inject: {e}");
+            }
+            // Re-write MCP config with current session_id (in case it changed)
+            if let Err(e) = write_mcp_config(&sid) {
+                eprintln!("[pty_write] write_mcp_config: {e}");
             }
         });
     }
@@ -283,15 +250,14 @@ pub fn pty_kill(session_id: String, state: tauri::State<'_, AppState>) -> Result
         let _ = s._child.kill();
         let _ = session_end(&state.db, &session_id, Some(1), None);
 
-        // ── Mark agent as "paused" in persistent memory ───────────────────────
-        // Worktree stays alive — agent will resume on next open.
+        persistent::deregister_session(&s.runbox_id);
+
+        // Only clean up worktree if agent actually created one.
+        // wt_path is None at spawn — it gets set later when agent reports via MCP.
         if let Some(ref wt) = s.worktree_path {
             let wt_name = persistent::wt_name_from_path(wt);
             persistent::update_agent_status(&s.cwd, &wt_name, "paused");
-            persistent::deregister_session(&s.runbox_id);
-
-            // Keep the worktree alive (branch persists, agent resumes next time).
-            // Only remove the filesystem checkout — branch stays in git.
+            // Keep worktree on disk — agent resumes from it on next open.
             remove_worktree_only(wt);
         }
     }
@@ -324,27 +290,21 @@ pub async fn get_session_worktree_path(
 
 // ── Persistent memory commands ────────────────────────────────────────────────
 
-/// Get all agents (active + done) for a workspace.
-/// Frontend uses this to display the agent/worktree list.
 #[tauri::command]
 pub fn get_workspace_agents(cwd: String) -> Vec<persistent::AgentEntry> {
     persistent::list_all_agents(&cwd)
 }
 
-/// Get only in-progress/paused agents with existing worktrees.
-/// Used for auto-resume on workspace open.
 #[tauri::command]
 pub fn get_resumable_agents(cwd: String) -> Vec<persistent::AgentEntry> {
     persistent::agents_to_resume(&cwd)
 }
 
-/// Read STATE.md for a specific agent. Returns None if not found.
 #[tauri::command]
 pub fn get_agent_state(cwd: String, wt_name: String) -> Option<String> {
     persistent::read_agent_state(&cwd, &wt_name)
 }
 
-/// Mark an agent as done (e.g., after PR merged).
 #[tauri::command]
 pub fn mark_agent_done(cwd: String, wt_name: String) -> Result<(), String> {
     persistent::update_agent_status(&cwd, &wt_name, "done");

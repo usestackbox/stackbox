@@ -23,6 +23,7 @@ import type { LiveDiffFile } from "./features/git/types";
 
 import { SettingsModal }  from "./features/settings";
 import { useUpdater }     from "./features/updater";
+import { OnboardingFlow } from "./features/onboarding";
 
 
 
@@ -345,6 +346,8 @@ export default function App() {
           initialTab={settingsTab as any}
         />
       )}
+
+      <OnboardingFlow runboxes={runboxes} onCreate={create} />
     </div>
   );
 }
@@ -371,7 +374,7 @@ function AppEmptyState({ hasRunboxes, contentMarginLeft, onNew }: {
           <line x1="12" y1="17" x2="12" y2="21"/>
         </svg>
         <span className="stackbox-brand" style={{ fontSize: 22, color: "rgba(255,255,255,.07)" }}>
-          Stackbox
+          Calus
         </span>
       </div>
 

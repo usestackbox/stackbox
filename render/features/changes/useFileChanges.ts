@@ -18,7 +18,7 @@ export interface AgentSpan {
 }
 
 const BLOCKED_NAMES = new Set([
-  ".stackbox-context.md",
+  ".calus-context.md",
   "claude.md",
   "agents.md",
   "gemini.md",

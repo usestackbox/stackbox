@@ -6,29 +6,27 @@ import { GeneralTab }    from "./GeneralTab";
 import { UpdatesTab }    from "./UpdatesTab";
 import { AppearanceTab } from "./AppearanceTab";
 import { KeybindsTab }   from "./KeybindsTab";
-import { MCPTab }        from "./MCPTab";
 import { AboutTab }      from "./AboutTab";
 import type { UseUpdaterReturn } from "../updater";
 
-type Tab = "general" | "appearance" | "updates" | "keybinds" | "mcp" | "about";
+type Tab = "general" | "appearance" | "updates" | "keybinds" | "about";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general",    label: "General"    },
   { id: "appearance", label: "Appearance" },
   { id: "updates",    label: "Updates"    },
   { id: "keybinds",   label: "Keybinds"  },
-  { id: "mcp",        label: "MCP"        },
   { id: "about",      label: "About"      },
 ];
 
 interface Props {
   onClose:     () => void;
   updater:     UseUpdaterReturn;
-  initialTab?: Tab;           // ← NEW: allows App.tsx to open a specific tab
+  initialTab?: Tab;
 }
 
 export function SettingsModal({ onClose, updater, initialTab }: Props) {
-  const [tab, setTab] = useState<Tab>(initialTab ?? "general");  // ← use prop
+  const [tab, setTab] = useState<Tab>(initialTab ?? "general");
   const settingsCtx   = useSettings();
 
   return (
@@ -44,7 +42,7 @@ export function SettingsModal({ onClose, updater, initialTab }: Props) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: 700, height: 520,
+          width: 680, height: 500,
           background: C.bg3,
           border: `1px solid ${C.border}`,
           borderRadius: 12,
@@ -56,9 +54,9 @@ export function SettingsModal({ onClose, updater, initialTab }: Props) {
       >
         {/* Sidebar */}
         <nav style={{
-          width: 160,
+          width: 150,
           background: C.bg2,
-          borderRight: `1px solid ${C.border}`,   // ← was C.borderSubtle (doesn't exist)
+          borderRight: `1px solid ${C.border}`,
           padding: "12px 0",
           flexShrink: 0,
         }}>
@@ -80,13 +78,15 @@ export function SettingsModal({ onClose, updater, initialTab }: Props) {
                 background:  tab === t.id ? C.bg4 : "transparent",
                 border:      "none",
                 borderLeft:  tab === t.id ? `2px solid ${C.blue}` : "2px solid transparent",
-                color:       tab === t.id ? C.t1 : C.t2,
+                color:       tab === t.id ? C.t0 : C.t2,
                 fontSize:    13,
                 fontFamily:  SANS,
                 textAlign:   "left",
                 cursor:      "pointer",
-                transition:  "background .1s",
+                transition:  "background .1s, color .1s",
               }}
+              onMouseEnter={e => { if (tab !== t.id) (e.currentTarget as HTMLElement).style.background = "rgba(109,235,176,.06)"; }}
+              onMouseLeave={e => { if (tab !== t.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
             >
               {t.label}
             </button>
@@ -109,7 +109,6 @@ export function SettingsModal({ onClose, updater, initialTab }: Props) {
           {tab === "appearance" && <AppearanceTab ctx={settingsCtx} />}
           {tab === "updates"    && <UpdatesTab    ctx={settingsCtx} updater={updater} />}
           {tab === "keybinds"   && <KeybindsTab />}
-          {tab === "mcp"        && <MCPTab        ctx={settingsCtx} />}
           {tab === "about"      && <AboutTab />}
         </div>
       </div>

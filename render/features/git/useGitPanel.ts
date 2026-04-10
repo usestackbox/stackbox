@@ -1,22 +1,23 @@
+// render/features/git/useGitPanel.ts
+
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AgentBranch,
   AgentSpan,
+  BranchDiffFile,
   BranchStatus,
   ConflictFile,
-  GitCommit as GC,
   GitCommit,
   LiveDiffFile,
   WorktreeEntry,
-  WorktreeRecord,
 } from "./types";
 
 // ── File filter ───────────────────────────────────────────────────────────────
 
 const BLOCKED_NAMES = new Set([
-  ".stackbox-context.md",
+  ".calus-context.md",
   "claude.md",
   "agents.md",
   "gemini.md",
@@ -25,8 +26,6 @@ const BLOCKED_NAMES = new Set([
   "mcp.json",
   "skill.md",
   "payload.json",
-  "rewrite_app.py",
-  "update_app.py",
 ]);
 const BLOCKED_PREFIXES = [
   ".claude/",
@@ -45,7 +44,9 @@ function shouldBlock(path: string) {
   const norm = path.replace(/\\/g, "/").toLowerCase();
   const name = norm.split("/").pop() ?? "";
   return (
-    BLOCKED_NAMES.has(name) || isTempFile(name) || BLOCKED_PREFIXES.some((p) => norm.startsWith(p))
+    BLOCKED_NAMES.has(name) ||
+    isTempFile(name) ||
+    BLOCKED_PREFIXES.some((p) => norm.startsWith(p))
   );
 }
 
@@ -62,25 +63,11 @@ function shortAgent(name: string) {
   return name.split(" ")[0].toLowerCase();
 }
 
-/**
- * Returns the agent whose session most closely precedes (or overlaps by 5s)
- * the file's modifiedAt timestamp.
- *
- * Fix: spans are sorted ascending by startedAt. We stop as soon as a span
- * starts MORE THAN 5s after modifiedAt — so match holds the last span that
- * started ≤ modifiedAt+5s, which is the closest qualifying agent, not the
- * most-recently-spawned one overall.
- */
 export function agentForFile(spans: AgentSpan[], modifiedAt: number): string | null {
   if (!spans.length || !modifiedAt) return null;
   let match: AgentSpan | null = null;
   for (const s of spans) {
-    if (s.startedAt <= modifiedAt + 5000) {
-      match = s;
-    } else {
-      // Spans are sorted ascending; once we overshoot, all later ones will too.
-      break;
-    }
+    if (s.startedAt <= modifiedAt + 5000) match = s;
   }
   return match ? shortAgent(match.agent) : null;
 }
@@ -96,24 +83,13 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
   const [allBranches, setAllBranches] = useState<string[]>([]);
   const [agentSpans, setAgentSpans] = useState<AgentSpan[]>([]);
   const [agentBranches, setAgentBranches] = useState<AgentBranch[]>([]);
-  const [worktreeRecord, setWorktreeRecord] = useState<WorktreeRecord | null>(null);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
 
-  // Reset everything when workspace switches so stale data never flashes
-  useEffect(() => {
-    setIsGitRepo(null);
-    setFiles([]);
-    setCommits([]);
-    setWorktrees([]);
-    setConflicts([]);
-    setAllBranches([]);
-    setAgentSpans([]);
-    setAgentBranches([]);
-    setWorktreeRecord(null);
-    setNotice(null);
-  }, [workspaceId]);
+  // Track whether we've ever confirmed this is a git repo so we don't flash
+  // the loading spinner on subsequent cwd updates (e.g. worktree path change).
+  const confirmedRepo = useRef(false);
 
-  const PORT = (window as any).__STACKBOX_PORT__ ?? 7700;
+  const PORT = (window as any).__CALUS_PORT__ ?? 7700;
 
   const showNotice = useCallback((text: string, ok: boolean) => {
     setNotice({ text, ok });
@@ -122,38 +98,47 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
 
   // ── Detect git repo ───────────────────────────────────────────────────────────
   useEffect(() => {
+    if (!workspaceCwd) return;
+
+    // Only flash the loading spinner on the very first detection for this
+    // workspace. After that, re-detect silently in the background so the panel
+    // content stays visible instead of vanishing to a spinner.
+    if (!confirmedRepo.current) {
+      setIsGitRepo(null);
+    }
+
     const detect = async () => {
-      // Primary check: .git directory existence. Reliable even on fresh repos
-      // with no commits — git_current_branch fails on an unborn HEAD.
       try {
         const isRepo = await invoke<boolean>("git_is_repo", { cwd: workspaceCwd });
         if (isRepo) {
+          confirmedRepo.current = true;
           setIsGitRepo(true);
           return;
         }
-      } catch {
-        /* fall through */
-      }
-      // Secondary: branch name (needs at least one commit)
+      } catch { /* fall through */ }
       try {
         const b = await invoke<string>("git_current_branch", { cwd: workspaceCwd });
         if (b?.trim().length > 0) {
+          confirmedRepo.current = true;
           setIsGitRepo(true);
           return;
         }
-      } catch {
-        /* not git */
-      }
-      // Last resort: try to init (idempotent — safe to call on existing repos)
-      try {
-        await invoke("git_init", { cwd: workspaceCwd });
-        setIsGitRepo(true);
-      } catch {
-        setIsGitRepo(false);
-      }
+      } catch { /* not git */ }
+      // Not a git repo.
+      confirmedRepo.current = false;
+      setIsGitRepo(false);
     };
     detect();
   }, [workspaceCwd, workspaceId]);
+
+  // Reset the confirmed flag when the workspace itself changes (not just cwd).
+  const prevWorkspaceId = useRef(workspaceId);
+  useEffect(() => {
+    if (prevWorkspaceId.current !== workspaceId) {
+      confirmedRepo.current = false;
+      prevWorkspaceId.current = workspaceId;
+    }
+  }, [workspaceId]);
 
   // ── Load agent spans ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -168,9 +153,7 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
               try {
                 const p = JSON.parse(r.payload_json);
                 return { agent: p.agent ?? "", startedAt: r.timestamp };
-              } catch {
-                return null;
-              }
+              } catch { return null; }
             })
             .filter((s): s is AgentSpan => !!s && s.agent !== "Shell")
             .sort((a, b) => a.startedAt - b.startedAt)
@@ -183,11 +166,16 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
   const applyFiles = useCallback((raw: LiveDiffFile[]) => {
     const deduped = new Map<string, LiveDiffFile>();
     for (const f of raw) deduped.set(f.path, f);
-    setFiles(
-      Array.from(deduped.values())
-        .filter((f) => !shouldBlock(f.path))
-        .sort((a, b) => (b.modified_at || 0) - (a.modified_at || 0))
-    );
+    const filtered = Array.from(deduped.values())
+      .filter((f) => !shouldBlock(f.path))
+      .sort((a, b) => (b.modified_at || 0) - (a.modified_at || 0));
+    setFiles(prev => {
+      // Don't replace a non-empty list with an empty one mid-recompute —
+      // this is the "vanish" bug where the list briefly goes blank while
+      // the git watcher recomputes diffs in the background.
+      if (filtered.length === 0 && prev.length > 0) return prev;
+      return filtered;
+    });
   }, []);
 
   const loadFiles = useCallback(() => {
@@ -226,12 +214,6 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
       .catch(() => {});
   }, [workspaceId]);
 
-  const loadWorktreeRecord = useCallback(() => {
-    invoke<WorktreeRecord | null>("git_worktree_record", { cwd: workspaceCwd })
-      .then((r) => setWorktreeRecord(r))
-      .catch(() => setWorktreeRecord(null));
-  }, [workspaceCwd]);
-
   const loadAll = useCallback(() => {
     loadFiles();
     loadCommits();
@@ -239,51 +221,39 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     loadConflicts();
     loadBranches();
     loadAgentBranches();
-    loadWorktreeRecord();
-  }, [loadFiles, loadCommits, loadWorktrees, loadConflicts, loadBranches, loadAgentBranches, loadWorktreeRecord]);
+  }, [loadFiles, loadCommits, loadWorktrees, loadConflicts, loadBranches, loadAgentBranches]);
 
   useEffect(() => {
     if (!isGitRepo) return;
     loadAll();
   }, [isGitRepo, loadAll]);
 
-  // Refresh agent branches when a PTY session ends
   useEffect(() => {
-    const u = listen<string>("pty:exited", () => {
-      loadAgentBranches();
-    });
-    return () => {
-      u.then((f) => f());
-    };
+    const u = listen<string>("pty:exited", () => { loadAgentBranches(); });
+    return () => { u.then((f) => f()); };
   }, [loadAgentBranches]);
 
   // ── Git watcher ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isGitRepo) return;
     invoke("git_watch_start", { cwd: workspaceCwd, runboxId: workspaceId }).catch(() => {});
-    return () => {
-      invoke("git_watch_stop", { cwd: workspaceCwd }).catch(() => {});
-    };
+    return () => { invoke("git_watch_stop", { cwd: workspaceCwd }).catch(() => {}); };
   }, [isGitRepo, workspaceCwd, workspaceId]);
 
   useEffect(() => {
     if (!isGitRepo) return;
-    const u = listen<LiveDiffFile[]>("git:live-diff", () => {
-      loadFiles();
+    const u = listen<LiveDiffFile[]>("git:live-diff", ({ payload }) => {
+      applyFiles(payload);
       loadConflicts();
     });
-    return () => {
-      u.then((f) => f());
-    };
+    return () => { u.then((f) => f()); };
   }, [isGitRepo, applyFiles, loadConflicts]);
 
   // ── Git actions ───────────────────────────────────────────────────────────────
   const commit = useCallback(
     async (message: string) => {
       const result = await invoke<string>("git_stage_and_commit", {
-        cwd: workspaceCwd,
-        runboxId: workspaceId,
-        message,
+        cwd: workspaceCwd, runboxId: workspaceId, message,
       });
       showNotice(result, true);
       loadFiles();
@@ -292,31 +262,11 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     [workspaceCwd, workspaceId, showNotice, loadFiles, loadCommits]
   );
 
-  const push = useCallback(async () => {
-    const result = await invoke<string>("git_push", { cwd: workspaceCwd });
-    showNotice(result || "Pushed", true);
-    loadFiles();
-    loadCommits();
-    loadWorktreeRecord();
-  }, [workspaceCwd, showNotice, loadFiles, loadCommits, loadWorktreeRecord]);
-
-  const createPr = useCallback(
-    async (title: string, body: string): Promise<string> => {
-      const url = await invoke<string>("git_push_pr", { cwd: workspaceCwd, title, body });
-      showNotice("PR created", true);
-      loadWorktreeRecord();
-      return url;
-    },
-    [workspaceCwd, showNotice, loadWorktreeRecord]
-  );
-
   const switchBranch = useCallback(
     async (branch: string) => {
       await invoke("git_checkout", { cwd: workspaceCwd, branch });
       showNotice(`→ ${branch}`, true);
-      loadFiles();
-      loadCommits();
-      loadBranches();
+      loadFiles(); loadCommits(); loadBranches();
     },
     [workspaceCwd, showNotice, loadFiles, loadCommits, loadBranches]
   );
@@ -325,9 +275,7 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     async (branch: string) => {
       await invoke("git_checkout", { cwd: workspaceCwd, branch });
       showNotice(`Created & switched to ${branch}`, true);
-      loadFiles();
-      loadCommits();
-      loadBranches();
+      loadFiles(); loadCommits(); loadBranches();
     },
     [workspaceCwd, showNotice, loadFiles, loadCommits, loadBranches]
   );
@@ -347,9 +295,7 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     async (branch: string) => {
       const result = await invoke<string>("git_merge_branch", { cwd: workspaceCwd, branch });
       showNotice(`Merged ${branch.split("/").pop()}`, true);
-      loadAgentBranches();
-      loadCommits();
-      loadFiles();
+      loadAgentBranches(); loadCommits(); loadFiles();
       return result;
     },
     [workspaceCwd, showNotice, loadAgentBranches, loadCommits, loadFiles]
@@ -359,23 +305,28 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     async (branch: string, force = false) => {
       await invoke("git_delete_branch", { cwd: workspaceCwd, branch, force });
       showNotice(`Deleted ${branch.split("/").pop()}`, true);
-      loadAgentBranches();
-      loadBranches();
+      loadAgentBranches(); loadBranches();
     },
     [workspaceCwd, showNotice, loadAgentBranches, loadBranches]
   );
 
   const branchLog = useCallback(
-    (branch: string, base?: string): Promise<GC[]> => {
-      return invoke<GC[]>("git_branch_log", { cwd: workspaceCwd, branch, base });
-    },
+    (branch: string, base?: string): Promise<GitCommit[]> =>
+      invoke<GitCommit[]>("git_branch_log", { cwd: workspaceCwd, branch, base }),
     [workspaceCwd]
   );
 
   const branchStatus = useCallback(
-    (branch: string, base?: string): Promise<BranchStatus> => {
-      return invoke<BranchStatus>("git_branch_status", { cwd: workspaceCwd, branch, base });
-    },
+    (branch: string, base?: string): Promise<BranchStatus> =>
+      invoke<BranchStatus>("git_branch_status", { cwd: workspaceCwd, branch, base }),
+    [workspaceCwd]
+  );
+
+  // ── Branch diff (for diff view in BranchesTab) ───────────────────────────────
+
+  const branchDiff = useCallback(
+    (branch: string, base?: string): Promise<BranchDiffFile[]> =>
+      invoke<BranchDiffFile[]>("git_diff_branch", { cwd: workspaceCwd, branch, base }),
     [workspaceCwd]
   );
 
@@ -406,13 +357,8 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
   );
 
   const commitDiff = useCallback(
-    (hash: string) => {
-      return invoke<string>("git_diff_for_commit", {
-        cwd: workspaceCwd,
-        runboxId: workspaceId,
-        hash,
-      });
-    },
+    (hash: string) =>
+      invoke<string>("git_diff_for_commit", { cwd: workspaceCwd, runboxId: workspaceId, hash }),
     [workspaceCwd, workspaceId]
   );
 
@@ -421,53 +367,26 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
       const bn = newBranch || wtName;
       await invoke<string>("git_worktree_create", { cwd: workspaceCwd, branch: bn, wtName });
       showNotice(`Created on ${bn}`, true);
-      loadWorktrees();
-      loadBranches();
+      loadWorktrees(); loadBranches();
     },
     [workspaceCwd, showNotice, loadWorktrees, loadBranches]
   );
 
   const diffWorktrees = useCallback(
-    async (wtPath: string) => {
-      return invoke<string>("git_diff_between_worktrees", { cwd: workspaceCwd, otherCwd: wtPath });
-    },
+    (wtPath: string) =>
+      invoke<string>("git_diff_between_worktrees", { cwd: workspaceCwd, otherCwd: wtPath }),
     [workspaceCwd]
   );
 
   return {
-    isGitRepo,
-    setIsGitRepo,
-    files,
-    commits,
-    worktrees,
-    conflicts,
-    allBranches,
-    agentSpans,
-    agentBranches,
-    worktreeRecord,
-    notice,
-    showNotice,
-    commit,
-    push,
-    createPr,
-    switchBranch,
-    createBranch,
-    renameBranch,
-    mergeBranch,
-    deleteBranch,
-    branchLog,
-    branchStatus,
-    createWorktree,
-    diffWorktrees,
-    stageFile,
-    unstageFile,
-    discardFile,
-    commitDiff,
-    loadAll,
-    loadAgentBranches,
-    loadFiles,
-    loadCommits,
-    loadBranches,
-    loadWorktreeRecord,
+    isGitRepo, setIsGitRepo,
+    files, commits, worktrees, conflicts,
+    allBranches, agentSpans, agentBranches,
+    notice, showNotice,
+    commit, switchBranch, createBranch, renameBranch,
+    mergeBranch, deleteBranch, branchLog, branchStatus, branchDiff,
+    createWorktree, diffWorktrees,
+    stageFile, unstageFile, discardFile, commitDiff,
+    loadAll, loadAgentBranches, loadFiles, loadCommits, loadBranches,
   };
 }

@@ -110,7 +110,7 @@ export function WorkspaceView({
   const [splitRatio, setSplitRatio] = useState(0.5); // 0..1, terminals left portion
 
   const [_sidePanel, _setSidePanel] = useState<SidePanel>(null);
-  const sidePanel    = sidePanelProp !== undefined ? sidePanelProp : _sidePanel;
+  const sidePanel    = sidePanelProp ?? _sidePanel;
   // Keep the last opened panel type in a ref so we can leave it mounted (display:none)
   // when the panel is closed — this preserves openPaths diff state inside ChangesTab.
   const lastSidePanelRef = useRef<SidePanel>(null);

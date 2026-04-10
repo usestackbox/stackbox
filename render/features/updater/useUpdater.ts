@@ -49,6 +49,10 @@ export function useUpdater(): UseUpdaterReturn {
   }, []);
 
   const install = useCallback(async () => {
+    // Bug 3 fix: reset counters before each attempt so a retry after an error
+    // doesn't start the progress bar at a stale high percentage.
+    loadedBytesRef.current = 0;
+    totalBytesRef.current  = 0;
     setState({ phase: "downloading", percent: 0 });
     try {
       await invoke("install_update");

@@ -15,8 +15,6 @@ use crate::{db::Db, state::SessionMap};
 pub struct McpState {
     pub db: Db,
     /// Optional sessions map — used to resolve agent_name from session_id.
-    /// Wrapped in Option so existing code that constructs McpState without
-    /// sessions still compiles.
     pub sessions: Option<SessionMap>,
     pub app_state: Arc<crate::state::AppState>,
 }
@@ -61,6 +59,8 @@ impl JsonRpcResponse {
 
 pub fn router(state: McpState) -> Router {
     Router::new()
-        .route("/:runbox_id", post(handler::mcp_handler))
+        // Static route — runbox_id removed from URL.
+        // Session routing is done by the Bearer token in the Authorization header.
+        .route("/", post(handler::mcp_handler))
         .with_state(state)
 }

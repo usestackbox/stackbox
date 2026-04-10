@@ -38,6 +38,15 @@ pub struct BranchStatus {
     pub has_conflicts: bool,
 }
 
+#[derive(serde::Serialize)]
+pub struct BranchDiffFile {
+    pub path: String,
+    pub change_type: String,
+    pub insertions: i32,
+    pub deletions: i32,
+    pub diff: String,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // git_ensure — called by agent via MCP at session start
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,11 +166,10 @@ pub async fn git_merge_branch(
     branch: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
-    if !branch.starts_with("stackbox/") {
-        return Err(format!("can only merge stackbox/* branches, got: {branch}"));
+    if !branch.starts_with("calus/") {  // ← was "stackbox/"
+        return Err(format!("can only merge calus/* branches, got: {branch}"));
     }
 
-    // Verify the branch exists
     let check = std::process::Command::new("git")
         .args(["rev-parse", "--verify", &branch])
         .current_dir(&cwd)
@@ -431,7 +439,7 @@ pub async fn git_worktree_list(cwd: String) -> Result<Vec<FullWorktreeEntry>, St
 }
 
 #[tauri::command]
-pub async fn git_worktree_list_stackbox(cwd: String) -> Result<Vec<WorktreeEntry>, String> {
+pub async fn git_worktree_list_calus(cwd: String) -> Result<Vec<WorktreeEntry>, String> {
     Ok(list_worktrees(&cwd))
 }
 
@@ -552,6 +560,77 @@ pub struct ConflictFile {
     pub path: String,
     pub status: String,
 }
+
+#[tauri::command]
+pub async fn git_diff_branch(
+    cwd: String,
+    branch: String,
+    base: Option<String>,
+) -> Result<Vec<BranchDiffFile>, String> {
+    let base = base.as_deref().unwrap_or("main");
+    let range = format!("{base}...{branch}");
+
+    // --stat for summary: insertions / deletions per file
+    let stat_out = std::process::Command::new("git")
+        .args(["diff", "--numstat", &range])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    // name-status for change type
+    let ns_out = std::process::Command::new("git")
+        .args(["diff", "--name-status", &range])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let stat_text = String::from_utf8_lossy(&stat_out.stdout);
+    let ns_text   = String::from_utf8_lossy(&ns_out.stdout);
+
+    // Parse name-status → map path → change_type
+    let mut change_types: std::collections::HashMap<String, String> = Default::default();
+    for line in ns_text.lines() {
+        let parts: Vec<&str> = line.splitn(2, '\t').collect();
+        if parts.len() < 2 { continue; }
+        let ct = match parts[0].chars().next().unwrap_or(' ') {
+            'A' => "added",
+            'D' => "deleted",
+            'R' => "renamed",
+            _   => "modified",
+        };
+        // For renames the path is "old\tnew" — use the new path
+        let path = parts[1].split('\t').last().unwrap_or(parts[1]);
+        change_types.insert(path.to_string(), ct.to_string());
+    }
+
+    // Parse numstat → per-file insertions/deletions
+    let mut files: Vec<BranchDiffFile> = Vec::new();
+    for line in stat_text.lines() {
+        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        if parts.len() < 3 { continue; }
+        let insertions: i32 = parts[0].parse().unwrap_or(0);
+        let deletions: i32  = parts[1].parse().unwrap_or(0);
+        let path = parts[2].to_string();
+        let change_type = change_types.get(&path).cloned().unwrap_or_else(|| "modified".to_string());
+
+        // Get per-file diff
+        let diff_out = std::process::Command::new("git")
+            .args(["diff", &range, "--", &path])
+            .current_dir(&cwd)
+            .output()
+            .unwrap_or_else(|_| std::process::Output {
+                status: std::process::ExitStatus::default(),
+                stdout: vec![],
+                stderr: vec![],
+            });
+        let diff = String::from_utf8_lossy(&diff_out.stdout).to_string();
+
+        files.push(BranchDiffFile { path, change_type, insertions, deletions, diff });
+    }
+
+    Ok(files)
+}
+
 
 #[tauri::command]
 pub async fn git_conflicts(cwd: String) -> Result<Vec<ConflictFile>, String> {

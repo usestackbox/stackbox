@@ -1,11 +1,10 @@
 // src-tauri/src/mcp/handler.rs
 //
-// FIX (mcp-agent): agent_name is now passed to tools::dispatch() instead of
-//   being computed and immediately discarded (prefixed with _). Memories and
-//   status writes triggered via MCP will be tagged with the correct agent name.
+// MCP handler — routes requests by Bearer session_id from Authorization header.
+// runbox_id is no longer in the URL; the static /mcp endpoint is used for all agents.
 
 use axum::{
-    extract::{Path, State},
+    extract::State,
     http::HeaderMap,
     Json,
 };
@@ -13,7 +12,6 @@ use axum::{
 use super::{tools, JsonRpcRequest, JsonRpcResponse, McpState};
 
 pub async fn mcp_handler(
-    Path(_runbox_id): Path<String>,
     State(state): State<McpState>,
     headers: HeaderMap,
     Json(req): Json<JsonRpcRequest>,

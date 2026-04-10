@@ -78,7 +78,7 @@ export function Sidebar({
   const [showModal, setShowModal] = useState(false);
   const [lastUsedMap, setLastUsedMap] = useState<Record<string, number>>(() => {
     try {
-      return JSON.parse(localStorage.getItem("stackbox-last-used") ?? "{}");
+      return JSON.parse(localStorage.getItem("calus-last-used") ?? "{}");
     } catch {
       return {};
     }
@@ -117,7 +117,7 @@ export function Sidebar({
     setLastUsedMap((prev) => {
       const next = { ...prev, [activeId]: Date.now() };
       try {
-        localStorage.setItem("stackbox-last-used", JSON.stringify(next));
+        localStorage.setItem("calus-last-used", JSON.stringify(next));
       } catch {}
       return next;
     });
@@ -127,7 +127,7 @@ export function Sidebar({
     setLastUsedMap((prev) => {
       const next = { ...prev, [id]: Date.now() };
       try {
-        localStorage.setItem("stackbox-last-used", JSON.stringify(next));
+        localStorage.setItem("calus-last-used", JSON.stringify(next));
       } catch {}
       return next;
     });

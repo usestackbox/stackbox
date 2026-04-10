@@ -50,8 +50,8 @@ async function clipRead(): Promise<string> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme
 // ─────────────────────────────────────────────────────────────────────────────
-const BG     = "#1E222B";
-const BG_ACT = "#242938";
+const BG     = "#121212";
+const BG_ACT = "#425860";
 
 const TERM_THEME = {
   background:          BG,
@@ -596,8 +596,8 @@ export function TerminalPane({
       cursorBlink:           true,
       cursorStyle:           "bar",
       cursorWidth:           1.5,
-      fontSize:              13,
-      lineHeight:            1.42,
+      fontSize:              15,
+      lineHeight:            1.2,
       letterSpacing:         0.3,
       fontWeight:            "normal",
       fontWeightBold:        "bold",
@@ -729,7 +729,7 @@ export function TerminalPane({
               }
               p = p.replace(/^~\/\//, "~/");
               if (p !== "~/") p = p.replace(/\/$/, "");
-              const display = /[/\\]stackbox-wt-[^/\\]*$/.test(p)
+              const display = /[/\\]calus-wt-[^/\\]*$/.test(p)
                 ? (runboxCwdRef.current ?? p)
                 : p;
               if (display && display !== liveCwdRef.current) {
@@ -792,7 +792,7 @@ export function TerminalPane({
         })
         .catch(err => {
           if (!gone.current) {
-            term.write(`\r\n\x1b[38;5;196m[stackbox] spawn failed: ${err}\x1b[0m\r\n`);
+            term.write(`\r\n\x1b[38;5;196m[calus] spawn failed: ${err}\x1b[0m\r\n`);
           }
         });
     };
@@ -817,7 +817,7 @@ export function TerminalPane({
 
           if (paths.length > 0) {
             const cwd = paths[paths.length - 1];
-            const display = /[/\\]stackbox-wt-[^/\\]*$/.test(cwd)
+            const display = /[/\\]calus-wt-[^/\\]*$/.test(cwd)
               ? (runboxCwdRef.current ?? cwd)
               : cwd;
             setLiveCwd(display);

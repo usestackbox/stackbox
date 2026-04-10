@@ -32,7 +32,7 @@ export function AboutTab() {
         }}
       >
         <span className="stackbox-brand" style={{ fontSize: 28, color: C.t1 }}>
-          Stackbox
+          Calus
         </span>
         <span style={{ fontFamily: MONO, fontSize: 13, color: C.t3 }}>v{version}</span>
         {platform && (
@@ -46,16 +46,16 @@ export function AboutTab() {
       <div
         style={{
           background: C.bg2,
-          border: `1px solid ${C.borderSubtle}`,
+          border: `1px solid ${C.border}`,
           borderRadius: 8,
           overflow: "hidden",
         }}
       >
         {[
-          { label: "GitHub", url: "https://github.com/usestackbox/stackbox" },
-          { label: "Documentation", url: "https://docs.stackbox.dev" },
-          { label: "Changelog", url: "https://github.com/usestackbox/stackbox/releases" },
-          { label: "Report a bug", url: "https://github.com/usestackbox/stackbox/issues" },
+          { label: "GitHub", url: "https://github.com/usecalus/calus" },
+          { label: "Documentation", url: "https://docs.calus.dev" },
+          { label: "Changelog", url: "https://github.com/usecalus/calus/releases" },
+          { label: "Report a bug", url: "https://github.com/usecalus/calus/issues" },
         ].map((item, i, arr) => (
           <button
             key={item.label}
@@ -68,7 +68,7 @@ export function AboutTab() {
               padding: "10px 14px",
               background: "none",
               border: "none",
-              borderBottom: i < arr.length - 1 ? `1px solid ${C.borderSubtle}` : "none",
+              borderBottom: i < arr.length - 1 ? `1px solid ${C.border}` : "none",
               color: C.t1,
               fontSize: 13,
               fontFamily: SANS,

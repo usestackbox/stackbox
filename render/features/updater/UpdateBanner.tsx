@@ -42,7 +42,7 @@ export function UpdateBanner({ state, onInstall, onDismiss }: Props) {
         {state.phase === "available" && (
           <>
             <span style={{ color: C.blue }}>★</span>
-            <span style={{ color: C.t1 }}>Stackbox {state.version} is available</span>
+            <span style={{ color: C.t1 }}>Calus {state.version} is available</span>
             {state.notes && (
               <span
                 style={{

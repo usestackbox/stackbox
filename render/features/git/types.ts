@@ -1,3 +1,5 @@
+// render/features/git/types.ts
+
 export interface LiveDiffFile {
   path: string;
   change_type: "created" | "modified" | "deleted";
@@ -29,13 +31,24 @@ export interface ConflictFile {
   status: string;
 }
 
+/** Per-file diff between main and a calus/* branch */
+export interface BranchDiffFile {
+  path: string;
+  /** "added" | "modified" | "deleted" | "renamed" */
+  change_type: string;
+  insertions: number;
+  deletions: number;
+  /** Full unified diff text */
+  diff: string;
+}
+
 /** Mirrors db::branches::AgentBranch on the Rust side */
 export interface AgentBranch {
   id: string;
   runbox_id: string;
   session_id: string;
   agent_kind: string;
-  /** e.g. "stackbox/a1b2c3d4/codex" */
+  /** e.g. "calus/claude/fix-null-crash" */
   branch: string;
   /** null once PTY exits; branch still alive */
   worktree_path: string | null;
@@ -53,7 +66,6 @@ export interface BranchStatus {
   has_conflicts: boolean;
 }
 
-/** Attribution of a file change to a specific agent */
 export interface AgentSpan {
   agent: string;
   startedAt: number;
@@ -61,40 +73,28 @@ export interface AgentSpan {
 
 // ── GitHub / PR types ─────────────────────────────────────────────────────────
 
-/** A single review on a pull request */
 export interface PrReview {
   author: string;
-  /** APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED */
   state: string;
 }
 
-/** A CI check run attached to a pull request */
 export interface PrCheck {
   name: string;
-  /** QUEUED | IN_PROGRESS | COMPLETED */
   status: string;
-  /** SUCCESS | FAILURE | ERROR | NEUTRAL | null (still running) */
   conclusion: string | null;
 }
 
-/** Live pull-request details returned by git_pr_view */
 export interface PrDetails {
   title: string;
-  /** OPEN | CLOSED | MERGED */
   state: string;
   author: string;
   url: string;
   body: string;
-  /** MERGEABLE | CONFLICTING | UNKNOWN */
   mergeable: string;
   reviews: PrReview[];
   checks: PrCheck[];
 }
 
-/**
- * Per-branch record that tracks the worktree path and open PR URL.
- * Stored by the Rust kernel; fetched via git_worktree_record.
- */
 export interface WorktreeRecord {
   branch: string;
   worktree_path: string | null;
@@ -104,7 +104,7 @@ export interface WorktreeRecord {
 
 // ── Panel types ───────────────────────────────────────────────────────────────
 
-export type GitTab = "changes" | "source" | "worktrees";
+export type GitTab = "changes" | "branches" | "worktrees";
 
 export interface GitPanelProps {
   workspaceCwd: string;

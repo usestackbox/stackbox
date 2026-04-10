@@ -9,17 +9,10 @@ export interface AppSettings {
   launchAtLogin: boolean;
   logLevel: "error" | "warn" | "info" | "debug" | "trace";
   sidebarWidth: number;
-  mcpServers: McpServerConfig[];
 }
 
-export interface McpServerConfig {
-  id: string;
-  name: string;
-  url: string;
-  enabled: boolean;
-}
 
-const LS_KEY = "stackbox:settings";
+const LS_KEY = "calus:settings";
 
 const DEFAULTS: AppSettings = {
   theme: "dark",
@@ -28,7 +21,6 @@ const DEFAULTS: AppSettings = {
   launchAtLogin: false,
   logLevel: "info",
   sidebarWidth: 260,
-  mcpServers: [],
 };
 
 function fromLocalStorage(): AppSettings {

@@ -78,13 +78,13 @@ export interface AgentMeta {
 }
 
 export const AGENT_META: Record<string, AgentMeta> = {
-  claude: { label: "Claude Code", color: "#ffffff" },
-  codex: { label: "OpenAI Codex", color: "#ffffff" },
-  openai: { label: "OpenAI", color: "#ffffff" },
-  gemini: { label: "Gemini", color: "#ffffff" },
-  cursor: { label: "Cursor Agent", color: "#ffffff" },
-  copilot: { label: "GitHub Copilot", color: "#ffffff" },
-  aider: { label: "Aider", color: "#ffffff" },
+  claude:  { label: "claude",  color: "#ffffff" },
+  codex:   { label: "codex",   color: "#ffffff" },
+  openai:  { label: "openai",  color: "#ffffff" },
+  gemini:  { label: "gemini",  color: "#ffffff" },
+  cursor:  { label: "cursor",  color: "#ffffff" },
+  copilot: { label: "copilot", color: "#ffffff" },
+  aider:   { label: "aider",   color: "#ffffff" },
 };
 
 // ── What users type in the terminal → agent key ───────────────────────────────

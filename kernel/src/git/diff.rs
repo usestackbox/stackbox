@@ -144,10 +144,12 @@ pub fn diff_live(cwd: &str, runbox_id: &str) -> Result<Vec<LiveDiffFile>, String
             }
 
             _ if x == 'M' || y == 'M' || x == 'R' || x == 'C' => {
+                // Bug 1 fix: do NOT `continue` when diff is transiently empty
+                // (happens mid-write or when git index is locked during `git add`).
+                // Removing the file from the list unmounts its React FileRow and
+                // destroys the open:true state — the diff appears to "vanish".
+                // Keep the entry with an empty diff; the UI shows "recomputing…".
                 let diff = best_diff_readonly(cwd, gdo, &path, x, y).unwrap_or_default();
-                if diff.trim().is_empty() {
-                    continue;
-                }
                 let (ins, del) = stat(&diff);
                 LiveDiffFile {
                     path,

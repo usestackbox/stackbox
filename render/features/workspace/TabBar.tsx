@@ -1,5 +1,5 @@
 // features/workspace/TabBar.tsx
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { C, FS, MONO } from "../../design";
 import { StripIcon } from "../../ui";
@@ -42,7 +42,73 @@ const tbtn: React.CSSProperties = {
 
 const TRAFFIC_H = 28;
 
-// Split-right icon: file on left | terminal on right
+// ── Settings dropdown ─────────────────────────────────────────────────────────
+function SettingsDropdown({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    // slight delay so the click that opened it doesn't immediately close it
+    const t = setTimeout(() => document.addEventListener("mousedown", handler), 50);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+  }, [onClose]);
+
+  const item = (label: string, icon: string, action: () => void) => (
+    <button
+      onClick={() => { action(); onClose(); }}
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "7px 14px",
+        background: "transparent",
+        border: "none",
+        color: C.t1,
+        fontSize: 13,
+        cursor: "pointer",
+        textAlign: "left",
+        transition: "background .08s",
+        borderRadius: 6,
+        whiteSpace: "nowrap",
+      }}
+      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(109,235,176,.08)"; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+    >
+      <span style={{ fontSize: 13, width: 16, textAlign: "center", opacity: 0.7 }}>{icon}</span>
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: "absolute",
+        top: "calc(100% + 6px)",
+        left: 0,
+        zIndex: 9999,
+        background: C.bg3,
+        border: `1px solid ${C.border}`,
+        borderRadius: 8,
+        boxShadow: C.shadowLg,
+        padding: "4px",
+        minWidth: 180,
+      }}
+    >
+      {item("General",    "⚙", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "general"    } })))}
+      {item("Appearance", "◑", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "appearance" } })))}
+      {item("Updates",    "↻", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "updates"    } })))}
+      {item("Keybinds",   "⌨", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "keybinds"  } })))}
+      <div style={{ height: 1, background: C.border, margin: "4px 0" }} />
+      {item("About",      "ℹ", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "about"     } })))}
+    </div>
+  );
+}
+
+// Split-right icon
 function SplitRightIcon({ active }: { active: boolean }) {
   return (
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none"
@@ -51,10 +117,8 @@ function SplitRightIcon({ active }: { active: boolean }) {
     >
       <rect x="1" y="2" width="14" height="12" rx="1.5" />
       <line x1="8.5" y1="2" x2="8.5" y2="14" />
-      {/* doc lines on left side */}
       <line x1="3" y1="6" x2="6.5" y2="6" strokeWidth="1.2" />
       <line x1="3" y1="8.5" x2="6.5" y2="8.5" strokeWidth="1.2" />
-      {/* terminal prompt on right side */}
       <polyline points="10,6.5 11.5,8 10,9.5" strokeWidth="1.2" />
     </svg>
   );
@@ -70,6 +134,8 @@ export function TabBar({
 }: TabBarProps) {
   const [dragTabId,  setDragTabId]  = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const settingsBtnRef = useRef<HTMLDivElement>(null);
   const dragTabIdRef  = useRef<string | null>(null);
   const dragOverIdRef = useRef<string | null>(null);
   const hasFiles = fileTabs.length > 0;
@@ -119,12 +185,14 @@ export function TabBar({
         <div data-tauri-drag-region style={{ height: TRAFFIC_H, flexShrink: 0 }} />
       )}
 
-      <div style={{ display: "flex", alignItems: "stretch", flex: 1, padding: "0 5px", }}>
-        {/* Brand + view toggles */}
+      <div style={{ display: "flex", alignItems: "stretch", flex: 1, padding: "0 5px" }}>
+
+        {/* Brand + view toggles + settings button */}
         <div style={{
-          display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
+          display: "flex", alignItems: "center", gap: 2, flexShrink: 0,
           paddingLeft: 6, paddingRight: 8, alignSelf: "stretch",
-          borderRight: `2px solid rgba(255,255,255,.08)`,
+          borderRight: `1px solid ${C.border}`,
+          position: "relative",
         }}>
           <StripIcon title="Workspace" active={!sidebarCollapsed && !fileTreeOpen} onClick={onSidebarToggle} size={32}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
@@ -144,12 +212,31 @@ export function TabBar({
               color: "currentColor",
             }}>&lt;/&gt;</span>
           </StripIcon>
+
+          {/* Settings gear — opens dropdown */}
+          <div ref={settingsBtnRef} style={{ position: "relative" }}>
+            <StripIcon
+              title="Menu"
+              active={showSettingsMenu}
+              onClick={() => setShowSettingsMenu(v => !v)}
+              size={28}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </StripIcon>
+            {showSettingsMenu && (
+              <SettingsDropdown onClose={() => setShowSettingsMenu(false)} />
+            )}
+          </div>
         </div>
 
         {/* Terminal tabs */}
         <div style={{
-          display: "flex", alignItems: "stretch", 
-          overflowX: "auto", minWidth: 0, maxWidth: hasFiles ? "50%" : "85%",
+          display: "flex", alignItems: "stretch",
+          overflowX: "auto", minWidth: 0, maxWidth: hasFiles ? "55%" : "90%",
           scrollbarWidth: "none",
         }}>
           {wins.map((w, idx) => (
@@ -176,7 +263,7 @@ export function TabBar({
             style={{ ...tbtn, width: 26, alignSelf: "stretch", borderRadius: 0, fontSize: 16, fontWeight: 300, border: "1px solid transparent", marginRight: 6 }}
             onMouseEnter={e => {
               const el = e.currentTarget as HTMLElement;
-              el.style.color = C.t0; el.style.background = "rgba(255,255,255,.09)";
+              el.style.color = C.t0; el.style.background = "rgba(109,235,176,.08)";
               el.style.borderColor = "transparent";
             }}
             onMouseLeave={e => {
@@ -189,20 +276,17 @@ export function TabBar({
 
         {/* File tabs */}
         {fileTabs.length > 0 && (
-          <>
-            
-            <div style={{ display: "flex", alignItems: "stretch", gap: 0, overflowX: "auto", minWidth: 0, flex: 1, scrollbarWidth: "none" }}>
-              {fileTabs.map(tab => (
-                <FileTab
-                  key={tab.id}
-                  tab={tab}
-                  isActive={activeFileId === tab.id}
-                  onSelect={() => onFileSelect(tab.id)}
-                  onClose={() => onFileClose(tab.id)}
-                />
-              ))}
-            </div>
-          </>
+          <div style={{ display: "flex", alignItems: "stretch", gap: 0, overflowX: "auto", minWidth: 0, flex: 1, scrollbarWidth: "none" }}>
+            {fileTabs.map(tab => (
+              <FileTab
+                key={tab.id}
+                tab={tab}
+                isActive={activeFileId === tab.id}
+                onSelect={() => onFileSelect(tab.id)}
+                onClose={() => onFileClose(tab.id)}
+              />
+            ))}
+          </div>
         )}
 
         {/* Drag region spacer */}
