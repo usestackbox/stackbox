@@ -6,7 +6,7 @@
 // Called once per spawn, stamps the current session_id as the Bearer token.
 // Agents receive the config via --mcp-config CLI flag at launch.
 
-use crate::workspace::context::MEMORY_PORT;
+use crate::MEMORY_PORT;
 
 /// ~/calus/mcp/mcp.json
 pub fn mcp_config_path() -> std::path::PathBuf {
@@ -18,7 +18,7 @@ pub fn mcp_config_path() -> std::path::PathBuf {
 }
 
 pub fn write_mcp_config(session_id: &str) -> Result<(), String> {
-    let url  = format!("http://127.0.0.1:{}/mcp", MEMORY_PORT);
+    let url = format!("http://127.0.0.1:{}/mcp", MEMORY_PORT);
     let auth = format!("Bearer {}", session_id);
     let path = mcp_config_path();
 

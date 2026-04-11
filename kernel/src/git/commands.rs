@@ -1,4 +1,4 @@
-// src/git/commands.rs
+// kernel/src/git/commands.rs
 //
 // Tauri commands for git operations exposed to frontend + MCP.
 //
@@ -10,6 +10,7 @@
 
 use super::{
     diff::{clear_cache_for, diff_for_commit, diff_live, LiveDiffFile},
+    inject::inject_into_repo,
     log::{log_for_runbox, log_range, GitCommit},
     repo::{
         delete_branch, ensure_git_repo, ensure_worktree, expand_home, git, git_dir_opt, has_git,
@@ -53,10 +54,12 @@ pub struct BranchDiffFile {
 
 /// Ensure git repo + worktree exist for this agent session.
 /// Persists branch record to the database.
+/// Injects the agent instruction file into the user's repo if not already present.
 #[tauri::command]
 pub async fn git_ensure(
     cwd: String,
     runbox_id: String,
+    name: Option<String>,
     session_id: Option<String>,
     agent_kind: Option<String>,
     state: tauri::State<'_, AppState>,
@@ -67,8 +70,13 @@ pub async fn git_ensure(
 
     let kind = agent_kind.as_deref().unwrap_or("shell");
     let sid = session_id.as_deref().unwrap_or(&runbox_id);
+    // Use the agent-supplied task slug for the worktree name; fall back to session_id.
+    let wt_name = name.as_deref().unwrap_or(sid);
 
-    let wt = ensure_worktree(&cwd, &runbox_id, sid, kind);
+    let wt = ensure_worktree(&cwd, &runbox_id, wt_name, kind);
+
+    // Inject the agent instruction file into the user's repo (write-if-missing).
+    inject_into_repo(std::path::Path::new(&cwd), kind);
 
     let worktree_path = wt.as_ref().map(|w| w.path.clone());
     let branch = wt.as_ref().map(|w| w.branch.clone());
@@ -166,7 +174,7 @@ pub async fn git_merge_branch(
     branch: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
-    if !branch.starts_with("calus/") {  // ← was "stackbox/"
+    if !branch.starts_with("calus/") {
         return Err(format!("can only merge calus/* branches, got: {branch}"));
     }
 
@@ -570,14 +578,12 @@ pub async fn git_diff_branch(
     let base = base.as_deref().unwrap_or("main");
     let range = format!("{base}...{branch}");
 
-    // --stat for summary: insertions / deletions per file
     let stat_out = std::process::Command::new("git")
         .args(["diff", "--numstat", &range])
         .current_dir(&cwd)
         .output()
         .map_err(|e| e.to_string())?;
 
-    // name-status for change type
     let ns_out = std::process::Command::new("git")
         .args(["diff", "--name-status", &range])
         .current_dir(&cwd)
@@ -585,35 +591,38 @@ pub async fn git_diff_branch(
         .map_err(|e| e.to_string())?;
 
     let stat_text = String::from_utf8_lossy(&stat_out.stdout);
-    let ns_text   = String::from_utf8_lossy(&ns_out.stdout);
+    let ns_text = String::from_utf8_lossy(&ns_out.stdout);
 
-    // Parse name-status → map path → change_type
     let mut change_types: std::collections::HashMap<String, String> = Default::default();
     for line in ns_text.lines() {
         let parts: Vec<&str> = line.splitn(2, '\t').collect();
-        if parts.len() < 2 { continue; }
+        if parts.len() < 2 {
+            continue;
+        }
         let ct = match parts[0].chars().next().unwrap_or(' ') {
             'A' => "added",
             'D' => "deleted",
             'R' => "renamed",
-            _   => "modified",
+            _ => "modified",
         };
-        // For renames the path is "old\tnew" — use the new path
         let path = parts[1].split('\t').last().unwrap_or(parts[1]);
         change_types.insert(path.to_string(), ct.to_string());
     }
 
-    // Parse numstat → per-file insertions/deletions
     let mut files: Vec<BranchDiffFile> = Vec::new();
     for line in stat_text.lines() {
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
-        if parts.len() < 3 { continue; }
+        if parts.len() < 3 {
+            continue;
+        }
         let insertions: i32 = parts[0].parse().unwrap_or(0);
-        let deletions: i32  = parts[1].parse().unwrap_or(0);
+        let deletions: i32 = parts[1].parse().unwrap_or(0);
         let path = parts[2].to_string();
-        let change_type = change_types.get(&path).cloned().unwrap_or_else(|| "modified".to_string());
+        let change_type = change_types
+            .get(&path)
+            .cloned()
+            .unwrap_or_else(|| "modified".to_string());
 
-        // Get per-file diff
         let diff_out = std::process::Command::new("git")
             .args(["diff", &range, "--", &path])
             .current_dir(&cwd)
@@ -625,12 +634,17 @@ pub async fn git_diff_branch(
             });
         let diff = String::from_utf8_lossy(&diff_out.stdout).to_string();
 
-        files.push(BranchDiffFile { path, change_type, insertions, deletions, diff });
+        files.push(BranchDiffFile {
+            path,
+            change_type,
+            insertions,
+            deletions,
+            diff,
+        });
     }
 
     Ok(files)
 }
-
 
 #[tauri::command]
 pub async fn git_conflicts(cwd: String) -> Result<Vec<ConflictFile>, String> {
@@ -777,4 +791,25 @@ pub async fn git_diff_between_worktrees(cwd: String, other_cwd: String) -> Resul
     }
 
     Ok(format!("{stat_str}\n\n{capped}"))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// git_run — generic shim for frontend git.ts
+// Runs any git command in a given cwd and returns stdout.
+// Keeps diff parsing logic in TypeScript while avoiding plugin-shell dependency.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn git_run(cwd: String, args: Vec<String>) -> Result<String, String> {
+    let out = std::process::Command::new("git")
+        .args(&args)
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
 }

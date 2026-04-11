@@ -2,7 +2,7 @@
 
 export interface LiveDiffFile {
   path: string;
-  change_type: "created" | "modified" | "deleted";
+  change_type: "added" | "modified" | "deleted";
   diff: string;
   insertions: number;
   deletions: number;
@@ -104,7 +104,8 @@ export interface WorktreeRecord {
 
 // ── Panel types ───────────────────────────────────────────────────────────────
 
-export type GitTab = "changes" | "branches" | "worktrees";
+// FIX: Added "history" which was used in GitPanel.tsx but missing from the type
+export type GitTab = "changes" | "branches" | "worktrees" | "history";
 
 export interface GitPanelProps {
   workspaceCwd: string;

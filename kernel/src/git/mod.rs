@@ -1,4 +1,4 @@
-// src-tauri/src/git/mod.rs
+// kernel/src/git/mod.rs
 //
 // GitHub module: webhook HTTP handler + API client.
 //
@@ -14,6 +14,7 @@ pub mod api;
 pub mod cleanup;
 pub mod commands;
 pub mod diff;
+pub mod inject;
 pub mod log;
 pub mod repo;
 pub mod watcher;

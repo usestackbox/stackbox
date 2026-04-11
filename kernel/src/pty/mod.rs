@@ -5,7 +5,7 @@
 //
 // WORKTREE LIFECYCLE:
 //   spawn()  → ensure_worktree(cwd, runbox_id, session_id, agent_kind)
-//            → worktree created at {cwd}/.worktrees/stackbox-wt-{rb}-{sid}-{slug}
+//            → worktree created at ~/calus/<fnv32(cwd)>/.worktrees/<agent_kind>-<name>/
 //            → branch stays alive after worktree is removed
 //   PTY exit → remove_worktree_only() → directory gone, branch intact
 //   User     → git_merge_branch / git_delete_branch from frontend
@@ -518,7 +518,7 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
     cmd.env("NODE_ENV", "development");
     cmd.env("STACKBOX_PANE_PORT", pane_port.to_string());
 
-    let port = crate::workspace::context::MEMORY_PORT;
+    let port = crate::MEMORY_PORT;
     let ctx_file = format!("{effective_cwd}/.stackbox-context.md");
     cmd.env("STACKBOX_CONTEXT_FILE", &ctx_file);
     cmd.env(

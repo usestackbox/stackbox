@@ -44,6 +44,10 @@ function DiffView({ files }: { files: BranchDiffFile[] }) {
   const [selected, setSelected] = useState<string | null>(
     files.length > 0 ? files[0].path : null
   );
+  // Reset selection when files change (e.g. switching between agent branches).
+  useEffect(() => {
+    setSelected(files.length > 0 ? files[0].path : null);
+  }, [files]);
   const selectedFile = files.find((f) => f.path === selected);
 
   if (files.length === 0) {

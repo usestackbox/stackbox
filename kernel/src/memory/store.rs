@@ -737,7 +737,7 @@ pub async fn session_summary(
     if text.is_empty() {
         return Err("summary text cannot be empty".to_string());
     }
- 
+
     // ── Enforce compact structured format at write time ───────────────────────
     //
     // Accepted format (what agents are instructed to write):
@@ -750,7 +750,7 @@ pub async fn session_summary(
     // If free-form prose → take first 3 lines, truncate each to 80 chars.
     // Either way, stored content is always ≤ ~30 tokens.
     let stored_text = compact_session_text(text);
- 
+
     // Prune older SESSION memories for this agent beyond cap of 2
     let existing = memories_for_runbox(runbox_id).await.unwrap_or_default();
     let mut agent_sessions: Vec<_> = existing
@@ -762,16 +762,16 @@ pub async fn session_summary(
     for old in agent_sessions.iter().skip(1) {
         let _ = memory_delete(&old.id).await;
     }
- 
+
     let id = uuid::Uuid::new_v4().to_string();
     let agent_type = agent_type_from_name(agent_name);
     let now = now_ms();
- 
+
     let mem = Memory {
         id: id.clone(),
         runbox_id: runbox_id.to_string(),
         session_id: session_id.to_string(),
-        content: stored_text,  // compact, not raw
+        content: stored_text, // compact, not raw
         pinned: false,
         timestamp: now,
         branch: "main".to_string(),
@@ -789,7 +789,7 @@ pub async fn session_summary(
         agent_id: agent_id.to_string(),
         key: String::new(),
     };
- 
+
     let schema = memory_schema();
     let batch = memory_to_batch(&mem, schema.clone())?;
     let reader = RecordBatchIterator::new(vec![Ok(batch)], schema);
@@ -799,7 +799,7 @@ pub async fn session_summary(
         .execute()
         .await
         .map_err(|e: lancedb::Error| e.to_string())?;
- 
+
     // ── GCC+Letta: filesystem sync ─────────────────────────────────────────────
     {
         let rb = runbox_id.to_string();
@@ -816,10 +816,10 @@ pub async fn session_summary(
             });
         }
     }
- 
+
     Ok(mem)
 }
- 
+
 /// Compact a session summary to structured signal fields only.
 ///
 /// If ≥2 known key: value lines found → keep those, truncate values.
@@ -827,7 +827,7 @@ pub async fn session_summary(
 fn compact_session_text(text: &str) -> String {
     let known_keys = ["goal", "done", "blocked", "next"];
     let mut structured: Vec<String> = Vec::new();
- 
+
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -846,11 +846,11 @@ fn compact_session_text(text: &str) -> String {
             }
         }
     }
- 
+
     if structured.len() >= 2 {
         return structured.join("\n");
     }
- 
+
     // Fallback: first 3 non-empty lines, each max 80 chars
     text.lines()
         .map(str::trim)
@@ -1724,6 +1724,3 @@ fn keyword_relevance(content: &str, query: &str) -> f32 {
         .count();
     hits as f32 / words.len().max(1) as f32
 }
-
-
-

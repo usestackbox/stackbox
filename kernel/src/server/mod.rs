@@ -11,7 +11,7 @@ use crate::{
     db::Db,
     mcp,
     state::{AppState, SessionMap},
-    workspace::context::MEMORY_PORT,
+    MEMORY_PORT,
 };
 
 pub async fn start(

@@ -1,6 +1,9 @@
 // src/lib.rs
 
 #![allow(unused, dead_code)]
+
+/// HTTP port for the Calus kernel server (MCP + memory routes).
+pub const MEMORY_PORT: u16 = 7547;
 mod agent;
 mod browser;
 mod commands;
@@ -142,7 +145,7 @@ pub fn run() {
             git::commands::git_delete_branch,
             git::commands::git_branch_log,
             git::commands::git_branch_status,
-            git::commands::git_diff_branch,        // ← NEW: per-file diff for frontend
+            git::commands::git_diff_branch, // ← NEW: per-file diff for frontend
             git::commands::git_log_for_runbox,
             git::commands::git_diff_for_commit,
             git::commands::git_diff_live,
@@ -164,7 +167,9 @@ pub fn run() {
             git::commands::git_checkout,
             git::commands::git_rename_branch,
             git::commands::git_diff_between_worktrees,
+            git::commands::git_diff_branch,
             git::commands::git_commit,
+            git::commands::git_run,
             // ── Conflict ─────────────────────────────────────────────────────
             conflict::conflict_request_lock,
             conflict::conflict_release_lock,

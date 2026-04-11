@@ -1,11 +1,10 @@
-// ── Backgrounds — Warp Terminal palette ───────────────────────────────────────
 export const BG = {
-  0: "#0B0D14",
-  1: "#2e3034",
-  2: "#161924",
-  3: "#1C1F2E",
-  4: "#222638",
-  5: "#2A2F47",
+  0: "#0F1012",
+  1: "#1c1f22e6",
+  2: "#23262C",
+  3: "#2D3138",
+  4: "#373C45",
+  5: "#424752",
 };
 
 export const BORDER = {
@@ -18,7 +17,7 @@ export const BORDER = {
 export const TEXT = {
   primary:   "rgba(218,222,255,.95)",
   secondary: "rgb(255, 255, 255)",
-  muted:     "rgba(108,115,175,.60)",
+  muted:     "rgba(172, 175, 198, 0.6)",
   faint:     "rgba(72,78,135,.44)",
   ghost:     "rgba(45,50,100,.22)",
 } as const;

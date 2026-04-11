@@ -1,4 +1,4 @@
-// src/agent/context.rs
+// kernel/src/agent/context.rs
 //
 // Writes CONTEXT.md to AppData when a PTY agent is detected.
 // Path: <appdata>/calus/<hash>/agents/<runbox_id>/CONTEXT.md
@@ -33,9 +33,9 @@ pub fn context_file_path(cwd: &str, runbox_id: &str) -> std::path::PathBuf {
 
 fn build(cwd: &str, runbox_id: &str, session_id: &str, agent_kind: &str) -> String {
     let workspace_md = crate::workspace::persistent::workspace_md_path(cwd);
-    let graph_md     = crate::workspace::persistent::graph_md_path(cwd);
-    let wt_base      = crate::workspace::persistent::worktrees_base(cwd);
-    let wt_base_str  = wt_base.to_string_lossy();
+    let graph_md = crate::workspace::persistent::graph_md_path(cwd);
+    let wt_base = crate::workspace::persistent::worktrees_base(cwd);
+    let wt_base_str = wt_base.to_string_lossy();
 
     format!(
         "# Calus Agent Context\n\

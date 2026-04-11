@@ -43,10 +43,18 @@ pub fn git_dir_for(cwd: &str, runbox_id: &str) -> String {
 
 pub fn git_dir_opt(cwd: &str, runbox_id: &str) -> Option<String> {
     let dot_git = Path::new(cwd).join(".git");
-    if dot_git.is_dir() { return None; }
-    if dot_git.is_file() { return None; }
+    if dot_git.is_dir() {
+        return None;
+    }
+    if dot_git.is_file() {
+        return None;
+    }
     let shadow = git_dir_for(cwd, runbox_id);
-    if Path::new(&shadow).exists() { Some(shadow) } else { None }
+    if Path::new(&shadow).exists() {
+        Some(shadow)
+    } else {
+        None
+    }
 }
 
 pub fn has_git(cwd: &str, runbox_id: &str) -> bool {
@@ -58,11 +66,13 @@ pub fn has_git(cwd: &str, runbox_id: &str) -> bool {
 pub fn git(args: &[&str], cwd: &str, git_dir: Option<&str>) -> Result<String, String> {
     let mut cmd = std::process::Command::new("git");
     if let Some(gd) = git_dir {
-        let abs_gd  = std::fs::canonicalize(gd).unwrap_or_else(|_| Path::new(gd).to_path_buf());
+        let abs_gd = std::fs::canonicalize(gd).unwrap_or_else(|_| Path::new(gd).to_path_buf());
         let abs_cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| Path::new(cwd).to_path_buf());
-        cmd.arg("--git-dir").arg(&abs_gd)
-           .arg("--work-tree").arg(&abs_cwd)
-           .current_dir(&abs_cwd);
+        cmd.arg("--git-dir")
+            .arg(&abs_gd)
+            .arg("--work-tree")
+            .arg(&abs_cwd)
+            .current_dir(&abs_cwd);
     } else {
         cmd.current_dir(cwd);
     }
@@ -115,8 +125,12 @@ pub fn init_real_repo(cwd: &str) -> Result<(), String> {
 }
 
 fn is_stale_worktree_pointer(dot_git: &Path) -> bool {
-    let Ok(content) = std::fs::read_to_string(dot_git) else { return false; };
-    let Some(gitdir) = content.trim().strip_prefix("gitdir:") else { return false; };
+    let Ok(content) = std::fs::read_to_string(dot_git) else {
+        return false;
+    };
+    let Some(gitdir) = content.trim().strip_prefix("gitdir:") else {
+        return false;
+    };
     !Path::new(gitdir.trim()).exists()
 }
 
@@ -129,7 +143,10 @@ pub fn ensure_git_repo(cwd: &str, runbox_id: &str) -> Result<String, String> {
 
     if dot_git.is_file() {
         if is_stale_worktree_pointer(&dot_git) {
-            eprintln!("[git] removing stale worktree pointer: {}", dot_git.display());
+            eprintln!(
+                "[git] removing stale worktree pointer: {}",
+                dot_git.display()
+            );
             let _ = std::fs::remove_file(&dot_git);
         } else {
             return Ok(dot_git.to_string_lossy().to_string());
@@ -157,7 +174,12 @@ pub fn ensure_git_repo(cwd: &str, runbox_id: &str) -> Result<String, String> {
         .map_err(|e| format!("git config: {e}"))?;
 
     git(&["add", "-A"], cwd, Some(&shadow)).ok();
-    git(&["commit", "--allow-empty", "-m", "calus: initial snapshot"], cwd, Some(&shadow)).ok();
+    git(
+        &["commit", "--allow-empty", "-m", "calus: initial snapshot"],
+        cwd,
+        Some(&shadow),
+    )
+    .ok();
 
     eprintln!("[git] shadow repo at {shadow}");
     Ok(shadow)
@@ -209,7 +231,7 @@ pub fn ensure_worktree(
     agent_kind: &str,
 ) -> Option<WorktreeResult> {
     let wt_dir_name = format!("{agent_kind}-{name}");
-    let branch      = format!("calus/{agent_kind}/{name}");
+    let branch = format!("calus/{agent_kind}/{name}");
 
     let wt_base = crate::workspace::persistent::worktrees_base(cwd);
     if let Err(e) = std::fs::create_dir_all(&wt_base) {
@@ -218,10 +240,14 @@ pub fn ensure_worktree(
     }
 
     let wt_path = wt_base.join(&wt_dir_name);
-    let wt_str  = wt_path.to_string_lossy().to_string();
+    let wt_str = wt_path.to_string_lossy().to_string();
 
     if wt_path.exists() {
-        return Some(WorktreeResult { path: wt_str, branch, is_new: false });
+        return Some(WorktreeResult {
+            path: wt_str,
+            branch,
+            is_new: false,
+        });
     }
 
     // git worktree add -b <branch> <path> HEAD
@@ -233,7 +259,11 @@ pub fn ensure_worktree(
     match out {
         Ok(o) if o.status.success() => {
             eprintln!("[repo] worktree created: {wt_str} on {branch}");
-            Some(WorktreeResult { path: wt_str, branch, is_new: true })
+            Some(WorktreeResult {
+                path: wt_str,
+                branch,
+                is_new: true,
+            })
         }
         Ok(o) => {
             let err = String::from_utf8_lossy(&o.stderr);
@@ -244,7 +274,11 @@ pub fn ensure_worktree(
                     .output();
                 if out2.map(|o| o.status.success()).unwrap_or(false) {
                     eprintln!("[repo] worktree attached: {wt_str}");
-                    return Some(WorktreeResult { path: wt_str, branch, is_new: false });
+                    return Some(WorktreeResult {
+                        path: wt_str,
+                        branch,
+                        is_new: false,
+                    });
                 }
             }
             eprintln!("[repo] worktree add failed: {err}");
@@ -259,7 +293,9 @@ pub fn ensure_worktree(
 
 /// Remove worktree directory only — branch is kept for review/merge.
 pub fn remove_worktree_only(wt_path: &str) {
-    if !Path::new(wt_path).exists() { return; }
+    if !Path::new(wt_path).exists() {
+        return;
+    }
     let repo_root = main_repo_for_worktree(wt_path);
     let _ = std::process::Command::new("git")
         .args(["worktree", "remove", "--force", wt_path])
@@ -302,20 +338,28 @@ pub fn list_worktrees(cwd: &str) -> Vec<WorktreeEntry> {
         .output();
 
     let Ok(out) = out else { return vec![] };
-    if !out.status.success() { return vec![]; }
+    if !out.status.success() {
+        return vec![];
+    }
 
     let text = String::from_utf8_lossy(&out.stdout);
     let mut entries: Vec<WorktreeEntry> = Vec::new();
-    let mut path   = String::new();
+    let mut path = String::new();
     let mut branch = String::new();
-    let mut head   = String::new();
+    let mut head = String::new();
 
     for line in text.lines() {
         if line.is_empty() {
             if !path.is_empty() && branch.starts_with("calus/") {
-                entries.push(WorktreeEntry { path: path.clone(), branch: branch.clone(), head: head.clone() });
+                entries.push(WorktreeEntry {
+                    path: path.clone(),
+                    branch: branch.clone(),
+                    head: head.clone(),
+                });
             }
-            path.clear(); branch.clear(); head.clear();
+            path.clear();
+            branch.clear();
+            head.clear();
         } else if let Some(v) = line.strip_prefix("worktree ") {
             path = v.to_string();
         } else if let Some(v) = line.strip_prefix("HEAD ") {

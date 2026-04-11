@@ -57,13 +57,9 @@ pub async fn pty_spawn(
 
     // ── 6. Write per-agent context file to appdata ────────────────────────────
     // No worktree path yet — agent will create the worktree itself.
-    if let Err(e) = crate::agent::context::inject(
-        &real_cwd,
-        &runbox_id,
-        &session_id,
-        agent_kind_str,
-        None,
-    ) {
+    if let Err(e) =
+        crate::agent::context::inject(&real_cwd, &runbox_id, &session_id, agent_kind_str, None)
+    {
         eprintln!("[pty_spawn] context::inject: {e}");
     }
 

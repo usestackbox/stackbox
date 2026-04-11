@@ -3,6 +3,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+// NOTE: gitIsRepo/gitDiffLive from lib/git.ts route through git_run which does
+// NOT expand "~" in cwd on Windows — all git subprocesses silently fail.
+// Fix: call the Tauri commands directly; their Rust impls all call expand_home().
+import { gitDiffLive, gitCurrentBranch } from "../../lib/git";
 import type {
   AgentBranch,
   AgentSpan,
@@ -67,9 +71,20 @@ export function agentForFile(spans: AgentSpan[], modifiedAt: number): string | n
   if (!spans.length || !modifiedAt) return null;
   let match: AgentSpan | null = null;
   for (const s of spans) {
-    if (s.startedAt <= modifiedAt + 5000) match = s;
+    // Match spans that started at or before the modification time.
+    // Allow a 2s grace for timing skew between DB record and file write.
+    if (s.startedAt <= modifiedAt + 2000) match = s;
   }
   return match ? shortAgent(match.agent) : null;
+}
+
+// ── Timeout helper — prevents IPC hangs from blocking the UI forever ──────────
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -84,10 +99,13 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
   const [agentSpans, setAgentSpans] = useState<AgentSpan[]>([]);
   const [agentBranches, setAgentBranches] = useState<AgentBranch[]>([]);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  // FIX: bump this to force re-detection without changing cwd/workspaceId
+  const [detectTick, setDetectTick] = useState(0);
 
   // Track whether we've ever confirmed this is a git repo so we don't flash
   // the loading spinner on subsequent cwd updates (e.g. worktree path change).
   const confirmedRepo = useRef(false);
+  const emptyFilesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const PORT = (window as any).__CALUS_PORT__ ?? 7700;
 
@@ -96,40 +114,44 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     setTimeout(() => setNotice(null), 3500);
   }, []);
 
-  // ── Detect git repo ───────────────────────────────────────────────────────────
+  // ── Detect git repo — with timeout so a hanging IPC never spins forever ────────
   useEffect(() => {
-    if (!workspaceCwd) return;
+    // No cwd yet — show panel optimistically rather than spinning forever
+    if (!workspaceCwd) {
+      setIsGitRepo(true);
+      return;
+    }
 
     // Only flash the loading spinner on the very first detection for this
-    // workspace. After that, re-detect silently in the background so the panel
-    // content stays visible instead of vanishing to a spinner.
+    // workspace. After that, re-detect silently so the panel stays visible.
     if (!confirmedRepo.current) {
       setIsGitRepo(null);
     }
 
+    let cancelled = false;
+
     const detect = async () => {
       try {
-        const isRepo = await invoke<boolean>("git_is_repo", { cwd: workspaceCwd });
-        if (isRepo) {
-          confirmedRepo.current = true;
-          setIsGitRepo(true);
-          return;
-        }
-      } catch { /* fall through */ }
-      try {
-        const b = await invoke<string>("git_current_branch", { cwd: workspaceCwd });
-        if (b?.trim().length > 0) {
-          confirmedRepo.current = true;
-          setIsGitRepo(true);
-          return;
-        }
-      } catch { /* not git */ }
-      // Not a git repo.
-      confirmedRepo.current = false;
-      setIsGitRepo(false);
+        // 4-second timeout per check — a hanging Tauri IPC never blocks the UI
+        const isRepo = await withTimeout(invoke<boolean>("git_is_repo", { cwd: workspaceCwd }), 4000, false);
+        if (cancelled) return;
+        if (isRepo) { confirmedRepo.current = true; setIsGitRepo(true); return; }
+
+        // Double-check via branch (handles bare worktrees / detached HEAD)
+        const b = await withTimeout(invoke<string>("git_current_branch", { cwd: workspaceCwd }), 4000, "");
+        if (cancelled) return;
+        if (b.length > 0) { confirmedRepo.current = true; setIsGitRepo(true); return; }
+
+        confirmedRepo.current = false;
+        setIsGitRepo(false);
+      } catch {
+        if (!cancelled) { setIsGitRepo(false); }
+      }
     };
+
     detect();
-  }, [workspaceCwd, workspaceId]);
+    return () => { cancelled = true; };
+  }, [workspaceCwd, workspaceId, detectTick]);
 
   // Reset the confirmed flag when the workspace itself changes (not just cwd).
   const prevWorkspaceId = useRef(workspaceId);
@@ -169,20 +191,31 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     const filtered = Array.from(deduped.values())
       .filter((f) => !shouldBlock(f.path))
       .sort((a, b) => (b.modified_at || 0) - (a.modified_at || 0));
-    setFiles(prev => {
-      // Don't replace a non-empty list with an empty one mid-recompute —
-      // this is the "vanish" bug where the list briefly goes blank while
-      // the git watcher recomputes diffs in the background.
-      if (filtered.length === 0 && prev.length > 0) return prev;
-      return filtered;
-    });
+    // Clear any pending empty-debounce from a previous call.
+    if (emptyFilesTimer.current) {
+      clearTimeout(emptyFilesTimer.current);
+      emptyFilesTimer.current = null;
+    }
+    if (filtered.length === 0) {
+      // Debounce clearing the list: watcher recomputes are async and may
+      // briefly return empty mid-recompute. If a follow-up call arrives
+      // with real files within 400 ms the timer is cancelled. If the 400 ms
+      // fires it means all changes are genuinely gone (e.g. all committed).
+      emptyFilesTimer.current = setTimeout(() => {
+        setFiles([]);
+        emptyFilesTimer.current = null;
+      }, 400);
+    } else {
+      setFiles(filtered);
+    };
   }, []);
 
   const loadFiles = useCallback(() => {
-    invoke<LiveDiffFile[]>("git_diff_live", { cwd: workspaceCwd, runboxId: workspaceId })
+    // Wrap in a timeout so a hanging git_run IPC never silently blocks data loading
+    withTimeout(gitDiffLive(workspaceCwd), 10000, [])
       .then(applyFiles)
       .catch(() => {});
-  }, [workspaceCwd, workspaceId, applyFiles]);
+  }, [workspaceCwd, applyFiles]);
 
   const loadCommits = useCallback(() => {
     invoke<GitCommit[]>("git_log_for_runbox", { cwd: workspaceCwd, runboxId: workspaceId })
@@ -242,12 +275,14 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
 
   useEffect(() => {
     if (!isGitRepo) return;
-    const u = listen<LiveDiffFile[]>("git:live-diff", ({ payload }) => {
-      applyFiles(payload);
+    // The watcher fires git:live-diff when files change.
+    // We ignore the backend payload and recompute the diff ourselves.
+    const u = listen<unknown>("git:live-diff", () => {
+      loadFiles();
       loadConflicts();
     });
     return () => { u.then((f) => f()); };
-  }, [isGitRepo, applyFiles, loadConflicts]);
+  }, [isGitRepo, loadFiles, loadConflicts]);
 
   // ── Git actions ───────────────────────────────────────────────────────────────
   const commit = useCallback(
@@ -387,6 +422,7 @@ export function useGitPanel(workspaceCwd: string, workspaceId: string) {
     mergeBranch, deleteBranch, branchLog, branchStatus, branchDiff,
     createWorktree, diffWorktrees,
     stageFile, unstageFile, discardFile, commitDiff,
+    redetect: () => { confirmedRepo.current = false; setDetectTick(t => t + 1); },
     loadAll, loadAgentBranches, loadFiles, loadCommits, loadBranches,
   };
 }

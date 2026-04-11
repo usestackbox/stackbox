@@ -3,11 +3,7 @@
 // MCP handler — routes requests by Bearer session_id from Authorization header.
 // runbox_id is no longer in the URL; the static /mcp endpoint is used for all agents.
 
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    Json,
-};
+use axum::{extract::State, http::HeaderMap, Json};
 
 use super::{tools, JsonRpcRequest, JsonRpcResponse, McpState};
 

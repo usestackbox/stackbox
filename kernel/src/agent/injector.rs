@@ -1,4 +1,4 @@
-// src-tauri/src/agent/injector.rs
+// kernel/src/agent/injector.rs
 //
 // Context Injector — V3 4-level build + V2 legacy build.
 //
@@ -23,7 +23,7 @@ use crate::memory::{
 
 // ── Token budgets ─────────────────────────────────────────────────────────────
 const BUDGET_LOCKED: usize = 120;
-const BUDGET_SESSION: usize = 80;   // tighter — structured summaries need fewer tokens
+const BUDGET_SESSION: usize = 80; // tighter — structured summaries need fewer tokens
 const BUDGET_PREFERRED: usize = 120;
 const BUDGET_TEMPORARY: usize = 60;
 const BUDGET_TOTAL_V3: usize = 480;
@@ -224,14 +224,26 @@ pub fn extract_state_signal(content: &str) -> String {
         parts.push(format!("status: {status}"));
     }
     if !doing.is_empty() {
-        let short = if doing.len() > 60 { &doing[..60] } else { &doing };
+        let short = if doing.len() > 60 {
+            &doing[..60]
+        } else {
+            &doing
+        };
         parts.push(format!("doing: {short}"));
     }
     if !blocked.is_empty() {
-        let short = if blocked.len() > 60 { &blocked[..60] } else { &blocked };
+        let short = if blocked.len() > 60 {
+            &blocked[..60]
+        } else {
+            &blocked
+        };
         parts.push(format!("blocked: {short}"));
     } else if !next_field.is_empty() {
-        let short = if next_field.len() > 60 { &next_field[..60] } else { &next_field };
+        let short = if next_field.len() > 60 {
+            &next_field[..60]
+        } else {
+            &next_field
+        };
         parts.push(format!("next: {short}"));
     }
 
@@ -377,7 +389,7 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
                 .filter(|l| !l.starts_with('_'))
                 // Strip path-like lines (start with / or ~) — pure noise
                 .filter(|l| !l.starts_with('/') && !l.starts_with('~'))
-                .take(4)  // was 8
+                .take(4) // was 8
                 .collect::<Vec<_>>()
                 .join("\n");
 
@@ -424,7 +436,11 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
             if signal.is_empty() {
                 continue;
             }
-            let cross = if agent_label != current_kind { " [other]" } else { "" };
+            let cross = if agent_label != current_kind {
+                " [other]"
+            } else {
+                ""
+            };
             block.push_str(&format!("• [{agent_label} {age}{cross}] {signal}\n"));
         }
 
@@ -518,7 +534,8 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
         let budget_t = BUDGET_TEMPORARY.min(BUDGET_TOTAL_V3.saturating_sub(used));
         let mut block = String::from("MY NOTES:\n");
         let mut block_tokens = est_tokens(&block);
-        for t in temporary.iter().take(4) { // was 5
+        for t in temporary.iter().take(4) {
+            // was 5
             let line = format!("• {}\n", compress(&t.content, 1)); // 1 line not 2
             let lt = est_tokens(&line);
             if block_tokens + lt > budget_t {
@@ -535,9 +552,7 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
     // ── 5. PERSISTENT MEMORY — state signal, not raw STATE.md dump ───────────
     // Extracts only status/doing/blocked — ~12 tokens instead of 80.
     if used < BUDGET_TOTAL_V3 {
-        if let Some((wt_cwd, wt_name)) =
-            crate::workspace::persistent::get_session_info(runbox_id)
-        {
+        if let Some((wt_cwd, wt_name)) = crate::workspace::persistent::get_session_info(runbox_id) {
             let sp = crate::workspace::persistent::state_path(&wt_cwd, &wt_name);
             let lp = crate::workspace::persistent::log_path(&wt_cwd, &wt_name);
             let gp = crate::workspace::persistent::graph_md_path(&wt_cwd);

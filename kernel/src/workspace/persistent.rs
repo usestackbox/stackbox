@@ -38,9 +38,9 @@ fn calus_home() -> PathBuf {
 
 /// FNV-1a hash of cwd — used as the unique project key.
 fn repo_hash(cwd: &str) -> String {
-    let h: u32 = cwd
-        .bytes()
-        .fold(2166136261u32, |acc, b| acc.wrapping_mul(16777619) ^ (b as u32));
+    let h: u32 = cwd.bytes().fold(2166136261u32, |acc, b| {
+        acc.wrapping_mul(16777619) ^ (b as u32)
+    });
     format!("{h:08x}")
 }
 
@@ -49,9 +49,14 @@ pub fn project_dir(cwd: &str) -> PathBuf {
     calus_appdata().join(repo_hash(cwd))
 }
 
-/// Worktrees base (outside repo): ~/calus/<hash>/.worktrees/
+/// Worktrees base: <appdata>/calus/<hash>/.worktrees/
+///
+/// Previously used calus_home() (~/calus/<hash>/), but that collides with
+/// the repo itself when the workspace is at ~/calus — home.join("calus")
+/// equals the repo root, so the hash dir lands inside the repo.
+/// AppData is always disjoint from any user workspace.
 pub fn worktrees_base(cwd: &str) -> PathBuf {
-    calus_home().join(repo_hash(cwd)).join(".worktrees")
+    calus_appdata().join(repo_hash(cwd)).join(".worktrees")
 }
 
 /// Agent context dir — CONTEXT.md written here by kernel at spawn.
@@ -369,7 +374,10 @@ fn session_registry() -> &'static Mutex<HashMap<String, (String, String)>> {
 
 pub fn register_session(runbox_id: &str, cwd: &str, wt_name: &str) {
     if let Ok(mut map) = session_registry().lock() {
-        map.insert(runbox_id.to_string(), (cwd.to_string(), wt_name.to_string()));
+        map.insert(
+            runbox_id.to_string(),
+            (cwd.to_string(), wt_name.to_string()),
+        );
     }
 }
 
@@ -419,15 +427,32 @@ fn now_iso() -> String {
     loop {
         let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
         let dy = if leap { 366 } else { 365 };
-        if days < dy { break; }
+        if days < dy {
+            break;
+        }
         days -= dy;
         year += 1;
     }
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let month_days = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31u64,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u32;
     for &md in &month_days {
-        if days < md { break; }
+        if days < md {
+            break;
+        }
         days -= md;
         month += 1;
     }
