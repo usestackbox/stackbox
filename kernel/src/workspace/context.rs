@@ -110,7 +110,13 @@ pub fn memory_dir(cwd: &str) -> PathBuf {
 pub fn memory_topic_path(cwd: &str, name: &str) -> PathBuf {
     let safe = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect::<String>();
     let safe = safe.trim_matches('-').to_string();
     memory_dir(cwd).join(format!("{safe}.md"))

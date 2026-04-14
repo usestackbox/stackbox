@@ -21,7 +21,6 @@ pub async fn start(
 ) {
     let memory_routes = routes::memory::router(db.clone(), sessions.clone());
 
-
     let app_url = app_handle.clone();
     let app_changed = app_handle.clone();
 

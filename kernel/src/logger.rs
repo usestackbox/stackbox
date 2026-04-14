@@ -15,8 +15,7 @@ use tracing_subscriber::{
 pub fn init(log_level: &str) {
     let level = std::env::var("CALUS_LOG").unwrap_or_else(|_| log_level.to_string());
 
-    let filter = EnvFilter::try_new(&level)
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_new(&level).unwrap_or_else(|_| EnvFilter::new("info"));
 
     // ── File appender: daily rotation, kept in ~/.local/share/stackbox/logs/ ──
     let log_dir = dirs::data_local_dir()

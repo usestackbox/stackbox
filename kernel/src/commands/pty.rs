@@ -75,7 +75,6 @@ pub async fn pty_spawn(
     .await
 }
 
-
 #[tauri::command]
 pub fn pty_write(
     session_id: String,

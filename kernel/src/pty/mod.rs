@@ -23,7 +23,10 @@ use tauri::{AppHandle, Emitter};
 use crate::{
     agent::{context::inject, injector, kind::AgentKind},
     db::sessions::{session_end, session_start},
-    git::{inject::inject_into_repo, repo::{ensure_git_repo, remove_worktree_only}},
+    git::{
+        inject::inject_into_repo,
+        repo::{ensure_git_repo, remove_worktree_only},
+    },
     memory,
     state::{AppState, PtySession},
     workspace::{
@@ -296,10 +299,7 @@ pub async fn spawn(
     // so CLAUDE.md / AGENTS.md / GEMINI.md / .cursorrules / copilot-instructions.md
     // and all skill dirs are always present when the agent starts reading the repo.
     if agent_kind != AgentKind::Shell {
-        inject_into_repo(
-            std::path::Path::new(&resolved_cwd),
-            agent_kind.kind_str(),
-        );
+        inject_into_repo(std::path::Path::new(&resolved_cwd), agent_kind.kind_str());
     }
 
     if agent_kind != AgentKind::Shell {
@@ -592,7 +592,7 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
             // mcp.json that write_mcp_config() already wrote this spawn.
             // Also expose CALUS_PORT + CALUS_TOKEN so the stdio bridge
             // (calus-stdio entry in mcp.json) can reach the kernel HTTP server.
-            cmd.env("CALUS_PORT",  crate::MEMORY_PORT.to_string());
+            cmd.env("CALUS_PORT", crate::MEMORY_PORT.to_string());
             cmd.env("CALUS_TOKEN", format!("Bearer {}", session_id));
         }
         AgentKind::GitHubCopilot => {
@@ -726,10 +726,7 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
                     // Agent was typed inside an already-running shell — inject
                     // instruction file + skill dirs now, since PTY spawn ran as
                     // Shell and skipped injection earlier.
-                    inject_into_repo(
-                        std::path::Path::new(&cwd_thr),
-                        upgraded.kind_str(),
-                    );
+                    inject_into_repo(std::path::Path::new(&cwd_thr), upgraded.kind_str());
                 }
             }
 

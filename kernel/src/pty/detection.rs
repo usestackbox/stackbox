@@ -130,7 +130,7 @@ pub fn extract_osc133(raw: &str) -> Vec<String> {
             if i < bytes.len() {
                 if bytes[i] == 0x1b {
                     i += 1; // skip ESC
-                    if i < bytes.len() && (bytes[i] == b'\\' || bytes[i] == b'\\') {
+                    if i < bytes.len() && bytes[i] == b'\\'  {
                         i += 1;
                     }
                 } else {

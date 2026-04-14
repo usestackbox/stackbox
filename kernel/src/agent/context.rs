@@ -43,8 +43,7 @@ pub fn context_file_path(cwd: &str, runbox_id: &str) -> std::path::PathBuf {
 /// all Codex CLI versions.
 fn write_codex_config(cwd: &str) -> Result<(), String> {
     let codex_dir = Path::new(cwd).join(".codex");
-    std::fs::create_dir_all(&codex_dir)
-        .map_err(|e| format!("mkdir .codex: {e}"))?;
+    std::fs::create_dir_all(&codex_dir).map_err(|e| format!("mkdir .codex: {e}"))?;
 
     let config_path = codex_dir.join("config.yaml");
 
@@ -72,8 +71,7 @@ disableUpdateCheck: true
 disable-browser: true
 disableBrowser: true
 ";
-    std::fs::write(&config_path, content)
-        .map_err(|e| format!("write .codex/config.yaml: {e}"))?;
+    std::fs::write(&config_path, content).map_err(|e| format!("write .codex/config.yaml: {e}"))?;
 
     eprintln!("[context] wrote: {}", config_path.display());
     Ok(())
@@ -81,9 +79,9 @@ disableBrowser: true
 
 fn build(cwd: &str, runbox_id: &str, session_id: &str, agent_kind: &str) -> String {
     let workspace_md = crate::workspace::persistent::workspace_md_path(cwd);
-    let graph_md     = crate::workspace::persistent::graph_md_path(cwd);
-    let wt_base      = crate::workspace::persistent::worktrees_base(cwd);
-    let wt_base_str  = wt_base.to_string_lossy();
+    let graph_md = crate::workspace::persistent::graph_md_path(cwd);
+    let wt_base = crate::workspace::persistent::worktrees_base(cwd);
+    let wt_base_str = wt_base.to_string_lossy();
 
     // Build the example worktree path using the correct OS separator.
     let sep = std::path::MAIN_SEPARATOR;
@@ -225,14 +223,14 @@ fn build(cwd: &str, runbox_id: &str, session_id: &str, agent_kind: &str) -> Stri
          mcp__calus__set_agent_status  → update your status\n\
          ```\n\
          ",
-        runbox_id   = runbox_id,
-        session_id  = session_id,
-        agent_kind  = agent_kind,
-        cwd         = cwd,
-        sep         = sep,
+        runbox_id = runbox_id,
+        session_id = session_id,
+        agent_kind = agent_kind,
+        cwd = cwd,
+        sep = sep,
         wt_base_str = wt_base_str,
-        graph       = graph_md.display(),
-        ws          = workspace_md.display(),
-        mem         = crate::workspace::context::memory_md_path(cwd).display(),
+        graph = graph_md.display(),
+        ws = workspace_md.display(),
+        mem = crate::workspace::context::memory_md_path(cwd).display(),
     )
 }

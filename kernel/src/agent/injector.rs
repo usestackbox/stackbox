@@ -26,7 +26,7 @@ const BUDGET_LOCKED: usize = 120;
 const BUDGET_SESSION: usize = 80; // tighter — structured summaries need fewer tokens
 const BUDGET_PREFERRED: usize = 120;
 const BUDGET_TEMPORARY: usize = 60;
-const BUDGET_MEMORY: usize = 100;  // cross-agent MEMORY.md: commands + recent learnings
+const BUDGET_MEMORY: usize = 100; // cross-agent MEMORY.md: commands + recent learnings
 const BUDGET_TOTAL_V3: usize = 580; // raised from 480 to accommodate MEMORY section
 
 // V2 budgets (legacy)
@@ -323,11 +323,15 @@ pub fn extract_memory_signal(content: &str) -> String {
     if !learnings.is_empty() {
         // Most recent first, capped at 8 entries
         let recent: Vec<&String> = learnings.iter().take(8).collect();
-        out.push_str("learnings:
-");
+        out.push_str(
+            "learnings:
+",
+        );
         for l in &recent {
-            out.push_str(&format!("  {l}
-"));
+            out.push_str(&format!(
+                "  {l}
+"
+            ));
         }
     }
 

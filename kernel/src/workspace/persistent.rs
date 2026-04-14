@@ -47,9 +47,9 @@ fn calus_appdata() -> PathBuf {
 
 /// FNV-1a hash of cwd — used as the unique project key.
 fn repo_hash(cwd: &str) -> String {
-    let h: u32 = cwd
-        .bytes()
-        .fold(2_166_136_261u32, |acc, b| acc.wrapping_mul(16_777_619) ^ b as u32);
+    let h: u32 = cwd.bytes().fold(2_166_136_261u32, |acc, b| {
+        acc.wrapping_mul(16_777_619) ^ b as u32
+    });
     format!("{h:08x}")
 }
 
@@ -112,7 +112,7 @@ pub fn init_project(cwd: &str) -> Result<(), String> {
     let ws = workspace_md_path(cwd);
     if !ws.exists() {
         let hash = repo_hash(cwd);
-        let now  = now_iso();
+        let now = now_iso();
         let content = format!(
             "# workspace\nhash: {hash}\npath: {cwd}\ncreated: {now}\n\n\
              ## branches\nwt_name | branch | agent | status | wt_path | updated\n---\n"
@@ -122,7 +122,7 @@ pub fn init_project(cwd: &str) -> Result<(), String> {
 
     let gp = graph_md_path(cwd);
     if !gp.exists() {
-        let hash    = repo_hash(cwd);
+        let hash = repo_hash(cwd);
         let content = format!("# graph\nhash: {hash}\n\n## agents\n## links\n");
         std::fs::write(&gp, content).map_err(|e| format!("write GRAPH.md: {e}"))?;
     }
@@ -175,7 +175,10 @@ fn update_gitignore(cwd: &str) {
         .open(&gitignore_path)
         .and_then(|mut f| f.write_all(block.as_bytes()))
     {
-        Ok(_)  => eprintln!("[persistent] updated .gitignore: {}", gitignore_path.display()),
+        Ok(_) => eprintln!(
+            "[persistent] updated .gitignore: {}",
+            gitignore_path.display()
+        ),
         Err(e) => eprintln!("[persistent] could not update .gitignore: {e}"),
     }
 }
@@ -194,7 +197,7 @@ pub fn register_agent(
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir worktree dir: {e}"))?;
     }
     if !sp.exists() {
-        let now     = now_iso();
+        let now = now_iso();
         let content = format!(
             "# state\n\
              agent: {agent_kind}\n\
@@ -237,9 +240,9 @@ fn update_workspace_md(
     wt_path: &str,
     status: &str,
 ) -> Result<(), String> {
-    let ws      = workspace_md_path(cwd);
+    let ws = workspace_md_path(cwd);
     let existing = std::fs::read_to_string(&ws).unwrap_or_default();
-    let now     = now_iso();
+    let now = now_iso();
 
     let new_row = format!("{wt_name} | {branch} | {agent_kind} | {status} | {wt_path} | {now}");
 
@@ -257,7 +260,7 @@ fn update_workspace_md(
 
     match rows.iter().position(|r| r.starts_with(wt_name)) {
         Some(idx) => rows[idx] = new_row,
-        None      => rows.push(new_row),
+        None => rows.push(new_row),
     }
 
     let updated = format!("{}{}\n", header, rows.join("\n"));
@@ -267,7 +270,7 @@ fn update_workspace_md(
 pub fn update_agent_status(cwd: &str, wt_name: &str, status: &str) {
     let ws = workspace_md_path(cwd);
     if let Ok(content) = std::fs::read_to_string(&ws) {
-        let now     = now_iso();
+        let now = now_iso();
         let updated = content
             .lines()
             .map(|line| {
@@ -293,7 +296,7 @@ pub fn update_agent_status(cwd: &str, wt_name: &str, status: &str) {
 
     let sp = state_path(cwd, wt_name);
     if let Ok(content) = std::fs::read_to_string(&sp) {
-        let now     = now_iso();
+        let now = now_iso();
         let updated = content
             .lines()
             .map(|line| {
@@ -326,12 +329,12 @@ pub fn read_workspace(cwd: &str) -> String {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AgentEntry {
-    pub wt_name:    String,
-    pub branch:     String,
+    pub wt_name: String,
+    pub branch: String,
     pub agent_kind: String,
-    pub status:     String,
-    pub wt_path:    String,
-    pub updated:    String,
+    pub status: String,
+    pub wt_path: String,
+    pub updated: String,
 }
 
 pub fn list_active_agents(cwd: &str) -> Vec<AgentEntry> {
@@ -346,7 +349,7 @@ pub fn list_all_agents(cwd: &str) -> Vec<AgentEntry> {
 }
 
 fn parse_workspace_rows(cwd: &str) -> Vec<AgentEntry> {
-    let content  = read_workspace(cwd);
+    let content = read_workspace(cwd);
     let rows_raw = content
         .find("---\n")
         .map(|p| &content[p + 4..])
@@ -361,12 +364,12 @@ fn parse_workspace_rows(cwd: &str) -> Vec<AgentEntry> {
                 return None;
             }
             Some(AgentEntry {
-                wt_name:    p[0].trim().to_string(),
-                branch:     p[1].trim().to_string(),
+                wt_name: p[0].trim().to_string(),
+                branch: p[1].trim().to_string(),
                 agent_kind: p[2].trim().to_string(),
-                status:     p[3].trim().to_string(),
-                wt_path:    p[4].trim().to_string(),
-                updated:    p[5].trim().to_string(),
+                status: p[3].trim().to_string(),
+                wt_path: p[4].trim().to_string(),
+                updated: p[5].trim().to_string(),
             })
         })
         .collect()
@@ -375,10 +378,10 @@ fn parse_workspace_rows(cwd: &str) -> Vec<AgentEntry> {
 // ── Skill builder ─────────────────────────────────────────────────────────────
 
 pub fn build_skill(cwd: &str, wt_name: &str, wt_path: &str, branch: &str) -> String {
-    let sp  = state_path(cwd, wt_name);
-    let lp  = log_path(cwd, wt_name);
-    let gp  = graph_md_path(cwd);
-    let wp  = workspace_md_path(cwd);
+    let sp = state_path(cwd, wt_name);
+    let lp = log_path(cwd, wt_name);
+    let gp = graph_md_path(cwd);
+    let wp = workspace_md_path(cwd);
 
     let state_signal = read_agent_state(cwd, wt_name)
         .map(|s| crate::agent::injector::extract_state_signal(&s))
@@ -411,10 +414,10 @@ pub fn build_skill(cwd: &str, wt_name: &str, wt_path: &str, branch: &str) -> Str
          - NEVER write these files into the user repo\n\
          - NEVER create a new worktree if yours exists — read state and resume\n\
          - NEVER run git commands directly — use MCP tools only\n",
-        st  = sp.display(),
-        lg  = lp.display(),
+        st = sp.display(),
+        lg = lp.display(),
         gph = gp.display(),
-        ws  = wp.display(),
+        ws = wp.display(),
     )
 }
 
@@ -476,27 +479,44 @@ fn now_iso() -> String {
         .unwrap_or_default()
         .as_secs();
 
-    let s        = secs % 60;
-    let m        = (secs / 60) % 60;
-    let h        = (secs / 3_600) % 24;
+    let s = secs % 60;
+    let m = (secs / 60) % 60;
+    let h = (secs / 3_600) % 24;
     let mut days = secs / 86_400;
     let mut year = 1970u32;
 
     loop {
         let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-        let dy   = if leap { 366 } else { 365 };
-        if days < dy { break; }
+        let dy = if leap { 366 } else { 365 };
+        if days < dy {
+            break;
+        }
         days -= dy;
         year += 1;
     }
 
-    let leap       = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let month_days = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut month  = 1u32;
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days = [
+        31u64,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut month = 1u32;
 
     for &md in &month_days {
-        if days < md { break; }
-        days  -= md;
+        if days < md {
+            break;
+        }
+        days -= md;
         month += 1;
     }
 

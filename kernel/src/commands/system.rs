@@ -6,9 +6,9 @@ use tauri::AppHandle;
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlatformInfo {
-    pub os:          String,
-    pub arch:        String,
-    pub version:     String,
+    pub os: String,
+    pub arch: String,
+    pub version: String,
     pub app_version: String,
 }
 
@@ -16,9 +16,9 @@ pub struct PlatformInfo {
 #[tauri::command]
 pub fn get_platform_info() -> PlatformInfo {
     PlatformInfo {
-        os:          std::env::consts::OS.to_string(),
-        arch:        std::env::consts::ARCH.to_string(),
-        version:     os_version(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        version: os_version(),
         app_version: env!("CARGO_PKG_VERSION").to_string(),
     }
 }
@@ -28,9 +28,7 @@ pub fn get_platform_info() -> PlatformInfo {
 pub async fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_shell::ShellExt;
     #[allow(deprecated)]
-    app.shell()
-        .open(&url, None)
-        .map_err(|e| e.to_string())
+    app.shell().open(&url, None).map_err(|e| e.to_string())
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -51,9 +49,11 @@ fn os_version() -> String {
         std::fs::read_to_string("/etc/os-release")
             .ok()
             .and_then(|s| {
-                s.lines()
-                    .find(|l| l.starts_with("PRETTY_NAME="))
-                    .map(|l| l.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string())
+                s.lines().find(|l| l.starts_with("PRETTY_NAME=")).map(|l| {
+                    l.trim_start_matches("PRETTY_NAME=")
+                        .trim_matches('"')
+                        .to_string()
+                })
             })
             .unwrap_or_default()
     }

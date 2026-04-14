@@ -49,8 +49,8 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
     match updater.check().await.map_err(|e| e.to_string())? {
         Some(u) => Ok(Some(UpdateInfo {
             version: u.version.clone(),
-            date:    u.date.map(|d| d.to_string()),
-            body:    u.body.clone(),
+            date: u.date.map(|d| d.to_string()),
+            body: u.body.clone(),
         })),
         None => Ok(None),
     }
@@ -105,7 +105,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn get_app_version(app: AppHandle) -> AppVersionInfo {
     AppVersionInfo {
-        version:  app.package_info().version.to_string(),
+        version: app.package_info().version.to_string(),
         platform: std::env::consts::OS.to_string(),
     }
 }

@@ -38,28 +38,28 @@ pub fn run() {
         // Commands: check_update, install_update, get_app_version (below).
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state::AppState {
-            sessions:           Arc::new(Mutex::new(HashMap::new())),
-            db:                 db::open().expect("failed to open calus db"),
-            watchers:           Arc::new(Mutex::new(HashMap::new())),
-            watched_runboxes:   Arc::new(Mutex::new(HashSet::new())),
-            reinject_debounce:  Arc::new(Mutex::new(HashMap::new())),
-            pty_writer:         crate::pty::writer::PtyWriter::new(),
-            conflict_registry:  conflict::new_registry(),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            db: db::open().expect("failed to open calus db"),
+            watchers: Arc::new(Mutex::new(HashMap::new())),
+            watched_runboxes: Arc::new(Mutex::new(HashSet::new())),
+            reinject_debounce: Arc::new(Mutex::new(HashMap::new())),
+            pty_writer: crate::pty::writer::PtyWriter::new(),
+            conflict_registry: conflict::new_registry(),
         })
         .setup(|app| {
             agent::globals::set_app_handle(app.handle().clone());
 
-            let app_handle      = Arc::new(app.handle().clone());
-            let state           = app.state::<state::AppState>();
-            let db_handle       = state.db.clone();
+            let app_handle = Arc::new(app.handle().clone());
+            let state = app.state::<state::AppState>();
+            let db_handle = state.db.clone();
             let sessions_handle = state.sessions.clone();
-            let app_state       = Arc::new(state::AppState {
-                db:                db_handle.clone(),
-                sessions:          sessions_handle.clone(),
-                watchers:          state.watchers.clone(),
-                watched_runboxes:  state.watched_runboxes.clone(),
+            let app_state = Arc::new(state::AppState {
+                db: db_handle.clone(),
+                sessions: sessions_handle.clone(),
+                watchers: state.watchers.clone(),
+                watched_runboxes: state.watched_runboxes.clone(),
                 reinject_debounce: state.reinject_debounce.clone(),
-                pty_writer:        state.pty_writer.clone(),
+                pty_writer: state.pty_writer.clone(),
                 conflict_registry: state.conflict_registry.clone(),
             });
 
