@@ -26,7 +26,8 @@ const BUDGET_LOCKED: usize = 120;
 const BUDGET_SESSION: usize = 80; // tighter — structured summaries need fewer tokens
 const BUDGET_PREFERRED: usize = 120;
 const BUDGET_TEMPORARY: usize = 60;
-const BUDGET_TOTAL_V3: usize = 480;
+const BUDGET_MEMORY: usize = 100;  // cross-agent MEMORY.md: commands + recent learnings
+const BUDGET_TOTAL_V3: usize = 580; // raised from 480 to accommodate MEMORY section
 
 // V2 budgets (legacy)
 const BUDGET_GOAL: usize = 600;
@@ -251,6 +252,86 @@ pub fn extract_state_signal(content: &str) -> String {
         return String::new();
     }
     parts.join(" | ")
+}
+
+// ── Memory signal extractor ──────────────────────────────────────────────────
+
+/// Extract a compact signal from MEMORY.md for context injection.
+/// Includes:
+///   - All lines from ## commands (always useful, low token cost)
+///   - The 8 most recent ## learnings entries (newest first)
+/// output is kept well under BUDGET_MEMORY tokens.
+pub fn extract_memory_signal(content: &str) -> String {
+    let mut commands: Vec<String> = Vec::new();
+    let mut learnings: Vec<String> = Vec::new();
+    let mut current_section: Option<&str> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("<!--") {
+            continue;
+        }
+        // Skip the updated: timestamp line
+        if trimmed.starts_with("updated:") {
+            continue;
+        }
+        if trimmed == "## commands" {
+            current_section = Some("commands");
+            continue;
+        }
+        if trimmed == "## learnings" {
+            current_section = Some("learnings");
+            continue;
+        }
+        if trimmed == "## topics" || trimmed == "## notes" {
+            current_section = None;
+            continue;
+        }
+        if trimmed.starts_with("## ") {
+            current_section = None;
+            continue;
+        }
+        match current_section {
+            Some("commands") if trimmed.starts_with("- ") => {
+                commands.push(trimmed[2..].to_string());
+            }
+            Some("learnings") if trimmed.starts_with("- [") => {
+                learnings.push(trimmed.to_string());
+            }
+            _ => {}
+        }
+    }
+
+    if commands.is_empty() && learnings.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+
+    if !commands.is_empty() {
+        out.push_str("commands: ");
+        out.push_str(
+            &commands
+                .iter()
+                .map(|c| c.as_str())
+                .collect::<Vec<_>>()
+                .join(" · "),
+        );
+        out.push('\n');
+    }
+
+    if !learnings.is_empty() {
+        // Most recent first, capped at 8 entries
+        let recent: Vec<&String> = learnings.iter().take(8).collect();
+        out.push_str("learnings:
+");
+        for l in &recent {
+            out.push_str(&format!("  {l}
+"));
+        }
+    }
+
+    out
 }
 
 // ── Session cache ─────────────────────────────────────────────────────────────
@@ -549,7 +630,31 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
         }
     }
 
-    // ── 5. PERSISTENT MEMORY — state signal, not raw STATE.md dump ───────────
+    // ── 5. CROSS-AGENT MEMORY — compact MEMORY.md extract ───────────────────
+    // Loads the commands section + the most recent learnings from the shared
+    // MEMORY.md (written by all agents across all sessions).
+    // Full MEMORY.md is available via calus_memory_read MCP tool.
+    if !cwd.is_empty() && used < BUDGET_TOTAL_V3 {
+        let memory_content = crate::workspace::context::read_memory_index(&cwd);
+        if !memory_content.trim().is_empty() {
+            let compact = extract_memory_signal(&memory_content);
+            if !compact.is_empty() {
+                let memory_path = crate::workspace::context::memory_md_path(&cwd);
+                let block = format!(
+                    "MEMORY (cross-agent · all sessions):\n                     path: {mp}\n                     {compact}\n                     tip: calus_memory_read for full index · calus_memory_append to add\n",
+                    mp = memory_path.display(),
+                );
+                let bt = est_tokens(&block);
+                let room = BUDGET_MEMORY.min(BUDGET_TOTAL_V3.saturating_sub(used));
+                if bt <= room {
+                    sections.push(block);
+                    used += bt;
+                }
+            }
+        }
+    }
+
+    // ── 6. PERSISTENT MEMORY — state signal, not raw STATE.md dump ───────────
     // Extracts only status/doing/blocked — ~12 tokens instead of 80.
     if used < BUDGET_TOTAL_V3 {
         if let Some((wt_cwd, wt_name)) = crate::workspace::persistent::get_session_info(runbox_id) {
@@ -592,7 +697,7 @@ async fn build_v3_uncached(runbox_id: &str, task: &str, agent_id: &str) -> Strin
     }
 
     format!(
-        "<!-- stackbox context: ~{used} tokens -->\n{}\n<!-- end context -->",
+        "<!-- calus context: ~{used} tokens -->\n{}\n<!-- end context -->",
         sections.join("\n")
     )
 }

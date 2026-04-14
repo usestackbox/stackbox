@@ -1,14 +1,20 @@
 // kernel/src/mcp/tools.rs
 //
-// MCP tool definitions exposed to agents via the calus MCP server.
-// Agent calls git_ensure with a name slug — Calus creates the worktree.
+// MCP tool definitions exposed to agents via the Calus MCP server.
+//
+// Memory tools (new):
+//   calus_memory_read        — read MEMORY.md index or a named topic file
+//   calus_memory_append      — append a learning to MEMORY.md
+//   calus_memory_write_topic — create/replace a topic file in memory/
+//   calus_session_summary    — record end-of-session summary + auto-feeds MEMORY.md
 
-use crate::{db, git, state::AppState};
+use crate::{db, git, state::AppState, workspace::{persistent, context}};
 use git::inject::inject_into_repo;
 use serde_json::{json, Value};
 
 pub fn tool_definitions() -> Value {
     json!([
+        // ── Git worktree tools ────────────────────────────────────────────────
         {
             "name": "git_ensure",
             "description": "Create your git worktree and branch. Call this at the start of every task before editing files. Pass a short slug that describes your task.",
@@ -69,6 +75,89 @@ pub fn tool_definitions() -> Value {
                 },
                 "required": ["runbox_id", "status"]
             }
+        },
+
+        // ── Memory tools ──────────────────────────────────────────────────────
+        {
+            "name": "calus_memory_read",
+            "description": "Read cross-agent memory. Without a topic, returns the MEMORY.md index (shared by all agents). With a topic name, returns that topic file from memory/. Use this at session start to recall past learnings before beginning work.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "cwd":   { "type": "string", "description": "Workspace root from CALUS_CWD env var" },
+                    "topic": { "type": "string", "description": "Optional topic name (e.g. 'debugging', 'patterns'). Omit to read the MEMORY.md index." }
+                },
+                "required": ["cwd"]
+            }
+        },
+        {
+            "name": "calus_memory_append",
+            "description": "Append a learning or insight to the shared MEMORY.md. Use this when you discover something other agents should know — build commands, architecture decisions, gotchas, debugging insights. Keep it to one concise line.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "cwd":        { "type": "string", "description": "Workspace root from CALUS_CWD env var" },
+                    "agent_kind": { "type": "string", "description": "Your agent kind from CALUS_AGENT_KIND env var" },
+                    "learning":   { "type": "string", "description": "One concise line describing what you learned. e.g. 'run npm test before committing — CI requires it'" }
+                },
+                "required": ["cwd", "agent_kind", "learning"]
+            }
+        },
+        {
+            "name": "calus_memory_set_command",
+            "description": "Record a build/test/lint/run command in shared memory so all agents know how to operate this project. Replaces any existing value for the same key.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "cwd":   { "type": "string", "description": "Workspace root from CALUS_CWD env var" },
+                    "key":   { "type": "string", "description": "Command name: build, test, lint, run, migrate, seed, or similar" },
+                    "value": { "type": "string", "description": "The exact shell command to run" }
+                },
+                "required": ["cwd", "key", "value"]
+            }
+        },
+        {
+            "name": "calus_memory_write_topic",
+            "description": "Write detailed notes to a named topic file in memory/. Topic files are NOT loaded at session start — agents load them on demand with calus_memory_read(topic). Use for deep notes that would bloat the MEMORY.md index.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "cwd":     { "type": "string", "description": "Workspace root from CALUS_CWD env var" },
+                    "topic":   { "type": "string", "description": "Topic name: debugging, patterns, api, auth, etc. Becomes memory/<topic>.md" },
+                    "content": { "type": "string", "description": "Full markdown content to write" },
+                    "append":  { "type": "boolean", "description": "If true, append to existing content instead of replacing. Default: false." }
+                },
+                "required": ["cwd", "topic", "content"]
+            }
+        },
+        {
+            "name": "calus_memory_list_topics",
+            "description": "List all topic files available in memory/. Use this when unsure what detailed notes exist.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "cwd": { "type": "string", "description": "Workspace root from CALUS_CWD env var" }
+                },
+                "required": ["cwd"]
+            }
+        },
+
+        // ── Session summary ───────────────────────────────────────────────────
+        {
+            "name": "calus_session_summary",
+            "description": "Record an end-of-session summary. Call this when the user says done, pausing, stopping, or thanks. Automatically feeds key learnings into shared MEMORY.md so the next agent session (same or different agent) can resume with context.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "cwd":        { "type": "string", "description": "Workspace root from CALUS_CWD env var" },
+                    "agent_kind": { "type": "string", "description": "Your agent kind from CALUS_AGENT_KIND env var" },
+                    "goal":       { "type": "string", "description": "One sentence: what was the overall task?" },
+                    "done":       { "type": "string", "description": "Comma-separated list of completed items" },
+                    "blocked":    { "type": "string", "description": "Current blocker, or '-' if none" },
+                    "next":       { "type": "string", "description": "First concrete action to take on resume" }
+                },
+                "required": ["cwd", "agent_kind", "goal", "done", "blocked", "next"]
+            }
         }
     ])
 }
@@ -83,6 +172,8 @@ pub async fn dispatch(
     _agent_name: &str,
 ) -> Result<Value, String> {
     match tool_name {
+
+        // ── git_ensure ────────────────────────────────────────────────────────
         "git_ensure" => {
             let cwd = str_field(input, "cwd")?;
             let runbox_id = str_field(input, "runbox_id")?;
@@ -95,9 +186,7 @@ pub async fn dispatch(
 
             git::repo::ensure_git_repo(&cwd, &runbox_id)?;
 
-            // Agent provides the name — Calus creates the worktree
             let wt = git::repo::ensure_worktree(&cwd, &runbox_id, &name, agent_kind);
-            // Inject agent instruction file into repo root (write-if-missing).
             inject_into_repo(std::path::Path::new(&cwd), agent_kind);
 
             if let Some(ref w) = wt {
@@ -126,6 +215,7 @@ pub async fn dispatch(
             }))
         }
 
+        // ── git_worktree_get ──────────────────────────────────────────────────
         "git_worktree_get" => {
             let runbox_id = str_field(input, "runbox_id")?;
             let record = db::runboxes::runbox_get_worktree_record(&state.db, &runbox_id);
@@ -136,6 +226,7 @@ pub async fn dispatch(
             }))
         }
 
+        // ── git_commit ────────────────────────────────────────────────────────
         "git_commit" => {
             let worktree_path = str_field(input, "worktree_path")?;
             let message = str_field(input, "message")?;
@@ -143,12 +234,14 @@ pub async fn dispatch(
             Ok(json!({ "result": result }))
         }
 
+        // ── git_worktree_delete ───────────────────────────────────────────────
         "git_worktree_delete" => {
             let worktree_path = str_field(input, "worktree_path")?;
             git::repo::remove_worktree_only(&worktree_path);
             Ok(json!({ "deleted": true }))
         }
 
+        // ── set_agent_status ──────────────────────────────────────────────────
         "set_agent_status" => {
             let runbox_id = str_field(input, "runbox_id")?;
             let status = str_field(input, "status")?;
@@ -157,13 +250,137 @@ pub async fn dispatch(
             Ok(json!({ "ok": true }))
         }
 
+        // ── calus_memory_read ─────────────────────────────────────────────────
+        "calus_memory_read" => {
+            let cwd = str_field(input, "cwd")?;
+            let topic = input["topic"].as_str();
+
+            let content = match topic {
+                Some(t) => {
+                    // Read a named topic file
+                    context::read_memory_topic(&cwd, t)
+                        .ok_or_else(|| format!("topic '{t}' not found — use calus_memory_list_topics to see available topics"))?
+                }
+                None => {
+                    // Read the MEMORY.md index (enforcing the line/byte limits)
+                    let idx = context::read_memory_index(&cwd);
+                    if idx.is_empty() {
+                        "MEMORY.md is empty or does not exist yet.".to_string()
+                    } else {
+                        idx
+                    }
+                }
+            };
+
+            Ok(json!({ "content": content }))
+        }
+
+        // ── calus_memory_append ───────────────────────────────────────────────
+        "calus_memory_append" => {
+            let cwd = str_field(input, "cwd")?;
+            let agent_kind = input["agent_kind"].as_str().unwrap_or("agent");
+            let learning = str_field(input, "learning")?;
+
+            context::append_memory_learning(&cwd, agent_kind, &learning)?;
+            Ok(json!({ "ok": true, "memory": context::memory_md_path(&cwd).to_string_lossy() }))
+        }
+
+        // ── calus_memory_set_command ──────────────────────────────────────────
+        "calus_memory_set_command" => {
+            let cwd = str_field(input, "cwd")?;
+            let key = str_field(input, "key")?;
+            let value = str_field(input, "value")?;
+
+            context::set_memory_command(&cwd, &key, &value)?;
+            Ok(json!({ "ok": true }))
+        }
+
+        // ── calus_memory_write_topic ──────────────────────────────────────────
+        "calus_memory_write_topic" => {
+            let cwd = str_field(input, "cwd")?;
+            let topic = str_field(input, "topic")?;
+            let content = str_field(input, "content")?;
+            let append = input["append"].as_bool().unwrap_or(false);
+
+            if append {
+                context::append_memory_topic(&cwd, &topic, &content)?;
+            } else {
+                context::write_memory_topic(&cwd, &topic, &content)?;
+            }
+
+            // Register the topic in MEMORY.md's ## topics section so agents know it exists
+            register_topic_in_index(&cwd, &topic);
+
+            Ok(json!({
+                "ok": true,
+                "path": context::memory_topic_path(&cwd, &topic).to_string_lossy()
+            }))
+        }
+
+        // ── calus_memory_list_topics ──────────────────────────────────────────
+        "calus_memory_list_topics" => {
+            let cwd = str_field(input, "cwd")?;
+            let topics = context::list_memory_topics(&cwd);
+            Ok(json!({ "topics": topics }))
+        }
+
+        // ── calus_session_summary ─────────────────────────────────────────────
+        "calus_session_summary" => {
+            let cwd = str_field(input, "cwd")?;
+            let agent_kind = input["agent_kind"].as_str().unwrap_or("agent");
+            let goal = str_field(input, "goal")?;
+            let done = str_field(input, "done")?;
+            let blocked = str_field(input, "blocked")?;
+            let next = str_field(input, "next")?;
+
+            // Auto-feed key fields into shared MEMORY.md so all agents benefit
+            context::feed_session_to_memory(&cwd, agent_kind, &goal, &done, &blocked)?;
+
+            // Return confirmation with what was recorded
+            Ok(json!({
+                "recorded": true,
+                "summary": {
+                    "goal":    goal,
+                    "done":    done,
+                    "blocked": blocked,
+                    "next":    next,
+                },
+                "memory_updated": context::memory_md_path(&cwd).to_string_lossy()
+            }))
+        }
+
         other => Err(format!("unknown MCP tool: {other}")),
     }
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn str_field(v: &Value, key: &str) -> Result<String, String> {
     v[key]
         .as_str()
         .map(str::to_string)
         .ok_or_else(|| format!("missing field: {key}"))
+}
+
+/// Add `- <topic> → memory/<topic>.md` to the ## topics section of MEMORY.md
+/// if it isn't already listed.
+fn register_topic_in_index(cwd: &str, topic: &str) {
+    let mp = context::memory_md_path(cwd);
+    let Ok(raw) = std::fs::read_to_string(&mp) else { return };
+    let entry = format!("- {topic} → memory/{topic}.md");
+    if raw.contains(&entry) {
+        return;
+    }
+    let updated = if let Some(idx) = raw.find("## topics") {
+        let after = &raw[idx..];
+        if let Some(nl) = after.find('\n') {
+            let insert_pos = idx + nl + 1;
+            format!("{}{}\n{}", &raw[..insert_pos], entry, &raw[insert_pos..])
+        } else {
+            format!("{raw}\n{entry}\n")
+        }
+    } else {
+        format!("{raw}\n## topics\n{entry}\n")
+    };
+    let _ = std::fs::write(&mp, updated);
 }

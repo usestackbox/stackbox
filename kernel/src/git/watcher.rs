@@ -84,19 +84,25 @@ pub fn start_watch(app: AppHandle, cwd: String, runbox_id: String) {
 
     match watcher {
         Ok(mut w) => {
-            if w.watch(std::path::Path::new(&cwd), RecursiveMode::Recursive)
-                .is_ok()
-            {
-                eprintln!("[watcher] watching {cwd}");
-                map.insert(
-                    cwd,
-                    WatchEntry {
-                        _watcher: w,
-                        last_scheduled,
-                    },
-                );
-            } else {
-                eprintln!("[watcher] failed to watch path: {cwd}");
+            let path = std::path::Path::new(&cwd);
+            if !path.exists() {
+                // Path was valid when checked but disappeared — skip silently
+                return;
+            }
+            match w.watch(path, RecursiveMode::Recursive) {
+                Ok(_) => {
+                    eprintln!("[watcher] watching {cwd}");
+                    map.insert(
+                        cwd,
+                        WatchEntry {
+                            _watcher: w,
+                            last_scheduled,
+                        },
+                    );
+                }
+                Err(e) => {
+                    eprintln!("[watcher] failed to watch path: {cwd} — {e}");
+                }
             }
         }
         Err(e) => eprintln!("[watcher] failed to create watcher: {e}"),

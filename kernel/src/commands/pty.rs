@@ -3,7 +3,6 @@ use crate::{
     agent::kind::AgentKind,
     db::sessions::session_end,
     git::repo::{ensure_git_repo, has_git, remove_worktree_only},
-    mcp::config::{mcp_config_path, write_mcp_config},
     pty::{self, expand_cwd, kill_tmux_session, tmux_session_alive},
     state::AppState,
     workspace::persistent,
@@ -49,12 +48,6 @@ pub async fn pty_spawn(
         let _ = ensure_git_repo(&real_cwd, &runbox_id);
     }
 
-    // ── 5. Write shared MCP config to ~/stackbox/mcp/mcp.json ────────────────
-    // Never written to the user's repo. Passed to agent via --mcp-config flag.
-    if let Err(e) = write_mcp_config(&session_id) {
-        eprintln!("[pty_spawn] write_mcp_config: {e}");
-    }
-
     // ── 6. Write per-agent context file to appdata ────────────────────────────
     // No worktree path yet — agent will create the worktree itself.
     if let Err(e) =
@@ -66,17 +59,13 @@ pub async fn pty_spawn(
     let context_file = crate::agent::context::context_file_path(&real_cwd, &runbox_id);
     eprintln!("[pty_spawn] STACKBOX_CONTEXT={}", context_file.display());
 
-    // ── 7. Inject --mcp-config into agent command ─────────────────────────────
-    // All agents get the same shared config file.
-    let effective_cmd = agent_cmd.map(|cmd| append_mcp_config_flag(&cmd, kind));
-
     // ── 8. Terminal always starts in the user's real workspace folder ─────────
     pty::spawn(
         app,
         session_id,
         runbox_id,
         real_cwd,
-        effective_cmd,
+        agent_cmd,
         workspace_name,
         cols,
         rows,
@@ -86,20 +75,6 @@ pub async fn pty_spawn(
     .await
 }
 
-/// Append --mcp-config <path> to the agent command.
-/// Each agent CLI uses the same flag name; Gemini uses an env var instead.
-fn append_mcp_config_flag(cmd: &str, kind: AgentKind) -> String {
-    let config_path = mcp_config_path();
-    let path_str = config_path.to_string_lossy();
-
-    match kind {
-        // Gemini CLI reads GEMINI_MCP_CONFIG env var — handled at PTY env level,
-        // not injected into the command string here.
-        AgentKind::GeminiCli => cmd.to_string(),
-        // All other agents support --mcp-config <path>
-        _ => format!("{cmd} --mcp-config {path_str}"),
-    }
-}
 
 #[tauri::command]
 pub fn pty_write(
@@ -124,6 +99,14 @@ pub fn pty_write(
                                 open_url = Some(url);
                                 send_data = Some("\x03\r\n".to_string());
                             } else {
+                                // ── Warp-style block: tell the frontend a new command
+                                // was submitted so it can open a fresh output block
+                                // before any output bytes arrive.
+                                crate::agent::globals::emit_event(
+                                    &format!("pty://block/cmd/{}", session_id),
+                                    serde_json::json!({ "command": line }),
+                                );
+
                                 let token = line.split_whitespace().next().unwrap_or("");
                                 let base_cmd = token.rsplit(['/', '\\']).next().unwrap_or(token);
                                 let kind = AgentKind::detect(base_cmd);
@@ -165,10 +148,6 @@ pub fn pty_write(
                 crate::agent::context::inject(&cwd, &rb, &sid, kind.kind_str(), wt_path.as_deref())
             {
                 eprintln!("[pty_write] re-inject: {e}");
-            }
-            // Re-write MCP config with current session_id (in case it changed)
-            if let Err(e) = write_mcp_config(&sid) {
-                eprintln!("[pty_write] write_mcp_config: {e}");
             }
         });
     }
@@ -305,4 +284,45 @@ pub fn get_agent_state(cwd: String, wt_name: String) -> Option<String> {
 pub fn mark_agent_done(cwd: String, wt_name: String) -> Result<(), String> {
     persistent::update_agent_status(&cwd, &wt_name, "done");
     Ok(())
+}
+
+/// Returns the current working directory of a running PTY session.
+/// Uses the stored cwd from session state (set at spawn time).
+/// For a live cwd, the frontend should track cd events from PTY output.
+#[tauri::command]
+pub fn pty_get_cwd(session_id: String, state: tauri::State<'_, AppState>) -> Option<String> {
+    let sessions = state.sessions.lock().ok()?;
+    let session = sessions.get(&session_id)?;
+
+    // Try to resolve the live cwd via the OS process if pid is available.
+    let pid = session._child.process_id();
+
+    if let Some(pid) = pid {
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(path) = std::fs::read_link(format!("/proc/{pid}/cwd")) {
+                if let Some(s) = path.to_str() {
+                    return Some(s.to_string());
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(out) = std::process::Command::new("lsof")
+                .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+                .output()
+            {
+                if let Ok(s) = String::from_utf8(out.stdout) {
+                    if let Some(line) = s.lines().find(|l| l.starts_with('n')) {
+                        return Some(line[1..].to_string());
+                    }
+                }
+            }
+        }
+        // Windows: not easily available without WMI — fall through to stored cwd.
+        let _ = pid;
+    }
+
+    // Fallback: return the cwd stored at session spawn time.
+    Some(session.cwd.clone())
 }

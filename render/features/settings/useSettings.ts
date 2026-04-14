@@ -53,8 +53,15 @@ export function useSettings() {
 
   const save = useCallback(
     async (patch: Partial<AppSettings>) => {
-      const next = { ...settings, ...patch };
-      setSettingsState(next);
+      // Use functional setState so we always merge against the latest value —
+      // avoids dropped updates if save() is called multiple times in quick
+      // succession before the previous render completes.
+      let next: AppSettings = DEFAULTS;
+      setSettingsState((prev) => {
+        next = { ...prev, ...patch };
+        return next;
+      });
+      // next is set synchronously above inside the updater
       localStorage.setItem(LS_KEY, JSON.stringify(next));
       setSaving(true);
       setError(null);
@@ -66,7 +73,7 @@ export function useSettings() {
         setSaving(false);
       }
     },
-    [settings]
+    [] // no deps needed — we read state via functional updater
   );
 
   const reset = useCallback(async () => {

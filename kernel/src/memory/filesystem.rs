@@ -75,12 +75,12 @@ pub fn ensure_memory_repo(cwd: &str) -> Result<(), String> {
         .output();
 
     let _ = std::process::Command::new("git")
-        .args(["commit", "-m", "stackbox: init memory repo"])
+        .args(["commit", "-m", "calus: init memory repo"])
         .current_dir(&dir)
         .env("GIT_AUTHOR_NAME", "Stackbox")
-        .env("GIT_AUTHOR_EMAIL", "memory@stackbox.local")
+        .env("GIT_AUTHOR_EMAIL", "memory@calus.local")
         .env("GIT_COMMITTER_NAME", "Stackbox")
-        .env("GIT_COMMITTER_EMAIL", "memory@stackbox.local")
+        .env("GIT_COMMITTER_EMAIL", "memory@calus.local")
         .output();
 
     eprintln!("[memory::fs] init memory repo at {}", dir.display());
@@ -287,9 +287,9 @@ pub fn commit_memory_async(cwd: &str, message: String) {
             .args(["commit", "-m", &msg])
             .current_dir(&dir)
             .env("GIT_AUTHOR_NAME", "Stackbox")
-            .env("GIT_AUTHOR_EMAIL", "memory@stackbox.local")
+            .env("GIT_AUTHOR_EMAIL", "memory@calus.local")
             .env("GIT_COMMITTER_NAME", "Stackbox")
-            .env("GIT_COMMITTER_EMAIL", "memory@stackbox.local")
+            .env("GIT_COMMITTER_EMAIL", "memory@calus.local")
             .output();
 
         match result {

@@ -7,11 +7,12 @@ pub const MEMORY_PORT: u16 = 7547;
 mod agent;
 mod browser;
 mod commands;
+mod config;
 mod conflict;
 mod db;
 mod docker;
 mod git;
-mod mcp;
+mod logger;
 mod memory;
 mod proxy;
 mod pty;
@@ -30,34 +31,42 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        // ── Auto-updater ───────────────────────────────────────────────────
+        // Reads pubkey + endpoints from tauri.conf.json → plugins.updater.
+        // Commands: check_update, install_update, get_app_version (below).
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state::AppState {
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-            db: db::open().expect("failed to open calus db"),
-            watchers: Arc::new(Mutex::new(HashMap::new())),
-            watched_runboxes: Arc::new(Mutex::new(HashSet::new())),
-            reinject_debounce: Arc::new(Mutex::new(HashMap::new())),
-            pty_writer: crate::pty::writer::PtyWriter::new(),
-            conflict_registry: conflict::new_registry(),
+            sessions:           Arc::new(Mutex::new(HashMap::new())),
+            db:                 db::open().expect("failed to open calus db"),
+            watchers:           Arc::new(Mutex::new(HashMap::new())),
+            watched_runboxes:   Arc::new(Mutex::new(HashSet::new())),
+            reinject_debounce:  Arc::new(Mutex::new(HashMap::new())),
+            pty_writer:         crate::pty::writer::PtyWriter::new(),
+            conflict_registry:  conflict::new_registry(),
         })
         .setup(|app| {
             agent::globals::set_app_handle(app.handle().clone());
 
-            let app_handle = Arc::new(app.handle().clone());
-            let state = app.state::<state::AppState>();
-            let db_handle = state.db.clone();
+            let app_handle      = Arc::new(app.handle().clone());
+            let state           = app.state::<state::AppState>();
+            let db_handle       = state.db.clone();
             let sessions_handle = state.sessions.clone();
-            let app_state = Arc::new(state::AppState {
-                db: db_handle.clone(),
-                sessions: sessions_handle.clone(),
-                watchers: state.watchers.clone(),
-                watched_runboxes: state.watched_runboxes.clone(),
+            let app_state       = Arc::new(state::AppState {
+                db:                db_handle.clone(),
+                sessions:          sessions_handle.clone(),
+                watchers:          state.watchers.clone(),
+                watched_runboxes:  state.watched_runboxes.clone(),
                 reinject_debounce: state.reinject_debounce.clone(),
-                pty_writer: state.pty_writer.clone(),
+                pty_writer:        state.pty_writer.clone(),
                 conflict_registry: state.conflict_registry.clone(),
             });
 
             git::cleanup::prune_orphan_worktrees(&state.db);
+
+            // Signal frontend immediately — used to re-register git watchers after hot reload
+            app.handle().emit("backend-ready", ()).ok();
 
             tauri::async_runtime::spawn(async move {
                 match memory::init().await {
@@ -92,6 +101,8 @@ pub fn run() {
             commands::pty::pty_write,
             commands::pty::pty_resize,
             commands::pty::pty_kill,
+            commands::pty::pty_get_cwd,
+            commands::pty::pty_session_alive,
             commands::pty::get_session_worktree_path,
             commands::pty::get_workspace_agents,
             commands::pty::get_resumable_agents,
@@ -99,6 +110,23 @@ pub fn run() {
             commands::pty::mark_agent_done,
             commands::watcher::watch_runbox,
             commands::watcher::unwatch_runbox,
+            // ── System ───────────────────────────────────────────────────────
+            commands::system::get_platform_info,
+            commands::system::open_external_url,
+            // ── Config ───────────────────────────────────────────────────────
+            config::config_read,
+            config::config_write,
+            config::config_reset,
+            // ── Clipboard ────────────────────────────────────────────────────
+            commands::clipboard::clipboard_write,
+            commands::clipboard::clipboard_read,
+            // ── Notifications ────────────────────────────────────────────────
+            commands::notification::notify,
+            commands::notification::notify_with_icon,
+            // ── Updater ──────────────────────────────────────────────────────
+            commands::updater::check_update,
+            commands::updater::install_update,
+            commands::updater::get_app_version,
             // ── Memory V1/V2 ─────────────────────────────────────────────────
             commands::memory::memory_add,
             commands::memory::memory_add_full,
@@ -145,14 +173,14 @@ pub fn run() {
             git::commands::git_delete_branch,
             git::commands::git_branch_log,
             git::commands::git_branch_status,
-            git::commands::git_diff_branch, // ← NEW: per-file diff for frontend
+            git::commands::git_diff_branch,
             git::commands::git_log_for_runbox,
             git::commands::git_diff_for_commit,
             git::commands::git_diff_live,
             git::commands::git_worktree_create,
             git::commands::git_worktree_remove,
             git::commands::git_worktree_list,
-            git::commands::git_worktree_list_calus, // ← renamed from git_worktree_list_stackbox
+            git::commands::git_worktree_list_calus,
             git::commands::git_current_branch,
             git::commands::git_stage_and_commit,
             git::commands::git_watch_start,
@@ -167,7 +195,6 @@ pub fn run() {
             git::commands::git_checkout,
             git::commands::git_rename_branch,
             git::commands::git_diff_between_worktrees,
-            git::commands::git_diff_branch,
             git::commands::git_commit,
             git::commands::git_run,
             // ── Conflict ─────────────────────────────────────────────────────

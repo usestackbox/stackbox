@@ -6,16 +6,10 @@ use tauri::AppHandle;
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlatformInfo {
-    pub os:       String,
-    pub arch:     String,
-    pub version:  String,
+    pub os:          String,
+    pub arch:        String,
+    pub version:     String,
     pub app_version: String,
-}
-
-/// Returns the app version string from Cargo.toml.
-#[tauri::command]
-pub fn get_app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
 }
 
 /// Returns OS, arch, kernel version and the app version together.
@@ -33,6 +27,7 @@ pub fn get_platform_info() -> PlatformInfo {
 #[tauri::command]
 pub async fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
     app.shell()
         .open(&url, None)
         .map_err(|e| e.to_string())
@@ -41,7 +36,6 @@ pub async fn open_external_url(app: AppHandle, url: String) -> Result<(), String
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn os_version() -> String {
-    // Best-effort; returns empty string on platforms without the info.
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("sw_vers")

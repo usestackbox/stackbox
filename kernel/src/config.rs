@@ -31,23 +31,11 @@ pub struct AppConfig {
     #[serde(default = "default_log_level")]
     pub log_level: String,
 
-    /// MCP server configs the user has added
-    #[serde(default)]
-    pub mcp_servers: Vec<McpServerConfig>,
-
     /// Sidebar width (pixels)
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerConfig {
-    pub id:      String,
-    pub name:    String,
-    pub url:     String,
-    pub enabled: bool,
-}
 
 fn default_theme()        -> String { "dark".into() }
 fn default_font_size()    -> u8     { 13 }
@@ -66,7 +54,7 @@ impl Default for AppConfig {
 fn config_path() -> Result<PathBuf, String> {
     let base = dirs::config_dir()
         .ok_or_else(|| "could not determine config directory".to_string())?;
-    Ok(base.join("stackbox").join("config.json"))
+    Ok(base.join("calus").join("config.json"))
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

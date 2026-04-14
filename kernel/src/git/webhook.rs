@@ -372,7 +372,7 @@ async fn handle_pr_event(payload: WebhookPayload, state: &AppState) {
             "\n\n🎉 PR MERGED\n\
              PR: {}\n\
              Your branch has been merged into main by a human reviewer.\n\
-             Please run: mcp__stackbox__git_worktree_delete to clean up your worktree.\n",
+             Please run: mcp__calus__git_worktree_delete to clean up your worktree.\n",
             pr.html_url,
         );
         write_to_pty(&record.runbox_id, &message, state);
@@ -382,7 +382,7 @@ async fn handle_pr_event(payload: WebhookPayload, state: &AppState) {
         let message = format!(
             "\n\n🚫 PR CLOSED WITHOUT MERGE\n\
              PR: {}\n\
-             Please run: mcp__stackbox__git_worktree_delete with force=true to clean up.\n",
+             Please run: mcp__calus__git_worktree_delete with force=true to clean up.\n",
             pr.html_url,
         );
         write_to_pty(&record.runbox_id, &message, state);

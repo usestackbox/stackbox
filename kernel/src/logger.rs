@@ -1,6 +1,6 @@
 // src/logger.rs
 // Structured JSON log rotation via tracing + tracing-appender.
-// Log level is read from STACKBOX_LOG env var, falling back to config.
+// Log level is read from CALUS_LOG env var, falling back to config.
 
 use tracing_appender::rolling;
 use tracing_subscriber::{
@@ -13,7 +13,7 @@ use tracing_subscriber::{
 /// Initialise the global tracing subscriber.
 /// Call once in lib.rs before the Tauri builder runs.
 pub fn init(log_level: &str) {
-    let level = std::env::var("STACKBOX_LOG").unwrap_or_else(|_| log_level.to_string());
+    let level = std::env::var("CALUS_LOG").unwrap_or_else(|_| log_level.to_string());
 
     let filter = EnvFilter::try_new(&level)
         .unwrap_or_else(|_| EnvFilter::new("info"));
@@ -21,12 +21,12 @@ pub fn init(log_level: &str) {
     // ── File appender: daily rotation, kept in ~/.local/share/stackbox/logs/ ──
     let log_dir = dirs::data_local_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("stackbox")
+        .join("calus")
         .join("logs");
 
     std::fs::create_dir_all(&log_dir).ok();
 
-    let file_appender = rolling::daily(&log_dir, "stackbox.log");
+    let file_appender = rolling::daily(&log_dir, "calus.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     // Leak the guard so the file writer is never dropped for the lifetime of the process.

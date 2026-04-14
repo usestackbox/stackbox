@@ -19,10 +19,8 @@ export function UpdateBanner({ state, onInstall, onDismiss }: Props) {
   return (
     <div
       style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
+        position: "relative",
+        flexShrink: 0,
         zIndex: 9999,
         height: 36,
         display: "flex",

@@ -553,13 +553,24 @@ pub async fn git_watch_start(
     cwd: String,
     runbox_id: String,
 ) -> Result<(), String> {
-    crate::git::watcher::start_watch(app, cwd, runbox_id);
+    // Expand ~ and %USERPROFILE% before handing off to the watcher
+    let expanded = crate::pty::expand_cwd(&cwd);
+
+    // Skip silently if the path doesn't exist — avoids noisy "failed to watch" logs
+    // when the frontend sends stale or placeholder workspace paths
+    if !std::path::Path::new(&expanded).exists() {
+        eprintln!("[watcher] skipping non-existent path: {expanded}");
+        return Ok(());
+    }
+
+    crate::git::watcher::start_watch(app, expanded, runbox_id);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn git_watch_stop(cwd: String) -> Result<(), String> {
-    crate::git::watcher::stop_watch(&cwd);
+    let expanded = crate::pty::expand_cwd(&cwd);
+    crate::git::watcher::stop_watch(&expanded);
     Ok(())
 }
 

@@ -104,7 +104,7 @@ pub struct WorkspaceEvent {
 // ── Open ──────────────────────────────────────────────────────────────────────
 pub fn db_path() -> PathBuf {
     let base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("stackbox").join("stackbox.db")
+    base.join("calus").join("calus.db")
 }
 
 pub fn open() -> rusqlite::Result<Db> {
@@ -124,7 +124,7 @@ pub fn open() -> rusqlite::Result<Db> {
 
     let (tx, rx) = std::sync::mpsc::sync_channel::<Box<dyn FnOnce(&Connection) + Send>>(4096);
     std::thread::Builder::new()
-        .name("stackbox-db-writer".into())
+        .name("calus-db-writer".into())
         .spawn(move || {
             while let Ok(f) = rx.recv() {
                 f(&writer_conn);

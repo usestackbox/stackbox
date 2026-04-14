@@ -14,13 +14,13 @@ pub fn exec_prefix(runbox_id: &str) -> Result<String, String> {
 }
 
 fn container_name(runbox_id: &str) -> String {
-    format!("stackbox-{}", &runbox_id[..runbox_id.len().min(12)])
+    format!("calus-{}", &runbox_id[..runbox_id.len().min(12)])
 }
 
 fn workspace_volume_path(runbox_id: &str) -> String {
     let local = std::env::var("LOCALAPPDATA")
         .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()));
-    format!("{local}/stackbox/workspaces/{runbox_id}/docker")
+    format!("{local}/calus/workspaces/{runbox_id}/docker")
 }
 
 // ── docker_available ──────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ pub fn docker_ensure(runbox_id: String, cwd: String) -> Result<String, String> {
             "-v",
             &format!("{cwd}:/workspace"),
             "-v",
-            &format!("{vol_dir}:/stackbox-storage"),
+            &format!("{vol_dir}:/calus-storage"),
             "-w",
             "/workspace",
             "--restart",

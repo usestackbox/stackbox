@@ -1,8 +1,8 @@
 [package]
 name         = "app"
 version      = "0.1.0"
-description  = "Stackbox"
-authors      = ["you"]
+description  = "Calus — multi-agent coding workspace"
+authors      = ["Mohith Karthikeya M", "Rishikesh T R"]
 edition      = "2021"
 rust-version = "1.77.2"
 default-run  = "app"
@@ -12,44 +12,147 @@ name       = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "stackbox-open"
-path = "src/bin/stackbox_open.rs"
+name = "calus-open"
+path = "src/bin/calus_open.rs"
+# Helper binary: intercepts BROWSER= calls from agent PTYs and forwards
+# URLs to the Tauri frontend via a local HTTP POST to port 7547.
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Generates Tauri capability schemas and wires up platform-specific build steps.
 
 [dependencies]
+
+# ── Tauri core ────────────────────────────────────────────────────────────────
 tauri               = { version = "2", features = ["unstable"] }
+# Desktop app runtime: window management, IPC, system tray, events.
+# "unstable" enables experimental APIs used by the PTY and browser panes.
+
 tauri-plugin-shell  = "2"
+# Allows the frontend to spawn shell commands and open URLs via the OS default browser.
+
 tauri-plugin-dialog = "2"
+# Native file-open / save / message dialogs used by the workspace picker.
+
 tauri-plugin-log    = "2"
-serde               = { version = "1", features = ["derive"] }
-serde_json          = "1"
-log                 = "0.4"
-portable-pty        = "0.8"
-tokio               = { version = "1", features = ["full"] }
-uuid                = { version = "1", features = ["v4"] }
-shellexpand         = "3"
-dirs                = "5"
-urlencoding         = "2"
-url                 = "2.5.8"
-axum                = { version = "0.7", features = ["json"] }
-tower-http          = { version = "0.6", features = ["cors"] }
-lancedb             = "0.21.2"
-arrow-array         = "=55.2.0"
-arrow-schema        = "=55.2.0"
-futures             = "0.3"
-rusqlite            = { version = "0.38.0", features = ["bundled"] }
-reqwest             = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "cookies"] }
-notify              = "6"
-notify-debouncer-mini = "0.4"
-arboard             = "3.6.1"
+# Routes Rust log:: calls into the Tauri log pipeline (console + file).
+
+tauri-plugin-updater = "2"
+# Over-the-air auto-update: checks a remote JSON endpoint and applies
+# delta or full installers in the background.
+
 tauri-plugin-os     = "2"
+# Exposes OS info (platform, version, arch) to the frontend — used to
+# render platform-appropriate keybindings and shell defaults.
+
+tauri-plugin-clipboard-manager = "2"
+# Read / write the system clipboard; used by the copy-output toolbar action.
+
+tauri-plugin-store  = "2"
+# Persistent key-value store backed by a JSON file; used for frontend settings
+# that survive app restarts without hitting the SQLite db.
+
+# ── Serialisation ─────────────────────────────────────────────────────────────
+serde               = { version = "1", features = ["derive"] }
+# De/serialisation framework — derive macros on every command payload struct.
+
+serde_json          = "1"
+# JSON support: IPC payloads, MCP messages, config files.
+
+# ── Async runtime ─────────────────────────────────────────────────────────────
+tokio               = { version = "1", features = ["full"] }
+# Async runtime powering PTY management, the embedded Axum server,
+# git operations, and all background tasks.
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+log                 = "0.4"
+# Standard logging facade; backend wired up by tauri-plugin-log.
+
+# ── PTY / terminal ────────────────────────────────────────────────────────────
+portable-pty        = "0.8"
+# Cross-platform pseudo-terminal: spawns agent shells (Claude Code, Gemini CLI,
+# Codex, etc.) with a proper TTY so interactive CLIs behave correctly.
+
+# ── IDs ───────────────────────────────────────────────────────────────────────
+uuid                = { version = "1", features = ["v4"] }
+# Generates random v4 UUIDs for runbox IDs, session IDs, and event IDs.
+
+# ── Path / filesystem helpers ─────────────────────────────────────────────────
+shellexpand         = "3"
+# Expands ~ and $ENV_VAR in user-supplied paths before passing to the kernel.
+
+dirs                = "5"
+# Platform-correct AppData / home / config / cache directory resolution
+# used by workspace/persistent.rs to store all Calus data outside user repos.
+
 walkdir             = "2"
+# Recursive directory walker; used during workspace scan and memory topic listing.
+
+# ── URL handling ──────────────────────────────────────────────────────────────
+urlencoding         = "2"
+# Percent-encodes / decodes path segments in file:// URLs sent between PTY and frontend.
+
+url                 = "2.5.8"
+# Full URL parser; used in calus_open.rs to normalise file paths → file:// URLs.
+
+# ── Embedded HTTP server ──────────────────────────────────────────────────────
+axum                = { version = "0.7", features = ["json"] }
+# Minimal async HTTP server embedded in the kernel: serves the MCP endpoint
+# and the /open-url route consumed by the calus-open helper binary.
+
+tower-http          = { version = "0.6", features = ["cors"] }
+# CORS middleware for the Axum server so the frontend WebView can call
+# the local MCP/HTTP API without browser security rejections.
+
+# ── Database ──────────────────────────────────────────────────────────────────
+rusqlite            = { version = "0.38.0", features = ["bundled"] }
+# SQLite via bundled libsqlite3 — no system dependency required.
+# Stores workspaces, runboxes, sessions, branches, and layout state.
+
+# ── HTTP client ───────────────────────────────────────────────────────────────
+reqwest             = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "cookies"] }
+# Async HTTP client for GitHub API calls (webhook registration, PR creation,
+# branch listing). rustls-tls avoids an OpenSSL system dependency on all platforms.
+
+# ── Filesystem watching ───────────────────────────────────────────────────────
+notify              = "6"
+# Cross-platform filesystem event watcher; drives the git diff panel live updates
+# and .calus-context.md reload when an agent writes to it.
+
+notify-debouncer-mini = "0.4"
+# Debounces rapid filesystem events from notify so a burst of file writes
+# triggers only one diff refresh instead of hundreds.
+
+# ── Clipboard ─────────────────────────────────────────────────────────────────
+arboard             = "3.6.1"
+# Low-level clipboard access from Rust; used as the backend for the
+# tauri-plugin-clipboard-manager Tauri command handlers.
+
+# ── Text processing ───────────────────────────────────────────────────────────
 regex               = "1"
+# Regex engine: used in the PTY output parser to detect agent-emitted
+# structured markers (state signals, session summaries, OSC sequences).
+
 # ── GitHub webhook signature verification ─────────────────────────────────────
 hmac                = "0.12"
+# HMAC-SHA256 computation for verifying GitHub webhook X-Hub-Signature-256 headers.
+
 sha2                = "0.10"
+# SHA-256 hash primitive required by the hmac crate.
+
 hex                 = "0.4"
-tauri-plugin-clipboard-manager = "2"
-tauri-plugin-store = "2"
+# Encodes/decodes hex strings when comparing webhook signatures.
+
+# ── Vector store ──────────────────────────────────────────────────────────────
+lancedb             = "0.14"
+arrow-array         = "53"
+arrow-schema        = "53"
+futures             = "0.3"
+
+# ── Tracing / structured logging ──────────────────────────────────────────────
+tracing             = "0.1"
+tracing-appender    = "0.2"
+tracing-subscriber  = { version = "0.3", features = ["env-filter", "json"] }
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+tauri-plugin-notification = "2"

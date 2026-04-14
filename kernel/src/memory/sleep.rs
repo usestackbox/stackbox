@@ -75,7 +75,7 @@ pub async fn boot_init(runbox_id: &str, cwd: &str, db: &Db) {
     }
     filesystem::commit_memory_async(
         cwd,
-        format!("stackbox: boot init — {}", detect_project_name(cwd)),
+        format!("calus: boot init — {}", detect_project_name(cwd)),
     );
 
     eprintln!("[sleep] boot_init complete runbox={runbox_id}");
@@ -458,7 +458,7 @@ pub async fn reflection(runbox_id: &str, cwd: &str, session_id: &str) {
             runbox_id,
             session_id,
             &format!("reflection:{}", &session_id[..session_id.len().min(8)]),
-            "stackbox-reflection",
+            "calus-reflection",
             &insight,
             memory::LEVEL_PREFERRED,
         )

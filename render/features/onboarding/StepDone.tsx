@@ -33,7 +33,7 @@ export function StepDone({ onFinish }: { onFinish: () => void }) {
       <div>
         <h2 style={{ margin: "0 0 10px", fontSize: 22, color: C.t1 }}>You're all set!</h2>
         <p style={{ margin: 0, fontSize: 14, color: C.t3, lineHeight: 1.7, maxWidth: 360 }}>
-          Stackbox is ready. Create your first runbox to start working — give it a name and a
+          Calus is ready. Create your first runbox to start working — give it a name and a
           project directory.
         </p>
       </div>
@@ -54,7 +54,7 @@ export function StepDone({ onFinish }: { onFinish: () => void }) {
             cursor: "pointer",
           }}
         >
-          Open Stackbox →
+          Open Calus →
         </button>
         <p style={{ margin: 0, fontSize: 11, color: C.t3 }}>
           Tip: press{" "}

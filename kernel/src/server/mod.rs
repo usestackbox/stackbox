@@ -9,7 +9,6 @@ use tower_http::cors::CorsLayer;
 
 use crate::{
     db::Db,
-    mcp,
     state::{AppState, SessionMap},
     MEMORY_PORT,
 };
@@ -22,18 +21,12 @@ pub async fn start(
 ) {
     let memory_routes = routes::memory::router(db.clone(), sessions.clone());
 
-    let mcp_state = mcp::McpState {
-        db: db.clone(),
-        sessions: Some(sessions.clone()),
-        app_state: app_state.clone(),
-    };
 
     let app_url = app_handle.clone();
     let app_changed = app_handle.clone();
 
     let router = axum::Router::new()
         .merge(memory_routes)
-        .nest("/mcp", mcp::router(mcp_state))
         .route(
             "/open-url",
             axum::routing::post({

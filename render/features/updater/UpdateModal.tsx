@@ -150,7 +150,7 @@ export function UpdateModal({ updater, currentVersion, onClose }: Props) {
 
           {state.phase === "idle" && (
             <p style={{ fontSize: 13, color: C.t3, textAlign: "center", margin: "0 0 16px" }}>
-              Stackbox {currentVersion} is up to date.
+              Calus {currentVersion} is up to date.
             </p>
           )}
 

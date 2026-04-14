@@ -18,16 +18,38 @@ export interface UseUpdaterReturn {
   dismiss: () => void;
 }
 
-const HOUR_MS = 60 * 60 * 1000;
+const HOUR_MS   = 60 * 60 * 1000;
+const SETTINGS_KEY = "calus:settings";
+
+/** Read the autoUpdate preference without taking a dependency on useSettings. */
+function isAutoUpdateEnabled(): boolean {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return true; // default on
+    const cfg = JSON.parse(raw);
+    return cfg.autoUpdate !== false;
+  } catch {
+    return true;
+  }
+}
 
 export function useUpdater(): UseUpdaterReturn {
   const [state, setState] = useState<UpdaterState>({ phase: "idle" });
+  const stateRef    = useRef<UpdaterState>({ phase: "idle" });
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Track total bytes to calculate percent
-  const totalBytesRef = useRef<number>(0);
+  const totalBytesRef  = useRef<number>(0);
   const loadedBytesRef = useRef<number>(0);
 
+  // Keep stateRef in sync so callbacks can read the live phase without
+  // capturing a stale closure value.
+  useEffect(() => { stateRef.current = state; }, [state]);
+
   const check = useCallback(async () => {
+    // Never interrupt an active download or a completed/pending restart —
+    // the hourly interval could otherwise fire mid-download and reset the UI.
+    const cur = stateRef.current.phase;
+    if (cur === "downloading" || cur === "ready") return;
     setState({ phase: "checking" });
     try {
       const info = await invoke<{ version: string; date?: string; body?: string } | null>(
@@ -97,11 +119,15 @@ export function useUpdater(): UseUpdaterReturn {
     };
   }, []);
 
-  // Boot check + hourly re-check
+  // Boot check + hourly re-check — both gated behind the autoUpdate preference.
+  // Manual checkNow() calls always go through regardless of this setting.
   useEffect(() => {
+    if (!isAutoUpdateEnabled()) return; // user opted out — skip automatic checks
     // Slight delay on boot so the app UI is fully rendered first
     const boot = setTimeout(() => check(), 3000);
-    intervalRef.current = setInterval(() => check(), HOUR_MS);
+    intervalRef.current = setInterval(() => {
+      if (isAutoUpdateEnabled()) check(); // re-read pref on each tick
+    }, HOUR_MS);
     return () => {
       clearTimeout(boot);
       if (intervalRef.current) clearInterval(intervalRef.current);

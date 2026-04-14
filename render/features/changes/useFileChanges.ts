@@ -60,7 +60,7 @@ export function useFileChanges(runboxId: string, runboxCwd: string) {
   const [agentSpans, setAgentSpans] = useState<AgentSpan[]>([]);
   const worktreeCwdRef = useRef(runboxCwd);
 
-  const PORT = (window as any).__STACKBOX_PORT__ ?? 7700;
+  const PORT = (window as any).__CALUS_PORT__ ?? 7700;
 
   useEffect(() => {
     worktreeCwdRef.current = runboxCwd;

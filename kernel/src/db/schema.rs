@@ -103,7 +103,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     // Separates worktree lifetime (temporary) from branch lifetime (permanent).
     //
     // id = "{runbox_id}-{session_id}" — unique per session, not per runbox.
-    // branch = "stackbox/{runbox_short}/{slug}" — survives worktree removal.
+    // branch = "calus/{runbox_short}/{slug}" — survives worktree removal.
     // worktree_path = NULL once PTY exits.
     // status: working → done → merged | deleted
     conn.execute_batch(
@@ -190,7 +190,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             runbox_id,
             runbox_id,
             agent_kind,
-            COALESCE(branch, 'stackbox/migrated'),
+            COALESCE(branch, 'calus/migrated'),
             NULL,
             CASE status WHEN 'merged' THEN 'merged' ELSE 'done' END,
             created_at,

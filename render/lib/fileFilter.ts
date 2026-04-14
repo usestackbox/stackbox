@@ -9,7 +9,6 @@ const BLOCKED_NAMES = new Set([
   "gemini.md",
   "opencode.md",
   "copilot-instructions.md",
-  "mcp.json",
   "skill.md",
   "payload.json",
   "rewrite_app.py",

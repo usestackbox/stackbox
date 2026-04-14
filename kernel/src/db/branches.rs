@@ -4,7 +4,7 @@
 //
 // KEY DESIGN:
 //   - One row per agent session (runbox_id + session_id + agent_kind).
-//   - branch (stackbox/{short}/{slug}) is permanent — survives worktree removal.
+//   - branch (calus/{short}/{slug}) is permanent — survives worktree removal.
 //   - worktree_path is nullable — set on spawn, cleared when PTY exits.
 //   - status: working → done → merged | deleted
 //

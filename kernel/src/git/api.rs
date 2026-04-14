@@ -50,7 +50,7 @@ impl GithubApi {
             .get(&url)
             .header("Authorization", self.auth_header())
             .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "stackbox")
+            .header("User-Agent", "calus")
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -102,7 +102,7 @@ impl GithubApi {
             .get(&url)
             .header("Authorization", self.auth_header())
             .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "stackbox")
+            .header("User-Agent", "calus")
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -152,7 +152,7 @@ impl GithubApi {
             .get(&jobs_url)
             .header("Authorization", self.auth_header())
             .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "stackbox")
+            .header("User-Agent", "calus")
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -181,7 +181,7 @@ impl GithubApi {
                 .get(&log_url)
                 .header("Authorization", self.auth_header())
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "stackbox")
+                .header("User-Agent", "calus")
                 .send()
                 .await
             {

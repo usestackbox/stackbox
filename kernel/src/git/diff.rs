@@ -51,9 +51,57 @@ fn git_with_args(args: &[&str], cwd: &str, git_dir: Option<&str>) -> Result<Stri
     }
 }
 
+/// Ensure the directory is a git repo.
+/// Called at the top of diff_live so diffs always work even if the repo was
+/// created before fs_create_dir started auto-initing git.
+fn ensure_git_repo(cwd: &str, gdo: Option<&str>) {
+    if gdo.is_some() {
+        return; // already a worktree — git_dir_opt resolved a real .git
+    }
+    let p = std::path::Path::new(cwd);
+    if !p.join(".git").exists() {
+        let _ = std::process::Command::new("git")
+            .arg("init")
+            .current_dir(p)
+            .output();
+    }
+}
+
+/// Stage all working-tree changes so the diff panel always shows
+/// the complete current state, including files an agent just wrote.
+///
+/// Retries up to 4 times with exponential backoff when git reports
+/// index.lock contention (an agent or another git process holds the lock).
+/// Failures for other reasons are swallowed — a stale diff is better than
+/// an error.
+fn stage_all(cwd: &str, gdo: Option<&str>) {
+    let mut delay_ms = 50u64;
+    for attempt in 0..4 {
+        match git_with_args(&["add", "-A"], cwd, gdo) {
+            Ok(_) => return,
+            Err(e) if e.contains("index.lock") => {
+                if attempt < 3 {
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                    delay_ms *= 2; // 50 → 100 → 200 ms
+                }
+            }
+            Err(_) => return, // non-lock error — give up immediately
+        }
+    }
+}
+
 pub fn diff_live(cwd: &str, runbox_id: &str) -> Result<Vec<LiveDiffFile>, String> {
     let gdo_owned = git_dir_opt(cwd, runbox_id);
     let gdo: Option<&str> = gdo_owned.as_deref();
+
+    // Guard: make sure the directory is a git repo before doing anything.
+    // This handles repos opened before the auto-init logic was added to
+    // fs_create_dir, and any directory the user opens from outside Calus.
+    ensure_git_repo(cwd, gdo);
+
+    // Always stage everything before diffing — ensures newly written files and
+    // unstaged changes are always visible in the diff panel.
+    stage_all(cwd, gdo);
 
     // --no-optional-locks: don't create index.lock for this read-only status check
     let status_out =
@@ -86,6 +134,9 @@ pub fn diff_live(cwd: &str, runbox_id: &str) -> Result<Vec<LiveDiffFile>, String
 
         let entry = match (x, y) {
             ('?', '?') => {
+                // Untracked file — stage_all should have converted these to 'A'
+                // but if it failed (e.g. index.lock timeout) we render them
+                // directly so the panel never goes blank.
                 let full = std::path::Path::new(cwd).join(&path);
                 if !full.is_file() {
                     continue;
@@ -144,12 +195,11 @@ pub fn diff_live(cwd: &str, runbox_id: &str) -> Result<Vec<LiveDiffFile>, String
             }
 
             _ if x == 'M' || y == 'M' || x == 'R' || x == 'C' => {
-                // Bug 1 fix: do NOT `continue` when diff is transiently empty
-                // (happens mid-write or when git index is locked during `git add`).
-                // Removing the file from the list unmounts its React FileRow and
-                // destroys the open:true state — the diff appears to "vanish".
-                // Keep the entry with an empty diff; the UI shows "recomputing…".
-                let diff = best_diff_readonly(cwd, gdo, &path, x, y).unwrap_or_default();
+                // Fall back to synthetic_new when all git diff strategies fail.
+                // Covers: fresh repo with no HEAD, mid-write transient empty diff,
+                // or any other state where git can't produce a useful diff.
+                let diff = best_diff_readonly(cwd, gdo, &path, x, y)
+                    .unwrap_or_else(|| synthetic_new(cwd, &path));
                 let (ins, del) = stat(&diff);
                 LiveDiffFile {
                     path,
@@ -171,7 +221,17 @@ pub fn diff_live(cwd: &str, runbox_id: &str) -> Result<Vec<LiveDiffFile>, String
     Ok(files)
 }
 
-/// All diff operations use --no-optional-locks to avoid holding index.lock.
+/// Try multiple diff strategies, in priority order, until one produces output.
+///
+/// Strategy order:
+///   1. `git diff -- path`          — unstaged working-tree changes (y == M/D)
+///   2. `git diff --cached -- path` — staged changes vs HEAD (or empty tree on
+///                                    fresh repos — always works, even no HEAD)
+///   3. `git diff HEAD -- path`     — staged+unstaged vs last commit
+///
+/// All calls use --no-optional-locks to avoid holding index.lock.
+/// Returns None only when every strategy produces empty output, which triggers
+/// the synthetic_new fallback in the caller.
 fn best_diff_readonly(
     cwd: &str,
     gdo: Option<&str>,
@@ -179,6 +239,7 @@ fn best_diff_readonly(
     x: char,
     y: char,
 ) -> Option<String> {
+    // Strategy 1 — unstaged working-tree diff (only when there are unstaged changes)
     if y == 'M' || y == 'D' {
         if let Ok(d) = git_readonly(&["diff", "--", path], cwd, gdo) {
             if !d.trim().is_empty() {
@@ -186,6 +247,11 @@ fn best_diff_readonly(
             }
         }
     }
+
+    // Strategy 2 — staged diff vs HEAD (or empty-tree on fresh repos).
+    // `git diff --cached` works even when there is no HEAD commit: it compares
+    // the index against the empty tree and shows all staged lines as additions.
+    // This is the primary strategy for newly staged files (x == 'A').
     if matches!(x, 'M' | 'A' | 'D' | 'R' | 'C') {
         if let Ok(d) = git_readonly(&["diff", "--cached", "--", path], cwd, gdo) {
             if !d.trim().is_empty() {
@@ -193,11 +259,15 @@ fn best_diff_readonly(
             }
         }
     }
+
+    // Strategy 3 — combined staged+unstaged vs last commit.
+    // Fails on fresh repos (no HEAD) — caller falls back to synthetic_new.
     if let Ok(d) = git_readonly(&["diff", "HEAD", "--", path], cwd, gdo) {
         if !d.trim().is_empty() {
             return Some(d);
         }
     }
+
     None
 }
 

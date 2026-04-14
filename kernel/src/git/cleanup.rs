@@ -1,6 +1,6 @@
 // src-tauri/src/git/cleanup.rs
 //
-// On startup: scan {cwd}/.worktrees/ for stackbox-wt-* folders.
+// On startup: scan {cwd}/.worktrees/ for calus-wt-* folders.
 // Any that aren't in agent_branches as an active worktree are orphans
 // from a crash — prune them.
 //
@@ -85,7 +85,7 @@ fn prune_with_known_paths(
             if let Ok(entries) = std::fs::read_dir(&wt_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if !name.starts_with("stackbox-wt-") {
+                    if !name.starts_with("calus-wt-") {
                         continue;
                     }
 
@@ -96,7 +96,7 @@ fn prune_with_known_paths(
                         continue;
                     }
 
-                    let suffix = &name["stackbox-wt-".len()..];
+                    let suffix = &name["calus-wt-".len()..];
                     if known_short_ids
                         .iter()
                         .any(|id| suffix.starts_with(id.as_str()))
@@ -114,7 +114,7 @@ fn prune_with_known_paths(
             }
         }
 
-        // ── Legacy layout: scan parent dir for sibling stackbox-wt-* ─────────
+        // ── Legacy layout: scan parent dir for sibling calus-wt-* ─────────
         let parent = match Path::new(cwd).parent() {
             Some(p) => p.to_path_buf(),
             None => continue,
@@ -132,7 +132,7 @@ fn prune_with_known_paths(
 
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_string();
-            if !name.starts_with("stackbox-wt-") {
+            if !name.starts_with("calus-wt-") {
                 continue;
             }
 
@@ -143,7 +143,7 @@ fn prune_with_known_paths(
                 continue;
             }
 
-            let suffix = &name["stackbox-wt-".len()..];
+            let suffix = &name["calus-wt-".len()..];
             if known_short_ids
                 .iter()
                 .any(|id| suffix.starts_with(id.as_str()))

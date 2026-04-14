@@ -22,8 +22,10 @@ import { MemoryPanel }    from "./features/memory/MemoryPanel";
 import type { LiveDiffFile } from "./features/git/types";
 
 import { SettingsModal }  from "./features/settings";
-import { useUpdater }     from "./features/updater";
+import { useUpdater, UpdateBanner, UpdateModal } from "./features/updater";
 import { OnboardingFlow } from "./features/onboarding";
+import { useVersion }    from "./hooks/useVersion";
+import { StripIcon } from "./ui";
 
 
 
@@ -50,10 +52,18 @@ export default function App() {
 
   // Settings modal state
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab,  setSettingsTab]  = useState<string | undefined>(undefined);
+  const [settingsTab,     setSettingsTab]     = useState<string | undefined>(undefined);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const settingsBtnRef = useRef<HTMLDivElement>(null);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
 
-  // Updater
+
+  // Updater — pull checkNow out so the event-bridge useEffect can depend on
+  // the stable callback rather than the whole updater object (which changes on
+  // every render because it includes the mutable `state` field).
   const updater = useUpdater();
+  const { checkNow: updaterCheckNow } = updater;
+  const { version: currentVersion }     = useVersion();
 
   // Imperative refs for diff/file openers per runbox
   const diffOpenerRefs = useRef<Record<string, { open: (fc: any) => void }>>({});
@@ -101,7 +111,7 @@ export default function App() {
       setShowSettings(true);
     };
     const checkUpdates = () => {
-      updater.checkNow();
+      updaterCheckNow();
       setSettingsTab("updates");
       setShowSettings(true);
     };
@@ -116,7 +126,8 @@ export default function App() {
       window.removeEventListener("sb:check-updates", checkUpdates);
       window.removeEventListener("sb:new-workspace", newWorkspace);
     };
-  }, [updater]);
+  // updaterCheckNow is stable (useCallback with [] deps) — safe dep here
+  }, [updaterCheckNow]);
 
   // ── Global keyboard shortcuts ─────────────────────────────────────────────
   useKeyboard({
@@ -211,6 +222,13 @@ export default function App() {
       height: "100%", width: "100%",
       background: C.bg0, overflow: "hidden", position: "relative",
     }}>
+      {/* ── Update banner — rendered at the very top so it pushes content down ── */}
+      <UpdateBanner
+        state={updater.state}
+        onInstall={() => setShowUpdateModal(true)}
+        onDismiss={updater.dismiss}
+      />
+
       {/* Sidebar */}
       <Sidebar
         runboxes={runboxes}
@@ -278,7 +296,7 @@ export default function App() {
               onSidebarToggle={handleSidebarToggle}
               onFileTreeToggle={handleFileTreeToggle}
               toolbarSlot={
-                <div style={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <button
                     onClick={() => toggleSide("git")}
                     title="Changes"
@@ -307,6 +325,25 @@ export default function App() {
                       if (sidePanel !== "git") { el.style.color = "rgba(255,255,255,.45)"; el.style.background = "transparent"; }
                     }}
                   >Changes</button>
+
+                  <div ref={settingsBtnRef} style={{ position: "relative" }}>
+                    <StripIcon
+                      title="Menu"
+                      active={showSettingsMenu}
+                      onClick={() => setShowSettingsMenu(v => !v)}
+                      size={28}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                      </svg>
+                    </StripIcon>
+                    {showSettingsMenu && (
+                      <SettingsDropdown onClose={() => setShowSettingsMenu(false)} />
+                    )}
+                  </div>
+
                 </div>
               }
               onCwdChange={cwd => setCwdMap(p => ({ ...p, [rb.id]: cwd }))}
@@ -347,7 +384,79 @@ export default function App() {
         />
       )}
 
+      {showUpdateModal && (
+        <UpdateModal
+          updater={updater}
+          currentVersion={currentVersion}
+          onClose={() => setShowUpdateModal(false)}
+        />
+      )}
+
       <OnboardingFlow runboxes={runboxes} onCreate={create} />
+    </div>
+  );
+}
+
+function SettingsDropdown({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    // slight delay so the click that opened it doesn't immediately close it
+    const t = setTimeout(() => document.addEventListener("mousedown", handler), 50);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+  }, [onClose]);
+
+  const item = (label: string, icon: string, action: () => void) => (
+    <button
+      onClick={() => { action(); onClose(); }}
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "7px 14px",
+        background: "transparent",
+        border: "none",
+        color: C.t1,
+        fontSize: 13,
+        cursor: "pointer",
+        textAlign: "left",
+        transition: "background .08s",
+        borderRadius: 6,
+        whiteSpace: "nowrap",
+      }}
+      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(109,235,176,.08)"; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+    >
+      <span style={{ fontSize: 13, width: 16, textAlign: "center", opacity: 0.7 }}>{icon}</span>
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: "absolute",
+        top: "calc(100% + 6px)",
+        left: 0,
+        zIndex: 9999,
+        background: C.bg3,
+        border: `1px solid ${C.border}`,
+        borderRadius: 8,
+        boxShadow: C.shadowLg,
+        padding: "4px",
+        minWidth: 180,
+      }}
+    >
+
+      {item("Updates",    "↻", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "updates"    } })))}
+      {item("Shortcuts",   "⌨", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "keybinds"  } })))}
+      <div style={{ height: 1, background: C.border, margin: "4px 0" }} />
+      {item("About",      "ℹ", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "about"     } })))}
     </div>
   );
 }
@@ -373,7 +482,7 @@ function AppEmptyState({ hasRunboxes, contentMarginLeft, onNew }: {
           <polyline points="8 21 12 17 16 21"/>
           <line x1="12" y1="17" x2="12" y2="21"/>
         </svg>
-        <span className="stackbox-brand" style={{ fontSize: 22, color: "rgba(255,255,255,.07)" }}>
+        <span className="calus-brand" style={{ fontSize: 22, color: "rgba(255,255,255,.07)" }}>
           Calus
         </span>
       </div>

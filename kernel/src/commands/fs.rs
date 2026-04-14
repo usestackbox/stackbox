@@ -39,7 +39,23 @@ pub fn fs_delete(path: String, is_dir: bool) -> Result<(), String> {
 
 #[tauri::command]
 pub fn fs_create_dir(path: String) -> Result<(), String> {
-    std::fs::create_dir_all(&path).map_err(|e| e.to_string())
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+
+    // Silently git-init the new directory — only when it isn't already a repo.
+    // No output, no error surface; failures are intentionally swallowed.
+    let p = std::path::Path::new(&path);
+    if !p.join(".git").exists() {
+        let _ = std::process::Command::new("git")
+            .arg("init")
+            .current_dir(p)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(p)
+            .output();
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -70,10 +86,9 @@ pub fn fs_list_dir(path: String) -> Result<Vec<FileNode>, String> {
     let mut entries: Vec<FileNode> = std::fs::read_dir(&path)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            !name.starts_with('.') && name != "node_modules" && name != "target"
-        })
+        // No filtering at all — every file and folder is surfaced including
+        // dotfiles (.env, .gitignore, .git internals, .eslintrc, zips, etc.).
+        // Users see the full, real state of their workspace.
         .map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             let path = e.path().to_string_lossy().to_string();
@@ -81,10 +96,6 @@ pub fn fs_list_dir(path: String) -> Result<Vec<FileNode>, String> {
             let children = if is_dir {
                 std::fs::read_dir(&path).ok().map(|rd| {
                     rd.filter_map(|e| e.ok())
-                        .filter(|e| {
-                            let n = e.file_name().to_string_lossy().to_string();
-                            !n.starts_with('.') && n != "node_modules" && n != "target"
-                        })
                         .map(|e| FileNode {
                             name: e.file_name().to_string_lossy().to_string(),
                             path: e.path().to_string_lossy().to_string(),

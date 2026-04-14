@@ -24,6 +24,8 @@ import { SearchAddon }     from "@xterm/addon-search";
 import { invoke }          from "@tauri-apps/api/core";
 import { listen }          from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { C, MONO } from "../../design";
+
 // xterm.css — statically imported so Vite bundles it correctly in production.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -50,8 +52,8 @@ async function clipRead(): Promise<string> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme
 // ─────────────────────────────────────────────────────────────────────────────
-const BG     = "#121212";
-const BG_ACT = "#425860";
+const BG     = C.bg0;
+const BG_ACT = C.bg2;
 
 const TERM_THEME = {
   background:          BG,
@@ -527,10 +529,10 @@ export function TerminalPane({
   useEffect(() => {
     if (isActive) {
       termRef.current?.focus();
-    } else {
-      const ta = termElRef.current?.querySelector<HTMLTextAreaElement>("textarea");
-      ta?.blur();
     }
+    // Note: we intentionally do NOT blur the textarea when isActive becomes false.
+    // Aggressively blurring here races with the focus() call on the newly activated
+    // pane and can leave users unable to type until they click again.
   }, [isActive]);
 
   // Report initial session ID once
@@ -670,6 +672,16 @@ export function TerminalPane({
       const ctrl  = e.ctrlKey || e.metaKey;
       const shift = e.shiftKey;
 
+      // Plain Ctrl+C (no Shift) → always send SIGINT (\x03) to the PTY.
+      // Without this explicit intercept the Tauri/Electron webview captures
+      // Ctrl+C as a "copy" accelerator before xterm's onData ever fires,
+      // so running processes can never be interrupted with Ctrl+C.
+      if (e.ctrlKey && !shift && (e.key === "c" || e.key === "C")) {
+        invoke("pty_write", { sessionId: sidRef.current, data: "\x03" }).catch(() => {});
+        inputLineRef.current = "";
+        return false;
+      }
+
       if (ctrl && shift && e.key === "C") {
         const sel = term.getSelection();
         if (sel) clipWrite(sel);
@@ -740,8 +752,9 @@ export function TerminalPane({
             .catch(() => {}); // backend may not support yet — silent fallback to OSC 7
         };
 
-        setTimeout(pollCwd, 350);
-        setTimeout(pollCwd, 1200);
+        setTimeout(pollCwd,   80);  // fast: catches instant commands (ls, cd, etc.)
+        setTimeout(pollCwd,  350);  // medium: catches most shell operations
+        setTimeout(pollCwd, 1200);  // slow: catches agents / long-running commands
 
         inputLineRef.current = "";
       } else if (data === "\x7f" || data === "\b") {
@@ -945,7 +958,9 @@ export function TerminalPane({
   const handleMouseDown = useCallback(() => {
     onActivate?.();
     termRef.current?.focus();
-    setTimeout(() => termRef.current?.focus(), 0);
+    // Note: no deferred setTimeout focus here — the delayed re-focus races with
+    // clicks on other panes and causes the "can't type" bug where focus is
+    // silently stolen back to this pane after the user has clicked elsewhere.
   }, [onActivate]);
 
   // ── Clamp context menu to viewport ────────────────────────────────────────

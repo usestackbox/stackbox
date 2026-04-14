@@ -51,7 +51,7 @@ export function StepGitSetup({ onNext }: { onNext: () => void }) {
       <div>
         <h2 style={{ margin: "0 0 6px", fontSize: 20, color: C.t1 }}>Git Setup</h2>
         <p style={{ margin: 0, fontSize: 13, color: C.t3, lineHeight: 1.6 }}>
-          Stackbox uses git worktrees to isolate each runbox. Let's confirm git is available.
+          Calus uses git worktrees to isolate each runbox. Let's confirm git is available.
         </p>
       </div>
 

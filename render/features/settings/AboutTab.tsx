@@ -31,7 +31,7 @@ export function AboutTab() {
           paddingTop: 8,
         }}
       >
-        <span className="stackbox-brand" style={{ fontSize: 28, color: C.t1 }}>
+        <span className="calus-brand" style={{ fontSize: 28, color: C.t1 }}>
           Calus
         </span>
         <span style={{ fontFamily: MONO, fontSize: 13, color: C.t3 }}>v{version}</span>
@@ -83,7 +83,7 @@ export function AboutTab() {
       </div>
 
       <p style={{ margin: 0, fontSize: 11, color: C.t3, textAlign: "center" }}>
-        MIT License · © {new Date().getFullYear()} Stackbox contributors
+        MIT License · © {new Date().getFullYear()} Calus contributors
       </p>
     </div>
   );

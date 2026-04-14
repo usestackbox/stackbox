@@ -23,7 +23,7 @@ use tauri::{AppHandle, Emitter};
 use crate::{
     agent::{context::inject, injector, kind::AgentKind},
     db::sessions::{session_end, session_start},
-    git::repo::{ensure_git_repo, remove_worktree_only},
+    git::{inject::inject_into_repo, repo::{ensure_git_repo, remove_worktree_only}},
     memory,
     state::{AppState, PtySession},
     workspace::{
@@ -138,19 +138,19 @@ fn clear_git_lock(cwd: &str) {
 fn detect_worktree(cwd: &str) -> Option<String> {
     let path = std::path::Path::new(cwd);
 
-    // New layout: .worktrees/stackbox-wt-...  — parent is .worktrees/, grandparent is project
+    // New layout: .worktrees/calus-wt-...  — parent is .worktrees/, grandparent is project
     if let Some(parent) = path.parent() {
         if parent.file_name().and_then(|n| n.to_str()) == Some(".worktrees") {
             let folder = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if folder.starts_with("stackbox-wt-") {
+            if folder.starts_with("calus-wt-") {
                 return Some(cwd.to_string());
             }
         }
     }
 
-    // Legacy layout: sibling folder named stackbox-wt-*
+    // Legacy layout: sibling folder named calus-wt-*
     let folder = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if folder.starts_with("stackbox-wt-") {
+    if folder.starts_with("calus-wt-") {
         return Some(cwd.to_string());
     }
 
@@ -290,6 +290,18 @@ pub async fn spawn(
 
     crate::agent::globals::register_runbox_cwd(&runbox_id, &effective_cwd);
 
+    // Inject agent instruction file + skill directories into the user's actual
+    // repo root (resolved_cwd, not the worktree) at PTY spawn time.
+    // This runs whether or not the agent ever calls git_ensure via MCP,
+    // so CLAUDE.md / AGENTS.md / GEMINI.md / .cursorrules / copilot-instructions.md
+    // and all skill dirs are always present when the agent starts reading the repo.
+    if agent_kind != AgentKind::Shell {
+        inject_into_repo(
+            std::path::Path::new(&resolved_cwd),
+            agent_kind.kind_str(),
+        );
+    }
+
     if agent_kind != AgentKind::Shell {
         let rb4 = runbox_id.clone();
         let cwd4 = effective_cwd.clone();
@@ -323,7 +335,7 @@ pub async fn spawn(
         //   2. Emit OSC 7 on every prompt so the titlebar CWD tracks correctly
         //   3. OSC 7 emitted immediately so titlebar CWD is correct on first render
         let tmp_script =
-            std::env::temp_dir().join(format!("stackbox-ps-init-{}.ps1", std::process::id()));
+            std::env::temp_dir().join(format!("calus-ps-init-{}.ps1", std::process::id()));
 
         // The prompt function:
         //   • Builds a file:// URL with forward slashes for the OSC 7 sequence
@@ -339,16 +351,18 @@ function prompt {
     if (-not $url.StartsWith('/')) { $url = '/' + $url }
     $osc7 = [char]27 + ']7;file://' + $env:COMPUTERNAME + $url + [char]7
     [Console]::Write($osc7)
+    # OSC 133;A — prompt start (signals previous command finished).
+    $osc133a = [char]27 + ']133;A' + [char]7
+    [Console]::Write($osc133a)
     return $leaf + '> '
 }
-# Emit OSC 7 immediately so the titlebar CWD is correct on first render.
-# Do NOT call prompt() here — PowerShell renders its own first prompt after
-# the init script exits.  Calling it manually produces a second identical
-# prompt line (the double-prompt bug).
+# Emit OSC 7 + OSC 133;A immediately so the titlebar CWD and first block
+# boundary are correct before the user types anything.
 $loc  = (Get-Location).Path
 $url  = $loc.Replace('\', '/').Replace(' ', '%20')
 if (-not $url.StartsWith('/')) { $url = '/' + $url }
 [Console]::Write([char]27 + ']7;file://' + $env:COMPUTERNAME + $url + [char]7)
+[Console]::Write([char]27 + ']133;A' + [char]7)
 "#;
         let _ = std::fs::write(&tmp_script, init_ps1);
 
@@ -431,27 +445,50 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
             c.cwd(&effective_cwd);
             c
         } else if shell_name == "zsh" {
-            let stackbox_zsh_dir = format!("/tmp/stackbox-zsh-{}", std::process::id());
-            let _ = std::fs::create_dir_all(&stackbox_zsh_dir);
+            let calus_zsh_dir = format!("/tmp/calus-zsh-{}", std::process::id());
+            let _ = std::fs::create_dir_all(&calus_zsh_dir);
             let zshrc = r#"
             [ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc" 2>/dev/null
             autoload -U colors && colors 2>/dev/null
             PROMPT="%B%F{cyan}%1~%f%b %% "
-            chpwd() { printf '\e]7;file://%s%s\a' "$HOST" "$PWD" }
+            # Emit OSC 133;A (prompt start = previous command finished).
+            # In tmux we must wrap with the DCS passthrough so the sequence
+            # survives the tmux multiplexer and reaches the PTY reader.
+            _calus_osc133a() {
+                if [ -n "$TMUX" ]; then
+                    printf '\033Ptmux;\033\033]133;A\007\033\\';
+                else
+                    printf '\033]133;A\007';
+                fi
+            }
+            precmd() {
+                _calus_osc133a
+                printf '\e]7;file://%s%s\a' "$HOST" "$PWD"
+            }
             "#;
-            let _ = std::fs::write(format!("{stackbox_zsh_dir}/.zshrc"), zshrc);
-            c.env("ZDOTDIR", &stackbox_zsh_dir);
+            let _ = std::fs::write(format!("{calus_zsh_dir}/.zshrc"), zshrc);
+            c.env("ZDOTDIR", &calus_zsh_dir);
             c
         } else if shell_name == "bash" {
-            let stackbox_bash_dir = format!("/tmp/stackbox-bash-{}", std::process::id());
-            let _ = std::fs::create_dir_all(&stackbox_bash_dir);
+            let calus_bash_dir = format!("/tmp/calus-bash-{}", std::process::id());
+            let _ = std::fs::create_dir_all(&calus_bash_dir);
             let bashrc = r#"
             [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc" 2>/dev/null
             PS1='\[\033[01;36m\]\W\[\033[00m\] \$ '
-            _stackbox_osc7() { printf '\e]7;file://%s%s\a' "$HOSTNAME" "$PWD"; }
-            PROMPT_COMMAND="_stackbox_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+            _calus_osc133a() {
+                if [ -n "$TMUX" ]; then
+                    printf '\033Ptmux;\033\033]133;A\007\033\\';
+                else
+                    printf '\033]133;A\007';
+                fi
+            }
+            _calus_precmd() {
+                _calus_osc133a
+                printf '\e]7;file://%s%s\a' "$HOSTNAME" "$PWD"
+            }
+            PROMPT_COMMAND="_calus_precmd${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
             "#;
-            let bashrc_path = format!("{stackbox_bash_dir}/.bashrc");
+            let bashrc_path = format!("{calus_bash_dir}/.bashrc");
             let _ = std::fs::write(&bashrc_path, bashrc);
             c = CommandBuilder::new(&shell);
             c.args(&["--rcfile", &bashrc_path]);
@@ -471,9 +508,9 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
 
     {
         let shim = if cfg!(windows) {
-            "stackbox-open.exe"
+            "calus-open.exe"
         } else {
-            "stackbox-open"
+            "calus-open"
         };
         if let Some(path) = std::env::current_exe()
             .ok()
@@ -519,7 +556,7 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
     cmd.env("STACKBOX_PANE_PORT", pane_port.to_string());
 
     let port = crate::MEMORY_PORT;
-    let ctx_file = format!("{effective_cwd}/.stackbox-context.md");
+    let ctx_file = format!("{effective_cwd}/.calus-context.md");
     cmd.env("STACKBOX_CONTEXT_FILE", &ctx_file);
     cmd.env(
         "STACKBOX_MEMORY_URL",
@@ -550,6 +587,13 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
         }
         AgentKind::GeminiCli => {
             cmd.env("GEMINI_SYSTEM_MD", &ctx_file);
+            // Gemini CLI does not support --mcp-config as a CLI flag.
+            // It reads GEMINI_MCP_CONFIG instead — point it at the shared
+            // mcp.json that write_mcp_config() already wrote this spawn.
+            // Also expose CALUS_PORT + CALUS_TOKEN so the stdio bridge
+            // (calus-stdio entry in mcp.json) can reach the kernel HTTP server.
+            cmd.env("CALUS_PORT",  crate::MEMORY_PORT.to_string());
+            cmd.env("CALUS_TOKEN", format!("Bearer {}", session_id));
         }
         AgentKind::GitHubCopilot => {
             cmd.env("COPILOT_CONTEXT_FILE", &ctx_file);
@@ -648,6 +692,29 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
             }
             let text = String::from_utf8_lossy(&buf[..n]).to_string();
 
+            // ── Warp-style block boundary: OSC 133;A = prompt appeared ────────
+            // Shell emits ESC ] 133 ; A BEL (via precmd/PROMPT_COMMAND/prompt fn)
+            // every time the prompt is drawn.  This is our reliable signal that
+            // the previous command has finished and the shell is idle again.
+            // The frontend uses this to close the current output block.
+            let osc133_payloads = detection::extract_osc133(&text);
+            for payload in osc133_payloads {
+                if payload.starts_with('A') {
+                    // "A" = prompt start → previous command is done
+                    let _ = app_pty.emit(&format!("pty://block/prompt/{}", sid), ());
+                } else if payload.starts_with("D;") || payload == "D" {
+                    // "D;N" = command finished with exit code N
+                    let exit_code: i32 = payload
+                        .strip_prefix("D;")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    let _ = app_pty.emit(
+                        &format!("pty://block/exit/{}", sid),
+                        serde_json::json!({ "exit_code": exit_code }),
+                    );
+                }
+            }
+
             if detected_kind == AgentKind::Shell {
                 let stripped = strip_ansi(&text);
                 if let Some(upgraded) = AgentKind::infer_from_output(&stripped) {
@@ -655,6 +722,13 @@ if (-not $url.StartsWith('/')) { $url = '/' + $url }
                     let _ = app_pty.emit(
                         &format!("pty://agent/{}", sid),
                         upgraded.display_name().to_string(),
+                    );
+                    // Agent was typed inside an already-running shell — inject
+                    // instruction file + skill dirs now, since PTY spawn ran as
+                    // Shell and skipped injection earlier.
+                    inject_into_repo(
+                        std::path::Path::new(&cwd_thr),
+                        upgraded.kind_str(),
                     );
                 }
             }

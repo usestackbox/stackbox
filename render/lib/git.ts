@@ -33,12 +33,14 @@ export async function gitCurrentBranch(cwd: string): Promise<string> {
 
 // ── Status + diff ─────────────────────────────────────────────────────────────
 
-// FIX: Use "added" to match LiveDiffFile.change_type ("added" | "modified" | "deleted")
 type ChangeType = "modified" | "added" | "deleted";
 
 interface StatusEntry {
   path: string;
   change_type: ChangeType;
+  /** raw XY porcelain status codes */
+  x: string;
+  y: string;
 }
 
 function parseStatus(raw: string): StatusEntry[] {
@@ -53,11 +55,10 @@ function parseStatus(raw: string): StatusEntry[] {
       const x = xy[0];
       const y = xy[1];
       let change_type: ChangeType = "modified";
-      // Untracked ("??") or intent-added (" ?") → treat as added
       if (x === "?" || y === "?") change_type = "added";
       else if (x === "A" || y === "A") change_type = "added";
       else if (x === "D" || y === "D") change_type = "deleted";
-      return { path: path.trim(), change_type };
+      return { path: path.trim(), change_type, x, y };
     });
 }
 
@@ -71,40 +72,96 @@ function countDiffLines(diff: string): { insertions: number; deletions: number }
   return { insertions, deletions };
 }
 
-async function fileDiff(cwd: string, path: string, change_type: ChangeType): Promise<string> {
+/**
+ * Build a synthetic "+line" diff from raw file content.
+ * Used when git diff returns nothing (fresh repo / empty-tree scenario).
+ */
+function syntheticAddedDiff(path: string, content: string): string {
+  const lines = content.split("\n");
+  // git adds a trailing newline — remove the phantom empty last line
+  if (lines[lines.length - 1] === "") lines.pop();
+  const count = lines.length;
+  let d =
+    `diff --git a/${path} b/${path}\n` +
+    `new file mode 100644\n` +
+    `--- /dev/null\n` +
+    `+++ b/${path}\n` +
+    `@@ -0,0 +1,${count} @@\n`;
+  for (const l of lines) d += `+${l}\n`;
+  return d;
+}
+
+/**
+ * Check whether HEAD exists (i.e. the repo has at least one commit).
+ * Returns false on a freshly-initialised repo.
+ */
+async function repoHasHead(cwd: string): Promise<boolean> {
+  try {
+    const out = await git(cwd, ["rev-parse", "--verify", "HEAD"]);
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Git's empty-tree SHA — stable across versions.
+ * Comparing against it with --cached gives us all staged content
+ * even when HEAD doesn't exist yet.
+ */
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+async function fileDiff(cwd: string, path: string, change_type: ChangeType, x: string, y: string): Promise<string> {
   try {
     if (change_type === "deleted") {
-      // Try HEAD diff first (staged delete), fall back to cached
-      const d = await git(cwd, ["diff", "HEAD", "--", path]).catch(() => "");
-      if (d.trim()) return d;
-      return await git(cwd, ["diff", "--cached", "--", path]).catch(() => "");
+      const [head, cached] = await Promise.all([
+        git(cwd, ["diff", "HEAD", "--", path]).catch(() => ""),
+        git(cwd, ["diff", "--cached", "--", path]).catch(() => ""),
+      ]);
+      return head.trim() ? head : cached;
     }
 
-    // For modified/added: try unstaged first, then staged
-    const [unstaged, staged] = await Promise.all([
-      git(cwd, ["diff", "--", path]).catch(() => ""),
-      git(cwd, ["diff", "--cached", "--", path]).catch(() => ""),
-    ]);
+    // Try unstaged first (y == 'M' means working-tree has changes)
+    const unstaged = y === "M" || y === "?" ? await git(cwd, ["diff", "--", path]).catch(() => "") : "";
     if (unstaged.trim()) return unstaged;
+
+    // Try staged (x != ' ' means index has changes relative to HEAD)
+    const staged = await git(cwd, ["diff", "--cached", "--", path]).catch(() => "");
     if (staged.trim()) return staged;
 
-    // FIX: For new/untracked files both diffs are empty because the file is
-    // not tracked yet.  Use --intent-to-add to temporarily register the path
-    // in the index (zero bytes), run `git diff`, then immediately remove it.
-    if (change_type === "added") {
+    // ── Fresh-repo fallback ────────────────────────────────────────────────
+    // git diff --cached returns empty when there's no HEAD yet.
+    // Compare the staged file against the empty tree instead.
+    const hasHead = await repoHasHead(cwd);
+    if (!hasHead) {
+      const emptyTreeDiff = await git(cwd, ["diff", EMPTY_TREE, "--cached", "--", path]).catch(() => "");
+      if (emptyTreeDiff.trim()) return emptyTreeDiff;
+
+      // Last resort: read staged blob content and build a synthetic diff.
+      // `git show :path` reads the staged version (the colon is intentional).
+      const blobContent = await git(cwd, ["show", `:${path}`]).catch(() => "");
+      if (blobContent.trim()) return syntheticAddedDiff(path, blobContent);
+    }
+
+    // ── Untracked-file fallback (intent-to-add trick) ──────────────────────
+    // Only safe when the file is NOT already staged (x != 'A').
+    // If it IS staged, --intent-to-add will fail with "already exists in index".
+    if (change_type === "added" && x !== "A") {
       try {
         await git(cwd, ["add", "--intent-to-add", "--", path]);
         const diff = await git(cwd, ["diff", "--", path]).catch(() => "");
-        // Always clean up — even if diff failed
         await git(cwd, ["rm", "--cached", "--quiet", "--force", "--", path]).catch(() => {});
-        return diff;
+        if (diff.trim()) return diff;
       } catch {
-        // intent-to-add can fail if the file is already tracked somehow;
-        // safe to swallow and return empty
-        return "";
+        // intent-to-add unavailable or file already indexed — fall through
       }
     }
 
+    // ── Absolute last resort: build from disk content ──────────────────────
+    // Covers genuinely untracked files on repos that already have commits.
+    // We can't read disk files directly from the renderer process, but
+    // git show :path covers the staged case and git diff covers the rest.
+    // Return empty — the UI will show "computing diff…" rather than crashing.
     return "";
   } catch {
     return "";
@@ -122,8 +179,8 @@ export async function gitDiffLive(cwd: string): Promise<LiveDiffFile[]> {
   const entries = parseStatus(statusRaw);
 
   return Promise.all(
-    entries.map(async ({ path, change_type }) => {
-      const diff = await fileDiff(cwd, path, change_type);
+    entries.map(async ({ path, change_type, x, y }) => {
+      const diff = await fileDiff(cwd, path, change_type, x, y);
       const { insertions, deletions } = countDiffLines(diff);
       return {
         path,

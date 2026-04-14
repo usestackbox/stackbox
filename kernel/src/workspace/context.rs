@@ -7,11 +7,17 @@
 //   AppData:  <appdata>/calus/<hash>/
 //               WORKSPACE.md   ← Calus registry: all branches + worktrees
 //               GRAPH.md       ← agents write: cross-agent connections
+//               MEMORY.md      ← cross-agent memory index (first 200 lines loaded)
+//               memory/        ← topic files written by agents on demand
+//                 debugging.md
+//                 patterns.md
+//                 commands.md
+//                 <any>.md
 //               agents/
 //                 <runbox_id>/
 //                   CONTEXT.md ← kernel writes at spawn
 //
-//   Worktrees:  <AppData\Local\calus\<hash>\.worktrees\<agent_kind>-<slug>\
+//   Worktrees (OUTSIDE repo):  <appdata>/calus/<hash>/.worktrees/<agent_kind>-<slug>/
 //                                 STATE.md   ← agent writes (strict key:value)
 //                                 LOG.md     ← agent appends one line/action
 //
@@ -19,6 +25,14 @@
 // the workspace display name in the frontend.
 
 use std::path::{Path, PathBuf};
+
+// ── Memory constants ──────────────────────────────────────────────────────────
+
+/// Maximum number of lines loaded from MEMORY.md into context per session.
+/// Matches Claude Code's behaviour — keeps the context footprint predictable.
+pub const MEMORY_LINE_LIMIT: usize = 200;
+/// Maximum bytes loaded from MEMORY.md regardless of line count.
+pub const MEMORY_BYTE_LIMIT: usize = 25 * 1024;
 
 // ── Directory helpers ─────────────────────────────────────────────────────────
 
@@ -29,6 +43,12 @@ fn calus_appdata() -> PathBuf {
         .join("calus")
 }
 
+/// Home worktrees dir: ~/calus/
+fn calus_home() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("calus")
+}
 
 /// FNV-1a hash of cwd — used as the unique project key.
 fn repo_hash(cwd: &str) -> String {
@@ -43,7 +63,7 @@ pub fn project_dir(cwd: &str) -> PathBuf {
     calus_appdata().join(repo_hash(cwd))
 }
 
-/// Worktrees base: <AppData\Local\calus\<hash>\.worktrees\
+/// Worktrees base: <appdata>/calus/<hash>/.worktrees/
 pub fn worktrees_base(cwd: &str) -> PathBuf {
     calus_appdata().join(repo_hash(cwd)).join(".worktrees")
 }
@@ -71,6 +91,31 @@ pub fn graph_md_path(cwd: &str) -> PathBuf {
     project_dir(cwd).join("GRAPH.md")
 }
 
+// ── Memory paths ──────────────────────────────────────────────────────────────
+
+/// MEMORY.md — cross-agent shared index.
+/// First MEMORY_LINE_LIMIT lines (or MEMORY_BYTE_LIMIT bytes) are injected
+/// into every agent session automatically.
+pub fn memory_md_path(cwd: &str) -> PathBuf {
+    project_dir(cwd).join("MEMORY.md")
+}
+
+/// memory/ directory — topic files live here, loaded on demand by agents.
+pub fn memory_dir(cwd: &str) -> PathBuf {
+    project_dir(cwd).join("memory")
+}
+
+/// Path for a named topic file: memory/<name>.md
+/// Sanitises the name to prevent path traversal.
+pub fn memory_topic_path(cwd: &str, name: &str) -> PathBuf {
+    let safe = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect::<String>();
+    let safe = safe.trim_matches('-').to_string();
+    memory_dir(cwd).join(format!("{safe}.md"))
+}
+
 /// Extract the worktree dir name from its full path.
 pub fn wt_name_from_path(wt_path: &str) -> String {
     Path::new(wt_path)
@@ -91,6 +136,9 @@ pub fn init_project(cwd: &str) -> Result<(), String> {
     std::fs::create_dir_all(worktrees_base(cwd))
         .map_err(|e| format!("persistent::init .worktrees: {e}"))?;
 
+    std::fs::create_dir_all(memory_dir(cwd))
+        .map_err(|e| format!("persistent::init memory/: {e}"))?;
+
     let ws = workspace_md_path(cwd);
     if !ws.exists() {
         let hash = repo_hash(cwd);
@@ -108,8 +156,279 @@ pub fn init_project(cwd: &str) -> Result<(), String> {
         std::fs::write(&gp, content).map_err(|e| format!("write GRAPH.md: {e}"))?;
     }
 
+    init_memory(cwd)?;
+
     eprintln!("[persistent] ready: {}", proj.display());
     Ok(())
+}
+
+/// Create MEMORY.md with a starter template if it doesn't exist.
+pub fn init_memory(cwd: &str) -> Result<(), String> {
+    let mp = memory_md_path(cwd);
+    if !mp.exists() {
+        let now = now_iso();
+        let content = format!(
+            "# Calus Memory\n\
+             <!-- cross-agent: all agents read and write this file -->\n\
+             <!-- first {MEMORY_LINE_LIMIT} lines are injected into every session -->\n\
+             updated: {now}\n\
+             \n\
+             ## commands\n\
+             <!-- add build/test/run commands here as agents discover them -->\n\
+             \n\
+             ## learnings\n\
+             <!-- format: - [<agent> <date>] <insight> -->\n\
+             \n\
+             ## topics\n\
+             <!-- topic files in memory/ are loaded on demand, not at session start -->\n\
+             <!-- add entries like: - debugging → memory/debugging.md -->\n"
+        );
+        std::fs::write(&mp, content).map_err(|e| format!("write MEMORY.md: {e}"))?;
+    }
+    Ok(())
+}
+
+// ── Memory read / write ───────────────────────────────────────────────────────
+
+/// Read the first MEMORY_LINE_LIMIT lines (or MEMORY_BYTE_LIMIT bytes) of
+/// MEMORY.md for injection into agent context.
+pub fn read_memory_index(cwd: &str) -> String {
+    let raw = match std::fs::read_to_string(memory_md_path(cwd)) {
+        Ok(s) => s,
+        Err(_) => return String::new(),
+    };
+
+    // Apply both limits — whichever is hit first.
+    let mut byte_count = 0usize;
+    let mut lines_taken = 0usize;
+    let mut out = String::new();
+
+    for line in raw.lines() {
+        let line_bytes = line.len() + 1; // +1 for newline
+        if lines_taken >= MEMORY_LINE_LIMIT || byte_count + line_bytes > MEMORY_BYTE_LIMIT {
+            out.push_str(&format!(
+                "\n<!-- memory truncated at {lines_taken} lines / {byte_count} bytes -->"
+            ));
+            break;
+        }
+        out.push_str(line);
+        out.push('\n');
+        byte_count += line_bytes;
+        lines_taken += 1;
+    }
+
+    out
+}
+
+/// Append a single learning entry to the `## learnings` section of MEMORY.md.
+/// Entry is attributed with the agent kind and the current timestamp.
+/// Automatically trims MEMORY.md if it would exceed MEMORY_LINE_LIMIT * 2.
+pub fn append_memory_learning(cwd: &str, agent_kind: &str, learning: &str) -> Result<(), String> {
+    let mp = memory_md_path(cwd);
+    let raw = std::fs::read_to_string(&mp).unwrap_or_default();
+    let now = now_date();
+
+    // Sanitise: strip newlines from the learning itself
+    let clean = learning.lines().next().unwrap_or("").trim().to_string();
+    if clean.is_empty() {
+        return Ok(());
+    }
+    let entry = format!("- [{agent_kind} {now}] {clean}");
+
+    // Insert after the `## learnings` header
+    let updated = if let Some(idx) = raw.find("## learnings") {
+        let after = &raw[idx..];
+        if let Some(newline) = after.find('\n') {
+            let insert_pos = idx + newline + 1;
+            format!("{}{}\n{}", &raw[..insert_pos], entry, &raw[insert_pos..])
+        } else {
+            format!("{raw}\n{entry}\n")
+        }
+    } else {
+        format!("{raw}\n## learnings\n{entry}\n")
+    };
+
+    // Update the `updated:` timestamp
+    let updated = update_memory_timestamp(&updated);
+
+    // Trim if the file is getting too long (> 2x the line limit)
+    let updated = trim_memory_learnings(&updated, MEMORY_LINE_LIMIT * 2);
+
+    std::fs::write(&mp, updated).map_err(|e| format!("append MEMORY.md: {e}"))
+}
+
+/// Set or replace a key→value entry in the `## commands` section.
+/// Useful for agents to record discovered build/test/lint commands.
+pub fn set_memory_command(cwd: &str, key: &str, value: &str) -> Result<(), String> {
+    let mp = memory_md_path(cwd);
+    let raw = std::fs::read_to_string(&mp).unwrap_or_default();
+
+    let entry = format!("- {key}: `{value}`");
+
+    // Remove any existing line with this key under ## commands
+    let lines: Vec<&str> = raw.lines().collect();
+    let mut in_commands = false;
+    let mut replaced = false;
+    let mut out_lines: Vec<String> = Vec::with_capacity(lines.len() + 1);
+
+    for line in &lines {
+        if *line == "## commands" {
+            in_commands = true;
+            out_lines.push(line.to_string());
+            continue;
+        }
+        if in_commands && line.starts_with("## ") {
+            // End of commands section — insert if not replaced yet
+            if !replaced {
+                out_lines.push(entry.clone());
+                replaced = true;
+            }
+            in_commands = false;
+        }
+        if in_commands && line.starts_with(&format!("- {key}:")) {
+            out_lines.push(entry.clone());
+            replaced = true;
+            continue;
+        }
+        out_lines.push(line.to_string());
+    }
+
+    if !replaced {
+        // Append to end
+        out_lines.push(format!("\n## commands\n{entry}"));
+    }
+
+    let updated = update_memory_timestamp(&out_lines.join("\n"));
+    std::fs::write(&mp, updated).map_err(|e| format!("set_memory_command: {e}"))
+}
+
+/// Read a topic file from memory/ by name (without .md extension).
+/// Returns None if the file doesn't exist.
+pub fn read_memory_topic(cwd: &str, name: &str) -> Option<String> {
+    std::fs::read_to_string(memory_topic_path(cwd, name)).ok()
+}
+
+/// Write (create or replace) a topic file in memory/.
+pub fn write_memory_topic(cwd: &str, name: &str, content: &str) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(memory_dir(cwd));
+    let path = memory_topic_path(cwd, name);
+    std::fs::write(&path, content).map_err(|e| format!("write memory topic {name}: {e}"))
+}
+
+/// Append content to a topic file, creating it if needed.
+pub fn append_memory_topic(cwd: &str, name: &str, content: &str) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(memory_dir(cwd));
+    let path = memory_topic_path(cwd, name);
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let updated = if existing.is_empty() {
+        content.to_string()
+    } else {
+        format!("{existing}\n{content}")
+    };
+    std::fs::write(&path, updated).map_err(|e| format!("append memory topic {name}: {e}"))
+}
+
+/// List all topic files in memory/ (names without .md extension).
+pub fn list_memory_topics(cwd: &str) -> Vec<String> {
+    let dir = memory_dir(cwd);
+    std::fs::read_dir(&dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.ends_with(".md") {
+                Some(name.trim_end_matches(".md").to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Auto-feed from a session summary: extract learnings and append them to MEMORY.md.
+/// Called after `calus_session_summary` so every session's insights persist cross-agent.
+pub fn feed_session_to_memory(
+    cwd: &str,
+    agent_kind: &str,
+    goal: &str,
+    done: &str,
+    blocked: &str,
+) -> Result<(), String> {
+    // Append the goal as a learning if meaningful
+    if !goal.trim().is_empty() && goal.trim() != "-" {
+        append_memory_learning(cwd, agent_kind, &format!("completed: {goal}"))?;
+    }
+    // Append blockers so other agents know about them
+    if !blocked.trim().is_empty() && blocked.trim() != "-" && blocked.trim() != "none" {
+        append_memory_learning(cwd, agent_kind, &format!("blocker: {blocked}"))?;
+    }
+    // Append done items (first one, to keep it concise)
+    if !done.trim().is_empty() && done.trim() != "-" {
+        let first_done = done.split(',').next().unwrap_or(done).trim();
+        if !first_done.is_empty() {
+            append_memory_learning(cwd, agent_kind, &format!("done: {first_done}"))?;
+        }
+    }
+    Ok(())
+}
+
+// ── Memory helpers ─────────────────────────────────────────────────────────────
+
+fn update_memory_timestamp(content: &str) -> String {
+    let now = now_iso();
+    let lines: Vec<String> = content
+        .lines()
+        .map(|l| {
+            if l.starts_with("updated:") {
+                format!("updated: {now}")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    lines.join("\n") + "\n"
+}
+
+/// Trim the `## learnings` section to keep only the most recent `max_lines`
+/// total lines in the file. Oldest learnings (lowest in the list) are removed.
+fn trim_memory_learnings(content: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= max_lines {
+        return content.to_string();
+    }
+
+    // Find the learnings section range
+    let learn_start = lines.iter().position(|l| *l == "## learnings");
+    let Some(ls) = learn_start else {
+        return content.to_string();
+    };
+
+    // Find end of learnings section
+    let learn_end = lines[ls + 1..]
+        .iter()
+        .position(|l| l.starts_with("## "))
+        .map(|i| ls + 1 + i)
+        .unwrap_or(lines.len());
+
+    let excess = lines.len().saturating_sub(max_lines);
+    // Remove `excess` entries from the bottom of the learnings section
+    let entries_start = ls + 1;
+    let entries: Vec<&str> = lines[entries_start..learn_end]
+        .iter()
+        .filter(|l| l.starts_with("- ["))
+        .copied()
+        .collect();
+
+    let keep = entries.len().saturating_sub(excess);
+    let kept_entries: Vec<&str> = entries[entries.len() - keep..].to_vec();
+
+    let mut out: Vec<&str> = Vec::new();
+    out.extend_from_slice(&lines[..entries_start]);
+    out.extend_from_slice(&kept_entries);
+    out.extend_from_slice(&lines[learn_end..]);
+    out.join("\n") + "\n"
 }
 
 // ── Agent registration ────────────────────────────────────────────────────────
@@ -194,7 +513,7 @@ fn update_workspace_md(
         rows.push(new_row);
     }
 
-    let updated = format!("{}{}\n", header, rows.join("\n"));
+    let updated = format!("{}{}\\n", header, rows.join("\n"));
     std::fs::write(&ws, updated).map_err(|e| format!("update WORKSPACE.md: {e}"))
 }
 
@@ -312,6 +631,7 @@ pub fn build_skill(cwd: &str, wt_name: &str, wt_path: &str, branch: &str) -> Str
     let lp = log_path(cwd, wt_name);
     let gp = graph_md_path(cwd);
     let wp = workspace_md_path(cwd);
+    let mp = memory_md_path(cwd);
 
     let state_signal = read_agent_state(cwd, wt_name)
         .map(|s| crate::agent::injector::extract_state_signal(&s))
@@ -331,6 +651,7 @@ pub fn build_skill(cwd: &str, wt_name: &str, wt_path: &str, branch: &str) -> Str
          \n\
          state:     {st}\n\
          log:       {lg}\n\
+         memory:    {mem}\n\
          graph:     {gph}\n\
          workspace: {ws}\n\
          {state_block}\n\
@@ -341,10 +662,12 @@ pub fn build_skill(cwd: &str, wt_name: &str, wt_path: &str, branch: &str) -> Str
          - LOG FORMAT: `- [timestamp] action — reason`\n\
          - SESSION SUMMARY: goal: X / done: Y / blocked: Z / next: W\n\
          - ON FINISH: set `status: done` in state\n\
+         - MEMORY: use calus_memory_append to record learnings; calus_memory_read to recall\n\
          - NEVER write these files into the user repo\n\
          - NEVER create a new worktree if yours exists — read state and resume\n",
         st = sp.display(),
         lg = lp.display(),
+        mem = mp.display(),
         gph = gp.display(),
         ws = wp.display(),
     )
@@ -407,7 +730,19 @@ fn now_iso() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+    format_secs(secs, true)
+}
 
+fn now_date() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format_secs(secs, false)
+}
+
+fn format_secs(secs: u64, with_time: bool) -> String {
     let s = secs % 60;
     let m = (secs / 60) % 60;
     let h = (secs / 3600) % 24;
@@ -446,5 +781,9 @@ fn now_iso() -> String {
         month += 1;
     }
     let day = days + 1;
-    format!("{year}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
+    if with_time {
+        format!("{year}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
+    } else {
+        format!("{year}-{month:02}-{day:02}")
+    }
 }

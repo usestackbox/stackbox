@@ -43,70 +43,7 @@ const tbtn: React.CSSProperties = {
 const TRAFFIC_H = 28;
 
 // ── Settings dropdown ─────────────────────────────────────────────────────────
-function SettingsDropdown({ onClose }: { onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    // slight delay so the click that opened it doesn't immediately close it
-    const t = setTimeout(() => document.addEventListener("mousedown", handler), 50);
-    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
-  }, [onClose]);
-
-  const item = (label: string, icon: string, action: () => void) => (
-    <button
-      onClick={() => { action(); onClose(); }}
-      style={{
-        width: "100%",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "7px 14px",
-        background: "transparent",
-        border: "none",
-        color: C.t1,
-        fontSize: 13,
-        cursor: "pointer",
-        textAlign: "left",
-        transition: "background .08s",
-        borderRadius: 6,
-        whiteSpace: "nowrap",
-      }}
-      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(109,235,176,.08)"; }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-    >
-      <span style={{ fontSize: 13, width: 16, textAlign: "center", opacity: 0.7 }}>{icon}</span>
-      {label}
-    </button>
-  );
-
-  return (
-    <div
-      ref={ref}
-      style={{
-        position: "absolute",
-        top: "calc(100% + 6px)",
-        left: 0,
-        zIndex: 9999,
-        background: C.bg3,
-        border: `1px solid ${C.border}`,
-        borderRadius: 8,
-        boxShadow: C.shadowLg,
-        padding: "4px",
-        minWidth: 180,
-      }}
-    >
-      {item("General",    "⚙", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "general"    } })))}
-      {item("Appearance", "◑", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "appearance" } })))}
-      {item("Updates",    "↻", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "updates"    } })))}
-      {item("Keybinds",   "⌨", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "keybinds"  } })))}
-      <div style={{ height: 1, background: C.border, margin: "4px 0" }} />
-      {item("About",      "ℹ", () => window.dispatchEvent(new CustomEvent("sb:open-settings", { detail: { tab: "about"     } })))}
-    </div>
-  );
-}
 
 // Split-right icon
 function SplitRightIcon({ active }: { active: boolean }) {
@@ -189,11 +126,24 @@ export function TabBar({
 
         {/* Brand + view toggles + settings button */}
         <div style={{
-          display: "flex", alignItems: "center", gap: 2, flexShrink: 0,
+          display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
           paddingLeft: 6, paddingRight: 8, alignSelf: "stretch",
           borderRight: `1px solid ${C.border}`,
           position: "relative",
         }}>
+
+        <span style={{
+            fontSize: FS.md,
+            fontWeight: 600,
+            letterSpacing: "0.10em",
+            fontFamily: "Inter, system-ui, sans-serif",
+            color: C.t2,
+            marginRight: 4,
+            userSelect: "none",
+          }}>
+            Calus
+          </span>
+
           <StripIcon title="Workspace" active={!sidebarCollapsed && !fileTreeOpen} onClick={onSidebarToggle} size={32}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -212,25 +162,6 @@ export function TabBar({
               color: "currentColor",
             }}>&lt;/&gt;</span>
           </StripIcon>
-
-          {/* Settings gear — opens dropdown */}
-          <div ref={settingsBtnRef} style={{ position: "relative" }}>
-            <StripIcon
-              title="Menu"
-              active={showSettingsMenu}
-              onClick={() => setShowSettingsMenu(v => !v)}
-              size={28}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-              </svg>
-            </StripIcon>
-            {showSettingsMenu && (
-              <SettingsDropdown onClose={() => setShowSettingsMenu(false)} />
-            )}
-          </div>
         </div>
 
         {/* Terminal tabs */}

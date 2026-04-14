@@ -29,7 +29,7 @@ static DB: OnceCell<Connection> = OnceCell::const_new();
 fn db_dir() -> String {
     dirs::data_local_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("stackbox")
+        .join("calus")
         .join("memory")
         .to_string_lossy()
         .to_string()

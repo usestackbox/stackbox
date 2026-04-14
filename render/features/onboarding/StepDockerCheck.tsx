@@ -74,7 +74,7 @@ export function StepDockerCheck({ onNext }: { onNext: () => void }) {
             lineHeight: 1.7,
           }}
         >
-          Docker wasn't detected. You can still use Stackbox without it — or install it now for
+          Docker wasn't detected. You can still use Calus without it — or install it now for
           sandboxed agents.
         </div>
       )}

@@ -9,12 +9,9 @@ export interface LiveDiffFile {
   modified_at: number;
 }
 
-export interface GitCommit {
-  hash: string;
-  short_hash: string;
-  message: string;
-  date: string;
-  author: string;
+export interface ConflictFile {
+  path: string;
+  status: string;
 }
 
 export interface WorktreeEntry {
@@ -26,33 +23,51 @@ export interface WorktreeEntry {
   is_locked: boolean;
 }
 
-export interface ConflictFile {
-  path: string;
-  status: string;
+export interface AgentSpan {
+  agent: string;
+  startedAt: number;
 }
 
-/** Per-file diff between main and a calus/* branch */
+// ── GitHub / PR types ─────────────────────────────────────────────────────────
+
+export interface PrReview { author: string; state: string; }
+export interface PrCheck { name: string; status: string; conclusion: string | null; }
+export interface PrDetails {
+  title: string; state: string; author: string; url: string; body: string;
+  mergeable: string; reviews: PrReview[]; checks: PrCheck[];
+}
+export interface WorktreeRecord {
+  branch: string; worktree_path: string | null;
+  pr_url: string | null; pr_number: number | null;
+}
+
+// ── Panel types ───────────────────────────────────────────────────────────────
+
+export type GitTab = "changes";
+
+export interface GitPanelProps {
+  workspaceCwd: string;
+  workspaceId: string;
+  branch: string;
+  onClose: () => void;
+  onFileClick?: (fc: LiveDiffFile) => void;
+}
+
 export interface BranchDiffFile {
   path: string;
-  /** "added" | "modified" | "deleted" | "renamed" */
   change_type: string;
   insertions: number;
   deletions: number;
-  /** Full unified diff text */
   diff: string;
 }
 
-/** Mirrors db::branches::AgentBranch on the Rust side */
 export interface AgentBranch {
   id: string;
   runbox_id: string;
   session_id: string;
   agent_kind: string;
-  /** e.g. "calus/claude/fix-null-crash" */
   branch: string;
-  /** null once PTY exits; branch still alive */
   worktree_path: string | null;
-  /** working | done | merged | deleted */
   status: "working" | "done" | "merged" | "deleted";
   commit_count: number;
   created_at: number;
@@ -66,51 +81,10 @@ export interface BranchStatus {
   has_conflicts: boolean;
 }
 
-export interface AgentSpan {
-  agent: string;
-  startedAt: number;
-}
-
-// ── GitHub / PR types ─────────────────────────────────────────────────────────
-
-export interface PrReview {
+export interface GitCommit {
+  hash: string;
+  short_hash: string;
+  message: string;
+  date: string;
   author: string;
-  state: string;
-}
-
-export interface PrCheck {
-  name: string;
-  status: string;
-  conclusion: string | null;
-}
-
-export interface PrDetails {
-  title: string;
-  state: string;
-  author: string;
-  url: string;
-  body: string;
-  mergeable: string;
-  reviews: PrReview[];
-  checks: PrCheck[];
-}
-
-export interface WorktreeRecord {
-  branch: string;
-  worktree_path: string | null;
-  pr_url: string | null;
-  pr_number: number | null;
-}
-
-// ── Panel types ───────────────────────────────────────────────────────────────
-
-// FIX: Added "history" which was used in GitPanel.tsx but missing from the type
-export type GitTab = "changes" | "branches" | "worktrees" | "history";
-
-export interface GitPanelProps {
-  workspaceCwd: string;
-  workspaceId: string;
-  branch: string;
-  onClose: () => void;
-  onFileClick?: (fc: LiveDiffFile) => void;
 }

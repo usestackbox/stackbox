@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 // render/features/settings/UpdatesTab.tsx
 import { C, MONO, SANS } from "../../design";
@@ -11,35 +10,33 @@ type Ctx = ReturnType<typeof useSettings>;
 export function UpdatesTab({ ctx, updater }: { ctx: Ctx; updater: UseUpdaterReturn }) {
   const { settings, save } = ctx;
   const { state, checkNow, install } = updater;
-  const [appVersion, setAppVersion] = useState("…");
 
+  // get_app_version now returns { version, platform } — extract version only
+  const [appVersion, setAppVersion] = useState("…");
   useEffect(() => {
-    invoke<string>("get_app_version")
-      .then(setAppVersion)
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) =>
+        invoke<{ version: string; platform: string }>("get_app_version")
+      )
+      .then((info) => setAppVersion(info.version))
       .catch(() => {});
   }, []);
 
   const statusText = () => {
     switch (state.phase) {
-      case "checking":
-        return "Checking…";
-      case "available":
-        return `v${state.version} available`;
-      case "downloading":
-        return `Downloading… ${state.percent}%`;
-      case "ready":
-        return "Ready to install";
-      case "error":
-        return `Error: ${state.message}`;
-      default:
-        return "Up to date";
+      case "checking":    return "Checking…";
+      case "available":   return `v${state.version} available`;
+      case "downloading": return `Downloading… ${state.percent}%`;
+      case "ready":       return "Ready to install";
+      case "error":       return `Error: ${state.message}`;
+      default:            return "Up to date";
     }
   };
 
   const statusColor = () => {
-    if (state.phase === "available") return C.blue;
-    if (state.phase === "error") return C.red;
-    if (state.phase === "ready") return C.green;
+    if (state.phase === "available")   return C.blue;
+    if (state.phase === "error")       return C.red;
+    if (state.phase === "ready")       return C.green;
     return C.t3;
   };
 
